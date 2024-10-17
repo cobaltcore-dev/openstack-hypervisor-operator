@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- kvm_v1_eviction.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

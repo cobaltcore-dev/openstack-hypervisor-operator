@@ -1,0 +1,27 @@
+# permissions for end users to edit evictions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: openstack-hypervisor-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: eviction-editor-role
+rules:
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - evictions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - evictions/status
+  verbs:
+  - get

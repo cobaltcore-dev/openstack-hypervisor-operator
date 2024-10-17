@@ -1,0 +1,9 @@
+apiVersion: kvm.cloud.sap/v1
+kind: Eviction
+metadata:
+  labels:
+    app.kubernetes.io/name: openstack-hypervisor-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: eviction-sample
+spec:
+  hypervisor: node001-bb274

@@ -1,0 +1,60 @@
+/*
+Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package openstack
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+)
+
+// GetServiceClient returns an gophercloud ServiceClient for the given serviceType.
+func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.ServiceClient, error) {
+	var clientOpts clientconfig.ClientOpts
+	if osPWCmd := os.Getenv("OS_PW_CMD"); osPWCmd != "" {
+		// run external command to get password
+		cmd := exec.Command("sh", "-c", osPWCmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+		clientOpts.AuthInfo = &clientconfig.AuthInfo{Password: strings.TrimSuffix(string(out), "\n")}
+	}
+
+	provider, err := clientconfig.AuthenticatedClient(ctx, &clientOpts)
+	if err != nil {
+		return nil, err
+	}
+	eo := gophercloud.EndpointOpts{}
+	eo.ApplyDefaults(serviceType)
+
+	// Override endpoint?
+	var url string
+	if url, err = provider.EndpointLocator(eo); err != nil {
+		return nil, err
+	}
+
+	return &gophercloud.ServiceClient{
+		ProviderClient: provider,
+		Endpoint:       url,
+		Type:           serviceType,
+	}, nil
+}
