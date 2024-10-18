@@ -25,14 +25,17 @@ import (
 	"strings"
 	"time"
 
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
-	corev1 "k8s.io/api/core/v1"       // Required for Watching
+	corev1 "k8s.io/api/core/v1" // Required for Watching
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime" // Required for Watching
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime" // Required for Watching
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -40,6 +43,12 @@ import (
 	// Required for Watching
 	// Required for Watching
 	// Required for Watching
+)
+
+const (
+	MAINTENANCE_NEEDED_LABEL   = "cloud.sap/maintenance-required"
+	MAINTENANCE_APPROVED_LABEL = "cloud.sap/maintenance-approved"
+	HOST_LABEL                 = "kubernetes.metal.cloud.sap/host"
 )
 
 type NodeReconciler struct {
@@ -59,7 +68,15 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	_, err := r.normalizeName(ctx, node)
+	host, err := r.normalizeName(ctx, node)
+	if err != nil {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Second * 30,
+		}, err
+	}
+
+	err = r.ensureEvictionIfNeeded(ctx, node, host)
 	if err != nil {
 		return ctrl.Result{
 			Requeue:      true,
@@ -75,8 +92,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
 // kubernetes.metal.cloud.sap/node-ip
-
-const HOST_LABEL = "kubernetes.metal.cloud.sap/host"
 
 func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (string, error) {
 	if host, found := node.Labels[HOST_LABEL]; found {
@@ -118,6 +133,21 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 	r.setHostLabel(ctx, node, host)
 
 	return host, nil
+}
+
+func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1.Node, host string) error {
+	if _, found := node.Labels[MAINTENANCE_NEEDED_LABEL]; !found {
+		return nil
+	}
+
+	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: host, Namespace: "monsoon3"}}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
+		eviction.Spec.Hypervisor = host
+		return nil
+	})
+
+	return err
 }
 
 func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, host string) {
