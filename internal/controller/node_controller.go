@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package controller
 
 import (
@@ -25,8 +26,6 @@ import (
 	"strings"
 	"time"
 
-	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	corev1 "k8s.io/api/core/v1" // Required for Watching
@@ -39,6 +38,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	// Required for Watching
 	// Required for Watching
 	// Required for Watching
@@ -58,9 +60,9 @@ type NodeReconciler struct {
 	rand          *rand.Rand
 }
 
-// +kubebuilder:rbac:group=core,resources=nodes,verbs=get;list;watch;update;patch
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+// +kubebuilder:rbac:group=core,resources=nodes,verbs=get;list;watch;update;patch
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var node corev1.Node
 	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
@@ -87,12 +89,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
+// normalizeName returns the host name of the node. If the host name is not set, it will be set to the node name.
+// If the host is provisioned by Ironic, the host name will be retrieved from Netbox.
 // Eventually ensure these labels are in Gardener
 // kubernetes.metal.cloud.sap/role: kvm (rather set these in gardener, as it is fixed)
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
 // kubernetes.metal.cloud.sap/node-ip
-
 func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (string, error) {
 	if host, found := node.Labels[HOST_LABEL]; found {
 		return host, nil
@@ -135,6 +138,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 	return host, nil
 }
 
+// ensureEvictionIfNeeded ensures that an eviction is created if the node has the maintenance label.
 func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1.Node, host string) error {
 	if _, found := node.Labels[MAINTENANCE_NEEDED_LABEL]; !found {
 		return nil
@@ -150,6 +154,7 @@ func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1
 	return err
 }
 
+// setHostLabel sets the host label on the node.
 func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, host string) {
 	newNode := node.DeepCopy()
 	newNode.Labels[HOST_LABEL] = host
@@ -177,6 +182,7 @@ type netboxResponse struct {
 	Data netboxData `json:"data"`
 }
 
+// getHostNameFromNetbox retrieves the host name from Netbox by the given MAC address.
 func getHostNameFromNetbox(ctx context.Context, macAddress string) (string, error) {
 	graphql := "https://netbox.global.cloud.sap/graphql/"
 
@@ -205,6 +211,7 @@ func getHostNameFromNetbox(ctx context.Context, macAddress string) (string, erro
 	return response.Data.InterfaceList[0].Device.Name, nil
 }
 
+// nodesToRequests returns a list of reconcile requests for all nodes.
 func (r *NodeReconciler) nodesToRequests(ctx context.Context, configMap client.Object) []reconcile.Request {
 	allNodes := &corev1.NodeList{}
 	listOps := &client.ListOptions{}
