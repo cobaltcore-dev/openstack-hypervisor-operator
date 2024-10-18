@@ -19,7 +19,6 @@ package openstack
 
 import (
 	"context"
-	"errors"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
@@ -80,47 +79,4 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 	}
 
 	return &h.Hypervisors[0], nil
-}
-
-// GetMigrationCandidates returns a list of hypervisors that are candidates for migration.
-// The implementation is very naive and should be extended by scheduling recommendations from the OpenStack
-// Placement API and Cerebro.
-func GetMigrationCandidates(ctx context.Context, source string, sc *gophercloud.ServiceClient) ([]*string, error) {
-	var candidates []*string
-	pages, err := hypervisors.List(sc, hypervisors.ListOpts{}).AllPages(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// due some(tm) bug, gohperclouds hypervisors.ExtractPage is failing
-	var h HyperVisorsDetails
-	if err = (pages.(hypervisors.HypervisorPage)).ExtractInto(&h); err != nil {
-		return nil, err
-	}
-
-	for _, hv := range h.Hypervisors {
-		if hv.Status != "enabled" {
-			continue
-		}
-
-		if hv.State != "up" {
-			continue
-		}
-
-		if hv.HypervisorType != "QEMU" {
-			continue
-		}
-
-		if len(source) != len(hv.HypervisorHostname) {
-			// hack to assign target to the same cluster hypervisor
-			continue
-		}
-
-		candidates = append(candidates, &hv.HypervisorHostname)
-	}
-
-	if len(candidates) == 0 {
-		return nil, errors.New("no hypervisors available for migration")
-	}
-	return candidates, nil
 }
