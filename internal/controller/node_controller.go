@@ -41,10 +41,6 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
-	// Required for Watching
-	// Required for Watching
-	// Required for Watching
-	// Required for Watching
 )
 
 const (
@@ -103,8 +99,9 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 
 	providerId := node.Spec.ProviderID
 
-	// Assumption: The node name will be correct
+	// openstack:/// is the prefix for Ironic nodes
 	if !strings.HasPrefix(providerId, "openstack:///") {
+		// Assumption: The node name will be correct
 		r.setHostLabel(ctx, node, node.Name)
 		return node.Name, nil
 	}
@@ -120,13 +117,17 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 		return "", fmt.Errorf("could not retrieve ports for %v (%v) due to %w", node.Name, serverId, err)
 	}
 
-	ports, err := ports.ExtractPorts(pages)
-	// will raise error, if no ports have been found (404)
+	nodePorts, err := ports.ExtractPorts(pages)
+	// will raise error, if no nodePorts have been found (404)
 	if err != nil {
 		return "", fmt.Errorf("could not extract ports for %v (%v) due to %w", node.Name, serverId, err)
 	}
 
-	macAddress := ports[0].MACAddress
+	if len(nodePorts) == 0 {
+		return "", fmt.Errorf("no Port found for %v (%v)", node.Name, serverId)
+	}
+
+	macAddress := nodePorts[0].MACAddress
 	host, err := getHostNameFromNetbox(ctx, macAddress)
 
 	if err != nil {
@@ -182,30 +183,48 @@ type netboxResponse struct {
 	Data netboxData `json:"data"`
 }
 
+type netboxQuery struct {
+	Query string `json:"query"`
+}
+
 // getHostNameFromNetbox retrieves the host name from Netbox by the given MAC address.
 func getHostNameFromNetbox(ctx context.Context, macAddress string) (string, error) {
 	graphql := "https://netbox.global.cloud.sap/graphql/"
 
-	query := fmt.Sprintf(`{"query": "{ interface_list(mac_address: \"%v\") { device { name } } }"}`, macAddress)
-	r, err := http.NewRequest("POST", graphql, bytes.NewBuffer([]byte(query)))
+	query := fmt.Sprintf(`	{
+		interface_list(mac_address: "%v") { 
+			device { 
+				name 
+			}
+		} 
+	}`, macAddress)
+
+	payload := new(bytes.Buffer)
+	if err := json.NewEncoder(payload).Encode(netboxQuery{Query: query}); err != nil {
+		return "", err
+	}
+	r, err := http.NewRequest("POST", graphql, payload)
 	if err != nil {
 		return "", err
 	}
-
 	r.Header.Add("Content-Type", "application/json")
 
-	client := &http.Client{}
-	res, err := client.Do(r)
+	c := http.DefaultClient
+	res, err := c.Do(r.WithContext(ctx))
 	if err != nil {
 		return "", err
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	response := &netboxResponse{}
 	err = json.NewDecoder(res.Body).Decode(response)
 	if err != nil {
 		return "", err
+	}
+
+	if len(response.Data.InterfaceList) == 0 {
+		return "", fmt.Errorf("no device found for MAC address %v", macAddress)
 	}
 
 	return response.Data.InterfaceList[0].Device.Name, nil
