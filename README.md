@@ -56,7 +56,7 @@ privileges or be logged in as admin.
 Install CRDs and Controller
 
 ```sh
-helm upgrade --install opernstack-hypervisor-operator charts/opernstack-hypervisor-operator
+helm upgrade --install openstack-hypervisor-operator charts/openstack-hypervisor-operator
 ```
 
 **Create instances of your solution**
@@ -146,4 +146,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
