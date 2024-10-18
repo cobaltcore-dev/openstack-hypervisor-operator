@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "openstack-hypervisor-operator.fullname" . }}-manager-role
+  labels:
+  {{- include "openstack-hypervisor-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - evictions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - evictions/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - evictions/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "openstack-hypervisor-operator.fullname" . }}-manager-rolebinding
+  labels:
+  {{- include "openstack-hypervisor-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "openstack-hypervisor-operator.fullname" . }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "openstack-hypervisor-operator.fullname" . }}-controller-manager'
+  namespace: '{{ .Release.Namespace }}'

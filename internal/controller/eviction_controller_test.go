@@ -19,7 +19,10 @@ package controller
 
 import (
 	"context"
+	"math/rand"
 
+	"github.com/gophercloud/gophercloud/v2/testhelper"
+	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -69,9 +72,14 @@ var _ = Describe("Eviction Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
+			testhelper.SetupHTTP()
+			defer testhelper.TeardownHTTP()
+
 			controllerReconciler := &EvictionReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:        k8sClient,
+				Scheme:        k8sClient.Scheme(),
+				ServiceClient: client.ServiceClient(),
+				rand:          rand.New(rand.NewSource(42)),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

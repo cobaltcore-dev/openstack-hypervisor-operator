@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+#
+# SPDX-License-Identifier: Apache-2.0
 # Build the manager binary
 FROM golang:1.22 AS builder
 ARG TARGETOS
