@@ -143,7 +143,7 @@ func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1
 	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: host, Namespace: "monsoon3"}}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
-		eviction.Spec.Hypervisor = host
+		eviction.Spec.Hypervisor = node.Name
 		return nil
 	})
 

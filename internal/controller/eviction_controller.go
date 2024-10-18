@@ -18,12 +18,15 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/go-openapi/swag"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -76,95 +79,102 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Fetch all virtual machines on the hypervisor
-	listOpts := servers.ListOpts{
-		Host:       eviction.Spec.Hypervisor,
-		AllTenants: true,
-	}
-	pages, err := servers.List(r.ServiceClient, listOpts).AllPages(ctx)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.ServiceClient, eviction.Spec.Hypervisor)
 	if err != nil {
-		log.Error(err, "Failed to list servers")
+		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
-		eviction.Status.EvictionState = "Failed"
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    "Reconciling",
-			Status:  metav1.ConditionFalse,
-			Message: err.Error(),
-			Reason:  "Failed",
-		})
-		return ctrl.Result{}, r.Status().Update(ctx, &eviction)
+		r.addErrorCondition(ctx, &eviction, err)
+		return ctrl.Result{}, nil
 	}
 
-	vms, err := servers.ExtractServers(pages)
+	// Not sure, if it is an error condition, but I assume it will return []
+	if hypervisor.Servers == nil {
+		err = errors.New("no servers on hypervisor found")
+		// Abort eviction
+		r.addErrorCondition(ctx, &eviction, err)
+		return ctrl.Result{}, nil
+	}
+
+	disableService := services.UpdateOpts{Status: services.ServiceDisabled,
+		DisabledReason: fmt.Sprintf("K8S Operator by eviction %v/%v", eviction.Namespace, eviction.Name)}
+
+	_, err = services.Update(ctx, r.ServiceClient, hypervisor.Service.ID, disableService).Extract()
 	if err != nil {
-		log.Error(err, "Failed to extract servers")
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, err
-	}
-
-	if len(vms) == 0 {
-		// Update status
-		eviction.Status.EvictionState = "Succeeded"
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    "Reconciling",
-			Status:  metav1.ConditionFalse,
-			Message: "Reconciled",
-			Reason:  "Reconciled",
-		})
-		if err = r.Status().Update(ctx, &eviction); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		// Get migration target candidates
-		var candidates []*string
-		if candidates, err = openstack.GetMigrationCandidates(ctx, eviction.Spec.Hypervisor, r.ServiceClient); err != nil {
-			log.Error(err, "Failed to get migration candidates")
-			return ctrl.Result{}, err
-		}
-
-		// Evict all virtual machines
-		for _, vm := range vms {
-			if vm.Status != "ACTIVE" {
-				continue
-			}
-
-			randn := r.rand.Intn(len(candidates) - 1)
-			liveMigrateOpts := servers.LiveMigrateOpts{
-				Host:           candidates[randn],
-				BlockMigration: swag.Bool(false),
-				DiskOverCommit: swag.Bool(false),
-			}
-
-			log.Info("Live migrating server", "server", vm.ID, "source",
-				eviction.Spec.Hypervisor, "target", liveMigrateOpts.Host)
-			if res := servers.LiveMigrate(ctx, r.ServiceClient, vm.ID, liveMigrateOpts); res.Err != nil {
-				log.Info("Failed to evict server", "server", vm.ID)
-				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-					Type:    "Eviction",
-					Status:  metav1.ConditionFalse,
-					Message: res.ExtractErr().Error(),
-					Reason:  "Failed",
-				})
-				if err = r.Status().Update(ctx, &eviction); err != nil {
-					return ctrl.Result{}, err
-				}
-
-				return ctrl.Result{
-					Requeue:      true,
-					RequeueAfter: time.Second * 30,
-				}, nil
-			}
-		}
-
-		// Requeue after 30 seconds
+		r.addErrorCondition(ctx, &eviction, err)
 		return ctrl.Result{
 			Requeue:      true,
 			RequeueAfter: time.Second * 30,
 		}, nil
 	}
 
-	return ctrl.Result{}, nil
+	r.addProgressCondition(ctx, &eviction, "Host disabled", "Update")
+
+	// Evict all virtual machines
+	anyFailed := false
+	for _, server := range *hypervisor.Servers {
+		res := servers.Get(ctx, r.ServiceClient, server.UUID)
+		vm, err := res.Extract()
+		if err != nil {
+			anyFailed = true
+			log.Info("Failed to get server", "server", vm.ID)
+			r.addErrorCondition(ctx, &eviction, err)
+			continue
+		}
+
+		if vm.Status != "ACTIVE" {
+			continue
+		}
+
+		liveMigrateOpts := servers.LiveMigrateOpts{
+			BlockMigration: swag.Bool(false),
+		}
+
+		log.Info("Live migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor)
+		if res := servers.LiveMigrate(ctx, r.ServiceClient, vm.ID, liveMigrateOpts); res.Err != nil {
+			anyFailed = true
+			log.Info("Failed to evict server", "server", vm.ID)
+			r.addErrorCondition(ctx, &eviction, res.ExtractErr())
+		}
+	}
+
+	// Requeue after 30 seconds
+	if anyFailed {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Second * 30,
+		}, nil
+	}
+
+	eviction.Status.EvictionState = "Succeeded"
+	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+		Type:    "Reconciling",
+		Status:  metav1.ConditionFalse,
+		Message: "Reconciled",
+		Reason:  "Reconciled",
+	})
+
+	return ctrl.Result{}, r.Status().Update(ctx, &eviction)
+}
+
+func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction, status metav1.ConditionStatus, message string, reason string) {
+	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+		Type:    "Eviction",
+		Status:  status,
+		Message: message,
+		Reason:  reason,
+	})
+	if err := r.Status().Update(ctx, eviction); err != nil {
+		log := logger.FromContext(ctx)
+		log.Error(err, "Failed to update conditions")
+	}
+}
+
+func (r *EvictionReconciler) addProgressCondition(ctx context.Context, eviction *kvmv1.Eviction, message string, reason string) {
+	r.addCondition(ctx, eviction, metav1.ConditionTrue, message, reason)
+}
+
+func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kvmv1.Eviction, err error) {
+	r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), "Failed")
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -174,6 +184,7 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ServiceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
 		return err
 	}
+	r.ServiceClient.Microversion = "2.90" // Xena (or later)
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	return ctrl.NewControllerManagedBy(mgr).

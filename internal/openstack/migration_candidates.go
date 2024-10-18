@@ -24,33 +24,61 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 )
 
+type hypervisorServer struct {
+	Name string `json:"name"`
+	UUID string `json:"uuid"`
+}
+
+type Hypervisor struct {
+	CPUInfo            string `json:"cpu_info"`
+	CurrentWorkload    int    `json:"current_workload"`
+	DiskAvailableLeast any    `json:"disk_available_least"`
+	FreeDiskGb         int    `json:"free_disk_gb"`
+	FreeRAMMb          int    `json:"free_ram_mb"`
+	HostIP             string `json:"host_ip"`
+	HypervisorHostname string `json:"hypervisor_hostname"`
+	HypervisorType     string `json:"hypervisor_type"`
+	HypervisorVersion  int    `json:"hypervisor_version"`
+	ID                 string `json:"id"`
+	LocalGb            int    `json:"local_gb"`
+	LocalGbUsed        int    `json:"local_gb_used"`
+	MemoryMb           int    `json:"memory_mb"`
+	MemoryMbUsed       int    `json:"memory_mb_used"`
+	RunningVms         int    `json:"running_vms"`
+	Service            struct {
+		DisabledReason any    `json:"disabled_reason"`
+		Host           string `json:"host"`
+		ID             string `json:"id"`
+	} `json:"service"`
+	State     string              `json:"state"`
+	Status    string              `json:"status"`
+	Vcpus     int                 `json:"vcpus"`
+	VcpusUsed int                 `json:"vcpus_used"`
+	Servers   *[]hypervisorServer `json:"servers"`
+}
 type HyperVisorsDetails struct {
-	Hypervisors []struct {
-		CPUInfo            string `json:"cpu_info"`
-		CurrentWorkload    int    `json:"current_workload"`
-		DiskAvailableLeast any    `json:"disk_available_least"`
-		FreeDiskGb         int    `json:"free_disk_gb"`
-		FreeRAMMb          int    `json:"free_ram_mb"`
-		HostIP             string `json:"host_ip"`
-		HypervisorHostname string `json:"hypervisor_hostname"`
-		HypervisorType     string `json:"hypervisor_type"`
-		HypervisorVersion  int    `json:"hypervisor_version"`
-		ID                 int    `json:"id"`
-		LocalGb            int    `json:"local_gb"`
-		LocalGbUsed        int    `json:"local_gb_used"`
-		MemoryMb           int    `json:"memory_mb"`
-		MemoryMbUsed       int    `json:"memory_mb_used"`
-		RunningVms         int    `json:"running_vms"`
-		Service            struct {
-			DisabledReason any    `json:"disabled_reason"`
-			Host           string `json:"host"`
-			ID             int    `json:"id"`
-		} `json:"service"`
-		State     string `json:"state"`
-		Status    string `json:"status"`
-		Vcpus     int    `json:"vcpus"`
-		VcpusUsed int    `json:"vcpus_used"`
-	} `json:"hypervisors"`
+	Hypervisors []Hypervisor `json:"hypervisors"`
+}
+
+func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string) (*Hypervisor, error) {
+	withServers := true
+	listOpts := hypervisors.ListOpts{
+		HypervisorHostnamePattern: &hypervisorHostnamePattern,
+		WithServers:               &withServers,
+	}
+
+	pages, err := hypervisors.List(sc, listOpts).AllPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// due some(tm) bug, gohperclouds hypervisors.ExtractPage is failing
+	h := &HyperVisorsDetails{}
+	if err = (pages.(hypervisors.HypervisorPage)).ExtractInto(h); err != nil {
+		return nil, err
+	}
+
+	return &h.Hypervisors[0], nil
 }
 
 // GetMigrationCandidates returns a list of hypervisors that are candidates for migration.
