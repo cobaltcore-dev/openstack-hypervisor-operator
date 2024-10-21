@@ -122,19 +122,30 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			continue
 		}
 
-		if vm.Status != "ACTIVE" {
+		vmIsActive := vm.Status == "ACTIVE" || vm.PowerState == 1
+
+		switch vm.Status {
+		case "MIGRATING", "RESIZE":
+			// wait for migration to finish
+			if !r.waitForMigration(ctx, *vm, &eviction) {
+				anyFailed = true
+			}
 			continue
-		}
-
-		liveMigrateOpts := servers.LiveMigrateOpts{
-			BlockMigration: swag.Bool(false),
-		}
-
-		log.Info("Live migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor)
-		if res := servers.LiveMigrate(ctx, r.ServiceClient, vm.ID, liveMigrateOpts); res.Err != nil {
+		case "ERROR":
+			// Needs manual intervention (or another operator fixes it)
 			anyFailed = true
-			log.Info("Failed to evict server", "server", vm.ID)
-			r.addErrorCondition(ctx, &eviction, res.ExtractErr())
+			continue
+		default:
+		}
+
+		if vmIsActive {
+			if !r.liveMigrate(ctx, *vm, &eviction) {
+				anyFailed = true
+			}
+		} else {
+			if !r.coldMigrate(ctx, *vm, &eviction) {
+				anyFailed = true
+			}
 		}
 	}
 
@@ -155,6 +166,96 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	})
 
 	return ctrl.Result{}, r.Status().Update(ctx, &eviction)
+}
+
+func (r *EvictionReconciler) liveMigrate(ctx context.Context, vm servers.Server, eviction *kvmv1.Eviction) bool {
+	log := logger.FromContext(ctx)
+
+	liveMigrateOpts := servers.LiveMigrateOpts{
+		BlockMigration: swag.Bool(false),
+	}
+
+	res := servers.LiveMigrate(ctx, r.ServiceClient, vm.ID, liveMigrateOpts)
+	if res.Err != nil {
+		log.Error(res.Err, "Failed to evict running server", "server", vm.ID)
+		r.addErrorCondition(ctx, eviction, res.Err)
+		return false
+	}
+
+	log.Info("Live migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	return r.waitForMigration(ctx, vm, eviction)
+}
+
+func (r *EvictionReconciler) pollInstance(ctx context.Context, vm *servers.Server, eviction *kvmv1.Eviction) bool {
+	res := servers.Get(ctx, r.ServiceClient, vm.ID)
+
+	// We are find with VMs being deleted, while we try to evict the host
+	if res.StatusCode == 404 {
+		return true
+	}
+
+	err := res.ExtractInto(vm)
+	if err == nil {
+		return true
+	}
+
+	log := logger.FromContext(ctx)
+	log.Info("Failed to poll server", "server", vm.ID)
+	r.addErrorCondition(ctx, eviction, err)
+	return false
+}
+
+func (r *EvictionReconciler) waitForMigration(ctx context.Context, vm servers.Server, eviction *kvmv1.Eviction) bool {
+	if !r.pollInstance(ctx, &vm, eviction) {
+		return false
+	}
+
+	log := logger.FromContext(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Monitoring of migration cancelled")
+			return false
+		default:
+			switch vm.Status {
+			case "ACTIVE", "SHUTOFF":
+				return true
+			case "RESIZE", "MIGRATING":
+				// Sleep and poll.
+				select {
+				case <-ctx.Done():
+					log.Info("Monitoring of migration cancelled")
+					return false
+				case <-time.After(1 * time.Second):
+					if !r.pollInstance(ctx, &vm, eviction) {
+						return false
+					}
+				}
+			case "VERIFY_RESIZE":
+				if err := servers.ConfirmResize(ctx, r.ServiceClient, vm.ID).ExtractErr(); err != nil {
+					log.Error(err, "ColdMigration")
+					return false
+				}
+			default:
+				log.Info("Unexpected state when migrating", "vm", vm.ID, "status", vm.Status)
+				return false
+			}
+		}
+	}
+}
+
+func (r *EvictionReconciler) coldMigrate(ctx context.Context, vm servers.Server, eviction *kvmv1.Eviction) bool {
+	log := logger.FromContext(ctx)
+
+	res := servers.Migrate(ctx, r.ServiceClient, vm.ID)
+	if res.Err != nil {
+		log.Error(res.Err, "Failed to evict stopped server", "server", vm.ID)
+		r.addErrorCondition(ctx, eviction, res.Err)
+		return false
+	}
+
+	log.Info("Cold-migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	return r.waitForMigration(ctx, vm, eviction)
 }
 
 // addCondition adds a condition to the Eviction status and updates the status
