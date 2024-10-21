@@ -61,8 +61,7 @@ type HyperVisorsDetails struct {
 	Hypervisors []Hypervisor `json:"hypervisors"`
 }
 
-func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string) (*Hypervisor, error) {
-	withServers := true
+func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string, withServers bool) (*Hypervisor, error) {
 	listOpts := hypervisors.ListOpts{
 		HypervisorHostnamePattern: &hypervisorHostnamePattern,
 		WithServers:               &withServers,

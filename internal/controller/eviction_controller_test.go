@@ -62,7 +62,7 @@ var _ = Describe("Eviction Controller", func() {
 		testhelper.TeardownHTTP()
 	})
 
-	Describe("Reconciling a eviction resource", func() {
+	Describe("Reconciling an eviction resource", func() {
 		When("creating an eviction without reason", func() {
 			It("it should fail creating the resource", func() {
 				resource := &kvmv1.Eviction{
