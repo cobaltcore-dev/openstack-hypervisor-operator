@@ -142,7 +142,8 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 
 // ensureEvictionIfNeeded ensures that an eviction is created if the node has the maintenance label.
 func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1.Node, host string) error {
-	if _, found := node.Labels[MAINTENANCE_NEEDED_LABEL]; !found {
+	value, found := node.Labels[MAINTENANCE_NEEDED_LABEL]
+	if !found {
 		return nil
 	}
 
@@ -150,6 +151,7 @@ func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
+		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, value)
 		return nil
 	})
 
@@ -193,11 +195,11 @@ func getHostNameFromNetbox(ctx context.Context, macAddress string) (string, erro
 	graphql := "https://netbox.global.cloud.sap/graphql/"
 
 	query := fmt.Sprintf(`	{
-		interface_list(mac_address: "%v") { 
-			device { 
-				name 
+		interface_list(mac_address: "%v") {
+			device {
+				name
 			}
-		} 
+		}
 	}`, macAddress)
 
 	payload := new(bytes.Buffer)

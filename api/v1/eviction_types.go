@@ -28,6 +28,7 @@ import (
 type EvictionSpec struct {
 	// Name of hypervisor to evict
 	Hypervisor string `json:"hypervisor"`
+	Reason     string `json:"reason"`
 }
 
 // EvictionStatus defines the observed state of Eviction

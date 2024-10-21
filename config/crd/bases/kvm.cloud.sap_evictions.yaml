@@ -49,8 +49,11 @@ spec:
               hypervisor:
                 description: Name of hypervisor to evict
                 type: string
+              reason:
+                type: string
             required:
             - hypervisor
+            - reason
             type: object
           status:
             description: EvictionStatus defines the observed state of Eviction

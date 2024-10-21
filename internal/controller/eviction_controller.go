@@ -97,7 +97,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	disableService := services.UpdateOpts{Status: services.ServiceDisabled,
-		DisabledReason: fmt.Sprintf("K8S Operator by eviction %v/%v", eviction.Namespace, eviction.Name)}
+		DisabledReason: fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)}
 
 	_, err = services.Update(ctx, r.ServiceClient, hypervisor.Service.ID, disableService).Extract()
 	if err != nil {
