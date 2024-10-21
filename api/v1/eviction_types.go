@@ -43,6 +43,8 @@ type EvictionStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Running;Failed;Succeeded
 	// +kubebuilder:default=Pending
 	EvictionState string `json:"evictionState"`
+	// +kubebuilder:validation:Optional
+	HypervisorServiceId string `json:"hypervisorServiceId"`
 
 	// Conditions is an array of current conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

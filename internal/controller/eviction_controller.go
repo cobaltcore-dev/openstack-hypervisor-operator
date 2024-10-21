@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -47,6 +48,10 @@ type EvictionReconciler struct {
 	rand          *rand.Rand
 }
 
+const (
+	finalizerName = "eviction-controller.cloud.sap/finalizer"
+)
+
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/finalizers,verbs=update
@@ -60,6 +65,12 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.Get(ctx, req.NamespacedName, &eviction); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	finalized, err := r.handleFinalizer(ctx, &eviction)
+
+	if err != nil || finalized {
+		return ctrl.Result{}, err
 	}
 
 	// Ignore if eviction already succeeded
@@ -80,12 +91,17 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Fetch all virtual machines on the hypervisor
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.ServiceClient, eviction.Spec.Hypervisor)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.ServiceClient, eviction.Spec.Hypervisor, true)
 	if err != nil {
 		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
 		r.addErrorCondition(ctx, &eviction, err)
 		return ctrl.Result{}, nil
+	}
+
+	eviction.Status.HypervisorServiceId = hypervisor.ID
+	if err := r.Status().Update(ctx, &eviction); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// TODO: Not sure, if it is an error condition, but I assume it will return []
@@ -166,6 +182,63 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	})
 
 	return ctrl.Result{}, r.Status().Update(ctx, &eviction)
+}
+
+func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) (bool, error) {
+	containsFinalizer := controllerutil.ContainsFinalizer(eviction, finalizerName)
+	// Not being deleted
+	if eviction.DeletionTimestamp.IsZero() {
+		if !containsFinalizer {
+			controllerutil.AddFinalizer(eviction, finalizerName)
+			if err := r.Update(ctx, eviction); err != nil {
+				return false, err
+			}
+		}
+	} else {
+		// being deleted
+		if containsFinalizer {
+			if err := r.enableHypervisorService(ctx, *eviction); err != nil {
+				return false, err
+			}
+
+			controllerutil.RemoveFinalizer(eviction, finalizerName)
+			if err := r.Update(ctx, eviction); err != nil {
+				return false, err
+			}
+		}
+
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, eviction kvmv1.Eviction) error {
+	log := logger.FromContext(ctx)
+	id := eviction.Status.HypervisorServiceId
+	if id != "" {
+		if err := r.enableHypervisorServiceInternal(ctx, id); err == nil {
+			return err
+		}
+	}
+
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.ServiceClient, eviction.Spec.Hypervisor, false)
+	if err != nil {
+		log.Error(err, "failed to get hypervisor")
+		// Abort eviction
+		r.addErrorCondition(ctx, &eviction, err)
+		return err
+	}
+
+	return r.enableHypervisorServiceInternal(ctx, hypervisor.Service.ID)
+}
+
+func (r *EvictionReconciler) enableHypervisorServiceInternal(ctx context.Context, id string) error {
+	log := logger.FromContext(ctx)
+	enableService := services.UpdateOpts{Status: services.ServiceEnabled}
+	log.Info("Enabling hypervisor", "id", id)
+	_, err := services.Update(ctx, r.ServiceClient, id, enableService).Extract()
+	return err
 }
 
 func (r *EvictionReconciler) liveMigrate(ctx context.Context, vm servers.Server, eviction *kvmv1.Eviction) bool {
