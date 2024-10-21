@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}, err
 	}
 
-	err = r.ensureEvictionIfNeeded(ctx, node, host)
+	err = r.reconcileEviction(ctx, node, host)
 	if err != nil {
 		return ctrl.Result{
 			Requeue:      true,
@@ -134,12 +135,10 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 	return host, nil
 }
 
-// ensureEvictionIfNeeded ensures that an eviction is created if the node has the maintenance label.
-func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1.Node, host string) error {
-	value, found := node.Labels[MAINTENANCE_NEEDED_LABEL]
-	if !found {
-		return nil
-	}
+// reconcileEviction ensures that an eviction is created if the node has the maintenance label.
+func (r *NodeReconciler) reconcileEviction(ctx context.Context, node corev1.Node, host string) error {
+	neededValue, neededFound := node.Labels[MAINTENANCE_NEEDED_LABEL]
+	_, approvedFound := node.Labels[MAINTENANCE_APPROVED_LABEL]
 
 	name := fmt.Sprintf("maintenance-required-%v", host)
 	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{
@@ -147,25 +146,47 @@ func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1
 		Namespace: "monsoon3", // todo: change to the correct namespace or use cluster scoped CRs
 	}}
 
+	if !neededFound && !approvedFound {
+		r.Delete(ctx, eviction)
+		return nil
+	}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
-		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, value)
+		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, neededValue)
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	switch eviction.Status.EvictionState {
+	case "Succeeded":
+		err = r.setNodeLabels(ctx, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
+	case "Failed":
+		err = r.setNodeLabels(ctx, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
+	}
 
 	return err
 }
 
 // setHostLabel sets the host label on the node.
 func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, host string) {
-	newNode := node.DeepCopy()
-	newNode.Labels[HOST_LABEL] = host
-
-	err := r.Patch(ctx, newNode, client.MergeFrom(&node))
+	err := r.setNodeLabels(ctx, node, map[string]string{
+		HOST_LABEL: host,
+	})
 	if err != nil {
 		log := logger.FromContext(ctx)
-		log.Error(err, "cannot set label on node", "host", host)
+		log.Error(err, "cannot set host label on node", "host", host)
 	}
+}
+
+// setHostLabel sets the host label on the node.
+func (r *NodeReconciler) setNodeLabels(ctx context.Context, node corev1.Node, labels map[string]string) error {
+	newNode := node.DeepCopy()
+	maps.Copy(newNode.Labels, labels)
+
+	return r.Patch(ctx, newNode, client.MergeFrom(&node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
