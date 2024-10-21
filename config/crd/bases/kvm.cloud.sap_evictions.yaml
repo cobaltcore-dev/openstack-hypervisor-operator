@@ -18,9 +18,15 @@ spec:
     - jsonPath: .spec.hypervisor
       name: Hypervisor
       type: string
+    - jsonPath: .spec.reason
+      name: Reason
+      type: string
     - jsonPath: .status.evictionState
       name: State
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Created
+      type: date
     name: v1
     schema:
       openAPIV3Schema:
@@ -50,6 +56,8 @@ spec:
                 description: Name of hypervisor to evict
                 type: string
               reason:
+                description: Reason for eviction, always required
+                minLength: 1
                 type: string
             required:
             - hypervisor

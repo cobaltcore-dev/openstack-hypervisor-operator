@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -57,6 +58,9 @@ var _ = Describe("Eviction Controller", func() {
 					},
 					// TODO(user): Specify other spec details if needed.
 				}
+				expected := fmt.Sprintf(`Eviction.kvm.cloud.sap "%s" is invalid: spec.reason: Invalid value: "": spec.reason in body should be at least 1 chars long`, resourceName)
+				Expect(k8sClient.Create(ctx, resource)).To(MatchError(expected))
+				resource.Spec.Reason = "test-reason"
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
 		})

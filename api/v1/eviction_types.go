@@ -26,9 +26,16 @@ import (
 
 // EvictionSpec defines the desired state of Eviction
 type EvictionSpec struct {
+	// +kubebuilder:validation:Required
+
 	// Name of hypervisor to evict
 	Hypervisor string `json:"hypervisor"`
-	Reason     string `json:"reason"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+
+	// Reason for eviction, always required
+	Reason string `json:"reason"`
 }
 
 // EvictionStatus defines the observed state of Eviction
@@ -44,7 +51,9 @@ type EvictionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:JSONPath=".spec.hypervisor",name="Hypervisor",type="string"
+// +kubebuilder:printcolumn:JSONPath=".spec.reason",name="Reason",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.evictionState",name="State",type="string"
+// +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Created",type="date"
 
 // Eviction is the Schema for the evictions API
 type Eviction struct {
