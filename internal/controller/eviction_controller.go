@@ -112,16 +112,18 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	disableService := services.UpdateOpts{Status: services.ServiceDisabled,
-		DisabledReason: fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)}
+	if hypervisor.Service.DisabledReason == "" {
+		disableService := services.UpdateOpts{Status: services.ServiceDisabled,
+			DisabledReason: r.evictionReason(eviction)}
 
-	_, err = services.Update(ctx, r.ServiceClient, hypervisor.Service.ID, disableService).Extract()
-	if err != nil {
-		r.addErrorCondition(ctx, &eviction, err)
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, nil
+		_, err = services.Update(ctx, r.ServiceClient, hypervisor.Service.ID, disableService).Extract()
+		if err != nil {
+			r.addErrorCondition(ctx, &eviction, err)
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: time.Second * 30,
+			}, nil
+		}
 	}
 
 	r.addProgressCondition(ctx, &eviction, "Host disabled", "Update")
@@ -184,6 +186,10 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, r.Status().Update(ctx, &eviction)
 }
 
+func (r *EvictionReconciler) evictionReason(eviction kvmv1.Eviction) string {
+	return fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)
+}
+
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) (bool, error) {
 	containsFinalizer := controllerutil.ContainsFinalizer(eviction, finalizerName)
 	// Not being deleted
@@ -215,19 +221,16 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, eviction kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
-	id := eviction.Status.HypervisorServiceId
-	if id != "" {
-		if err := r.enableHypervisorServiceInternal(ctx, id); err == nil {
-			return err
-		}
-	}
-
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.ServiceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
 		r.addErrorCondition(ctx, &eviction, err)
 		return err
+	}
+
+	if hypervisor.Service.DisabledReason != r.evictionReason(eviction) {
+		return nil
 	}
 
 	return r.enableHypervisorServiceInternal(ctx, hypervisor.Service.ID)
