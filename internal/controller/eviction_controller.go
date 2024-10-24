@@ -140,6 +140,11 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			continue
 		}
 
+		if vm.HypervisorHostname != hypervisor.HypervisorHostname {
+			// Someone else might have triggered a migration (in parallel)
+			continue
+		}
+
 		vmIsActive := vm.Status == "ACTIVE" || vm.PowerState == 1
 
 		switch vm.Status {
