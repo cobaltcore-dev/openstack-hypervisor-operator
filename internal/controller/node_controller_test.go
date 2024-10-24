@@ -21,14 +21,12 @@ import (
 	"context"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
-	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -44,6 +42,9 @@ var _ = Describe("Node Controller", func() {
 			Namespace: "monsoon3",
 		}
 		node := corev1.Node{}
+		generateReconcileRequest := func() request {
+			return request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient}
+		}
 
 		BeforeEach(func() {
 			By("creating the core resource for the Kind Node")
@@ -80,15 +81,9 @@ var _ = Describe("Node Controller", func() {
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			controllerReconciler := &NodeReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				ServiceClient: client.ServiceClient(),
-			}
+			controllerReconciler := &NodeReconciler{}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
+			_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
