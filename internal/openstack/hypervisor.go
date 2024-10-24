@@ -19,6 +19,7 @@ package openstack
 
 import (
 	"context"
+	"errors"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
@@ -76,6 +77,12 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 	h := &HyperVisorsDetails{}
 	if err = (pages.(hypervisors.HypervisorPage)).ExtractInto(h); err != nil {
 		return nil, err
+	}
+
+	if len(h.Hypervisors) == 0 {
+		return nil, errors.New("no hypervisor found")
+	} else if len(h.Hypervisors) > 1 {
+		return nil, errors.New("multiple hypervisors found")
 	}
 
 	return &h.Hypervisors[0], nil

@@ -63,7 +63,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Ignore if eviction already succeeded
-	if eviction.Status.EvictionState == "Succeeded" || eviction.Status.EvictionState == "Failed" {
+	if eviction.Status.EvictionState == "Succeeded" {
 		return ctrl.Result{}, nil
 	}
 
@@ -88,7 +88,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// Not sure, if it is an error condition, but I assume it will return []
+	// TODO: Not sure, if it is an error condition, but I assume it will return []
 	if hypervisor.Servers == nil {
 		err = errors.New("no servers on hypervisor found")
 		// Abort eviction
@@ -157,6 +157,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, r.Status().Update(ctx, &eviction)
 }
 
+// addCondition adds a condition to the Eviction status and updates the status
 func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction, status metav1.ConditionStatus, message string, reason string) {
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    "Eviction",

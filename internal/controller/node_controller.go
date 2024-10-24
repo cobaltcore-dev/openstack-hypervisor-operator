@@ -18,12 +18,8 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"math/rand"
-	"net/http"
 	"strings"
 	"time"
 
@@ -31,16 +27,14 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	corev1 "k8s.io/api/core/v1" // Required for Watching
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime" // Required for Watching
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/runtime"     // Required for Watching
 	ctrl "sigs.k8s.io/controller-runtime" // Required for Watching
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
@@ -54,12 +48,11 @@ type NodeReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	ServiceClient *gophercloud.ServiceClient
-	rand          *rand.Rand
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// +kubebuilder:rbac:group=core,resources=nodes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:group=core,resources=nodes,verbs=get;list;watch;patch
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var node corev1.Node
 	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
@@ -129,7 +122,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 	}
 
 	macAddress := nodePorts[0].MACAddress
-	host, err := getHostNameFromNetbox(ctx, macAddress)
+	host, err := netbox.GetHostName(ctx, macAddress)
 
 	if err != nil {
 		return host, err
@@ -147,7 +140,11 @@ func (r *NodeReconciler) ensureEvictionIfNeeded(ctx context.Context, node corev1
 		return nil
 	}
 
-	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: host, Namespace: "monsoon3"}}
+	name := fmt.Sprintf("maintenance-required-%v", host)
+	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{
+		Name:      name,
+		Namespace: "monsoon3", // todo: change to the correct namespace or use cluster scoped CRs
+	}}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
@@ -165,113 +162,22 @@ func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, hos
 
 	err := r.Patch(ctx, newNode, client.MergeFrom(&node))
 	if err != nil {
-		log := logger.FromContext(context.Background())
+		log := logger.FromContext(ctx)
 		log.Error(err, "cannot set label on node", "host", host)
 	}
-}
-
-type netboxDevice struct {
-	Name string `json:"name"`
-}
-
-type netboxInterfaceItem struct {
-	Device netboxDevice `json:"device"`
-}
-
-type netboxData struct {
-	InterfaceList []netboxInterfaceItem `json:"interface_list"`
-}
-
-type netboxResponse struct {
-	Data netboxData `json:"data"`
-}
-
-type netboxQuery struct {
-	Query string `json:"query"`
-}
-
-// getHostNameFromNetbox retrieves the host name from Netbox by the given MAC address.
-func getHostNameFromNetbox(ctx context.Context, macAddress string) (string, error) {
-	graphql := "https://netbox.global.cloud.sap/graphql/"
-
-	query := fmt.Sprintf(`	{
-		interface_list(mac_address: "%v") {
-			device {
-				name
-			}
-		}
-	}`, macAddress)
-
-	payload := new(bytes.Buffer)
-	if err := json.NewEncoder(payload).Encode(netboxQuery{Query: query}); err != nil {
-		return "", err
-	}
-	r, err := http.NewRequest("POST", graphql, payload)
-	if err != nil {
-		return "", err
-	}
-	r.Header.Add("Content-Type", "application/json")
-
-	c := http.DefaultClient
-	res, err := c.Do(r.WithContext(ctx))
-	if err != nil {
-		return "", err
-	}
-
-	defer func() { _ = res.Body.Close() }()
-
-	response := &netboxResponse{}
-	err = json.NewDecoder(res.Body).Decode(response)
-	if err != nil {
-		return "", err
-	}
-
-	if len(response.Data.InterfaceList) == 0 {
-		return "", fmt.Errorf("no device found for MAC address %v", macAddress)
-	}
-
-	return response.Data.InterfaceList[0].Device.Name, nil
-}
-
-// nodesToRequests returns a list of reconcile requests for all nodes.
-func (r *NodeReconciler) nodesToRequests(ctx context.Context, configMap client.Object) []reconcile.Request {
-	allNodes := &corev1.NodeList{}
-	listOps := &client.ListOptions{}
-	err := r.List(ctx, allNodes, listOps)
-	if err != nil {
-		return []reconcile.Request{}
-	}
-
-	requests := make([]reconcile.Request, len(allNodes.Items))
-	for i, item := range allNodes.Items {
-		requests[i] = reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      item.GetName(),
-				Namespace: "",
-			},
-		}
-	}
-	return requests
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
-	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var err error
 	if r.ServiceClient, err = openstack.GetServiceClient(context.Background(), "network"); err != nil {
 		return err
 	}
 
-	if !strings.HasSuffix(r.ServiceClient.Endpoint, "v2.0/") {
-		r.ServiceClient.ResourceBase = r.ServiceClient.Endpoint + "v2.0/"
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("OpenstackNodeController").
-		Watches(&corev1.Node{},
-			handler.EnqueueRequestsFromMapFunc(r.nodesToRequests),
-		).
+		For(&corev1.Node{}).
 		Complete(r)
 }
