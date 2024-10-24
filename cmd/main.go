@@ -20,6 +20,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -30,6 +31,8 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -53,6 +56,19 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+type stringArray []string
+
+// String is an implementation of the flag.Value interface
+func (i *stringArray) String() string {
+	return fmt.Sprintf("%v", *i)
+}
+
+// Set is an implementation of the flag.Value interface
+func (i *stringArray) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -60,6 +76,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var clusters stringArray
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -70,6 +87,7 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.Var(&clusters, "cluster", "Name of the target cluster(s).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -120,8 +138,9 @@ func main() {
 		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
+	restConfig := ctrl.GetConfigOrDie()
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -145,18 +164,51 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.EvictionReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	allClusters := map[string]cluster.Cluster{}
+	if len(clusters) == 0 {
+		cluster, err := cluster.New(restConfig, func(o *cluster.Options) {
+			o.Scheme = scheme
+		})
+		if err != nil {
+			setupLog.Error(err, "failed to construct clusters")
+			os.Exit(1)
+		}
+		if err := mgr.Add(cluster); err != nil {
+			setupLog.Error(err, "failed to add cluster to manager")
+			os.Exit(1)
+		}
+		// Ensure we can actually get a client
+		cluster.GetClient()
+		allClusters["self"] = cluster
+	}
+
+	for _, context := range clusters {
+		clusterConfig, err := config.GetConfigWithContext(context)
+		if err != nil {
+			setupLog.Error(err, "failed to load context", "context", context)
+			os.Exit(1)
+		}
+		cluster, err := cluster.New(clusterConfig, func(o *cluster.Options) {
+			o.Scheme = scheme
+		})
+		if err != nil {
+			setupLog.Error(err, "failed to construct clusters")
+			os.Exit(1)
+		}
+		if err := mgr.Add(cluster); err != nil {
+			setupLog.Error(err, "failed to add cluster to manager")
+			os.Exit(1)
+		}
+		cluster.GetClient()
+		allClusters[context] = cluster
+	}
+
+	if err = (&controller.EvictionReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Eviction")
 		os.Exit(1)
 	}
 
-	if err = (&controller.NodeReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = (&controller.NodeReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}

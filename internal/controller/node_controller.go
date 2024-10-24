@@ -26,13 +26,17 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
-	corev1 "k8s.io/api/core/v1" // Required for Watching
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"     // Required for Watching
+	corev1 "k8s.io/api/core/v1"                   // Required for Watching
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Required for Watching
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime" // Required for Watching
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
@@ -46,23 +50,21 @@ const (
 )
 
 type NodeReconciler struct {
-	client.Client
-	Scheme        *runtime.Scheme
-	ServiceClient *gophercloud.ServiceClient
+	serviceClient *gophercloud.ServiceClient
 }
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Result, error) {
 	var node corev1.Node
-	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
+	if err := req.client.Get(ctx, req.NamespacedName, &node); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	host, err := r.normalizeName(ctx, node)
+	host, err := r.normalizeName(ctx, req.client, node)
 	if err != nil {
 		return ctrl.Result{
 			Requeue:      true,
@@ -70,7 +72,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}, err
 	}
 
-	err = r.reconcileEviction(ctx, node, host)
+	err = r.reconcileEviction(ctx, req.client, node, host)
 	if err != nil {
 		return ctrl.Result{
 			Requeue:      true,
@@ -88,7 +90,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
 // kubernetes.metal.cloud.sap/node-ip
-func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (string, error) {
+func (r *NodeReconciler) normalizeName(ctx context.Context, client client.Client, node corev1.Node) (string, error) {
 	if host, found := node.Labels[HOST_LABEL]; found {
 		return host, nil
 	}
@@ -98,7 +100,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 	// openstack:/// is the prefix for Ironic nodes
 	if !strings.HasPrefix(providerId, "openstack:///") {
 		// Assumption: The node name will be correct
-		r.setHostLabel(ctx, node, node.Name)
+		r.setHostLabel(ctx, client, node, node.Name)
 		return node.Name, nil
 	}
 
@@ -108,7 +110,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 		Limit:    1,
 	}
 
-	pages, err := ports.List(r.ServiceClient, listOpts).AllPages(ctx)
+	pages, err := ports.List(r.serviceClient, listOpts).AllPages(ctx)
 	if err != nil {
 		return "", fmt.Errorf("could not retrieve ports for %v (%v) due to %w", node.Name, serverId, err)
 	}
@@ -130,13 +132,13 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node corev1.Node) (s
 		return host, err
 	}
 
-	r.setHostLabel(ctx, node, host)
+	r.setHostLabel(ctx, client, node, host)
 
 	return host, nil
 }
 
 // reconcileEviction ensures that an eviction is created if the node has the maintenance label.
-func (r *NodeReconciler) reconcileEviction(ctx context.Context, node corev1.Node, host string) error {
+func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Client, node corev1.Node, host string) error {
 	neededValue, neededFound := node.Labels[MAINTENANCE_NEEDED_LABEL]
 	_, approvedFound := node.Labels[MAINTENANCE_APPROVED_LABEL]
 
@@ -147,10 +149,10 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, node corev1.Node
 	}}
 
 	if !neededFound && !approvedFound {
-		r.Delete(ctx, eviction)
+		client.Delete(ctx, eviction)
 		return nil
 	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
 		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, neededValue)
 		return nil
@@ -162,17 +164,17 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, node corev1.Node
 
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		err = r.setNodeLabels(ctx, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
+		err = r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
 	case "Failed":
-		err = r.setNodeLabels(ctx, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
+		err = r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
 	}
 
 	return err
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, host string) {
-	err := r.setNodeLabels(ctx, node, map[string]string{
+func (r *NodeReconciler) setHostLabel(ctx context.Context, client client.Client, node corev1.Node, host string) {
+	err := r.setNodeLabels(ctx, client, node, map[string]string{
 		HOST_LABEL: host,
 	})
 	if err != nil {
@@ -182,24 +184,42 @@ func (r *NodeReconciler) setHostLabel(ctx context.Context, node corev1.Node, hos
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setNodeLabels(ctx context.Context, node corev1.Node, labels map[string]string) error {
+func (r *NodeReconciler) setNodeLabels(ctx context.Context, c client.Client, node corev1.Node, labels map[string]string) error {
 	newNode := node.DeepCopy()
 	maps.Copy(newNode.Labels, labels)
 
-	return r.Patch(ctx, newNode, client.MergeFrom(&node))
+	return c.Patch(ctx, newNode, client.MergeFrom(&node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters map[string]cluster.Cluster) error {
 	_ = logger.FromContext(context.Background())
 
 	var err error
-	if r.ServiceClient, err = openstack.GetServiceClient(context.Background(), "network"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "network"); err != nil {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named("OpenstackNodeController").
-		For(&corev1.Node{}).
-		Complete(r)
+	if !strings.HasSuffix(r.serviceClient.Endpoint, "v2.0/") {
+		r.serviceClient.ResourceBase = r.serviceClient.Endpoint + "v2.0/"
+	}
+
+	b := builder.TypedControllerManagedBy[request](mgr).
+		Named("openstack-node-controller")
+
+	for clusterName, cluster := range clusters {
+		b = b.WatchesRawSource(source.TypedKind(
+			cluster.GetCache(),
+			&corev1.Node{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, n *corev1.Node) []request {
+				return []request{{
+					NamespacedName: types.NamespacedName{Namespace: n.Namespace, Name: n.Name},
+					clusterName:    clusterName,
+					client:         cluster.GetClient(),
+				}}
+			}),
+		))
+	}
+
+	return b.Complete(r)
 }

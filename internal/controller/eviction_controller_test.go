@@ -25,12 +25,12 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
+	gopherclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -43,6 +43,10 @@ var _ = Describe("Eviction Controller", func() {
 	typeNamespacedName := types.NamespacedName{
 		Name:      resourceName,
 		Namespace: "default",
+	}
+
+	generateReconcileRequest := func() request {
+		return request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient}
 	}
 
 	BeforeEach(func() {
@@ -90,15 +94,11 @@ var _ = Describe("Eviction Controller", func() {
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 				controllerReconciler := &EvictionReconciler{
-					Client:        k8sClient,
-					Scheme:        k8sClient.Scheme(),
-					ServiceClient: client.ServiceClient(),
+					serviceClient: gopherclient.ServiceClient(),
 					rand:          rand.New(rand.NewSource(42)),
 				}
 
-				_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-					NamespacedName: typeNamespacedName,
-				})
+				_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -121,16 +121,14 @@ var _ = Describe("Eviction Controller", func() {
 
 				By("Creating the controller")
 				controllerReconciler = &EvictionReconciler{
-					Client:        k8sClient,
-					Scheme:        k8sClient.Scheme(),
-					ServiceClient: client.ServiceClient(),
+					serviceClient: client.ServiceClient(),
 					rand:          rand.New(rand.NewSource(42)),
 				}
 			})
 
 			When("hypervisor is not found in openstack", func() {
 				It("should fail reconciliation", func() {
-					_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -163,7 +161,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
