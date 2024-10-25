@@ -149,8 +149,7 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Cl
 	}}
 
 	if !neededFound && !approvedFound {
-		client.Delete(ctx, eviction)
-		return nil
+		return client.Delete(ctx, eviction)
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
