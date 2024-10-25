@@ -52,6 +52,10 @@ type EvictionReconciler struct {
 
 const (
 	finalizerName = "eviction-controller.cloud.sap/finalizer"
+	Succeeded     = "Succeeded"
+	Running       = "Running"
+	Reconciling   = "Reconciling"
+	Reconciled    = "Reconciled"
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -76,17 +80,17 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	}
 
 	// Ignore if eviction already succeeded
-	if eviction.Status.EvictionState == "Succeeded" {
+	if eviction.Status.EvictionState == Succeeded {
 		return ctrl.Result{}, nil
 	}
 
 	// Update status
-	eviction.Status.EvictionState = "Running"
+	eviction.Status.EvictionState = Running
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    "Reconciling",
+		Type:    Reconciling,
 		Status:  metav1.ConditionTrue,
-		Message: "Reconciling",
-		Reason:  "Reconciling",
+		Message: Reconciling,
+		Reason:  Reconciling,
 	})
 	if err := req.client.Status().Update(ctx, &eviction); err != nil {
 		return ctrl.Result{}, err
@@ -182,12 +186,12 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		}, nil
 	}
 
-	eviction.Status.EvictionState = "Succeeded"
+	eviction.Status.EvictionState = Succeeded
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    "Reconciling",
+		Type:    Reconciling,
 		Status:  metav1.ConditionFalse,
-		Message: "Reconciled",
-		Reason:  "Reconciled",
+		Message: Reconciled,
+		Reason:  Reconciled,
 	})
 
 	return ctrl.Result{}, req.client.Status().Update(ctx, &eviction)
