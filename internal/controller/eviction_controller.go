@@ -67,13 +67,13 @@ const (
 func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 
-	var eviction kvmv1.Eviction
-	if err := req.client.Get(ctx, req.NamespacedName, &eviction); err != nil {
+	eviction := &kvmv1.Eviction{}
+	if err := req.client.Get(ctx, req.NamespacedName, eviction); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	finalized, err := r.handleFinalizer(ctx, req.client, &eviction)
+	finalized, err := r.handleFinalizer(ctx, req.client, eviction)
 
 	if err != nil || finalized {
 		return ctrl.Result{}, err
@@ -92,7 +92,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		Message: Reconciling,
 		Reason:  Reconciling,
 	})
-	if err := req.client.Status().Update(ctx, &eviction); err != nil {
+	if err := req.client.Status().Update(ctx, eviction); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -101,12 +101,12 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	if err != nil {
 		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
-		r.addErrorCondition(ctx, req.client, &eviction, err)
+		r.addErrorCondition(ctx, req.client, eviction, err)
 		return ctrl.Result{}, nil
 	}
 
 	eviction.Status.HypervisorServiceId = hypervisor.ID
-	if err := req.client.Status().Update(ctx, &eviction); err != nil {
+	if err := req.client.Status().Update(ctx, eviction); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -114,7 +114,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	if hypervisor.Servers == nil {
 		err = errors.New("no servers on hypervisor found")
 		// Abort eviction
-		r.addErrorCondition(ctx, req.client, &eviction, err)
+		r.addErrorCondition(ctx, req.client, eviction, err)
 		return ctrl.Result{}, nil
 	}
 
@@ -124,7 +124,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 
 		_, err = services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
 		if err != nil {
-			r.addErrorCondition(ctx, req.client, &eviction, err)
+			r.addErrorCondition(ctx, req.client, eviction, err)
 			return ctrl.Result{
 				Requeue:      true,
 				RequeueAfter: time.Second * 30,
@@ -132,7 +132,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		}
 	}
 
-	r.addProgressCondition(ctx, req.client, &eviction, "Host disabled", "Update")
+	r.addProgressCondition(ctx, req.client, eviction, "Host disabled", "Update")
 
 	// Evict all virtual machines
 	anyFailed := false
@@ -142,7 +142,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		if err != nil {
 			anyFailed = true
 			log.Info("Failed to get server", "server", vm.ID)
-			r.addErrorCondition(ctx, req.client, &eviction, err)
+			r.addErrorCondition(ctx, req.client, eviction, err)
 			continue
 		}
 
@@ -156,7 +156,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		switch vm.Status {
 		case "MIGRATING", "RESIZE":
 			// wait for migration to finish
-			if !r.waitForMigration(ctx, req.client, *vm, &eviction) {
+			if !r.waitForMigration(ctx, req.client, vm, eviction) {
 				anyFailed = true
 			}
 			continue
@@ -168,11 +168,11 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		}
 
 		if vmIsActive {
-			if !r.liveMigrate(ctx, req.client, *vm, &eviction) {
+			if !r.liveMigrate(ctx, req.client, vm, eviction) {
 				anyFailed = true
 			}
 		} else {
-			if !r.coldMigrate(ctx, req.client, *vm, &eviction) {
+			if !r.coldMigrate(ctx, req.client, vm, eviction) {
 				anyFailed = true
 			}
 		}
@@ -194,10 +194,10 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		Reason:  Reconciled,
 	})
 
-	return ctrl.Result{}, req.client.Status().Update(ctx, &eviction)
+	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) evictionReason(eviction kvmv1.Eviction) string {
+func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 	return fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)
 }
 
@@ -214,7 +214,7 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 	} else {
 		// being deleted
 		if controllerutil.RemoveFinalizer(eviction, finalizerName) {
-			if err := r.enableHypervisorService(ctx, client, *eviction); err != nil {
+			if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
 				return false, err
 			}
 
@@ -229,13 +229,13 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 	return false, nil
 }
 
-func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction kvmv1.Eviction) error {
+func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
-		r.addErrorCondition(ctx, client, &eviction, err)
+		r.addErrorCondition(ctx, client, eviction, err)
 		return err
 	}
 
@@ -254,7 +254,7 @@ func (r *EvictionReconciler) enableHypervisorServiceInternal(ctx context.Context
 	return err
 }
 
-func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, vm servers.Server, eviction *kvmv1.Eviction) bool {
+func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
 	log := logger.FromContext(ctx)
 
 	liveMigrateOpts := servers.LiveMigrateOpts{
@@ -291,8 +291,8 @@ func (r *EvictionReconciler) pollInstance(ctx context.Context, client client.Cli
 	return false
 }
 
-func (r *EvictionReconciler) waitForMigration(ctx context.Context, client client.Client, vm servers.Server, eviction *kvmv1.Eviction) bool {
-	if !r.pollInstance(ctx, client, &vm, eviction) {
+func (r *EvictionReconciler) waitForMigration(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
+	if !r.pollInstance(ctx, client, vm, eviction) {
 		return false
 	}
 
@@ -313,7 +313,7 @@ func (r *EvictionReconciler) waitForMigration(ctx context.Context, client client
 					log.Info("Monitoring of migration cancelled")
 					return false
 				case <-time.After(1 * time.Second):
-					if !r.pollInstance(ctx, client, &vm, eviction) {
+					if !r.pollInstance(ctx, client, vm, eviction) {
 						return false
 					}
 				}
@@ -330,7 +330,7 @@ func (r *EvictionReconciler) waitForMigration(ctx context.Context, client client
 	}
 }
 
-func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Client, vm servers.Server, eviction *kvmv1.Eviction) bool {
+func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
 	log := logger.FromContext(ctx)
 
 	res := servers.Migrate(ctx, r.serviceClient, vm.ID)
