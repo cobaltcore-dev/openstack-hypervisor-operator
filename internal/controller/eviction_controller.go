@@ -118,21 +118,12 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	if hypervisor.Service.DisabledReason == "" {
-		disableService := services.UpdateOpts{Status: services.ServiceDisabled,
-			DisabledReason: r.evictionReason(eviction)}
-
-		_, err = services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
-		if err != nil {
-			r.addErrorCondition(ctx, req.client, eviction, err)
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Second * 30,
-			}, nil
-		}
+	if err = r.disableHypervisor(ctx, req, hypervisor, eviction); err != nil {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Second * 30,
+		}, err
 	}
-
-	r.addProgressCondition(ctx, req.client, eviction, "Host disabled", "Update")
 
 	// Evict all virtual machines
 	anyFailed := false
@@ -186,7 +177,6 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		}, nil
 	}
 
-	eviction.Status.EvictionState = Succeeded
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
 		Status:  metav1.ConditionFalse,
@@ -194,6 +184,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		Reason:  Reconciled,
 	})
 
+	eviction.Status.EvictionState = Succeeded
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
 
@@ -252,6 +243,29 @@ func (r *EvictionReconciler) enableHypervisorServiceInternal(ctx context.Context
 	log.Info("Enabling hypervisor", "id", id)
 	_, err := services.Update(ctx, r.serviceClient, id, enableService).Extract()
 	return err
+}
+
+func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request, hypervisor *openstack.Hypervisor, eviction *kvmv1.Eviction) error {
+	if hypervisor.Service.DisabledReason != nil && hypervisor.Service.DisabledReason != "" {
+		r.addProgressCondition(ctx, req.client, eviction, "Found host already disabled", "Update")
+	} else {
+		disableService := services.UpdateOpts{Status: services.ServiceDisabled,
+			DisabledReason: r.evictionReason(eviction)}
+
+		service, err := services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
+		if err != nil {
+			r.addErrorCondition(ctx, req.client, eviction, err)
+			return err
+		}
+		r.addProgressCondition(ctx, req.client, eviction, "Host disabled", "Update")
+
+		hypervisor.Service.DisabledReason = service.DisabledReason
+		hypervisor.Service.Host = service.Host
+		hypervisor.State = service.State
+		hypervisor.Status = service.Status
+	}
+
+	return nil
 }
 
 func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {

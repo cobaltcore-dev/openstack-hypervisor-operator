@@ -146,13 +146,13 @@ var _ = Describe("Eviction Controller", func() {
 					)
 				})
 			})
-			When("hypervisor has no servers", func() {
+			When("enabled hypervisor has no servers", func() {
 				BeforeEach(func() {
 					testhelper.Mux.HandleFunc("/os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						Expect(r.Method).To(Equal(http.MethodGet))
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "test-id"}, "servers": []}]}`)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "test-id"}, "servers": [], "status": "enabled", "state": "up"}]}`)).ToNot(BeNil())
 					})
 					testhelper.Mux.HandleFunc("/os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						Expect(r.Method).To(Equal(http.MethodPut))
@@ -168,12 +168,48 @@ var _ = Describe("Eviction Controller", func() {
 					err = k8sClient.Get(ctx, typeNamespacedName, resource)
 					Expect(err).NotTo(HaveOccurred())
 
-					// expect evicition condition to be true
+					// expect eviction condition to be true
 					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, "Eviction")
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
 					Expect(reconcileStatus.Reason).To(Equal("Update"))
 					Expect(reconcileStatus.Message).To(ContainSubstring("Host disabled"))
+
+					// expect reconciliation to be successfully finished
+					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, "Reconciling")
+					Expect(reconcileStatus).NotTo(BeNil())
+					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
+					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
+				})
+			})
+			When("disabvled hypervisor has no servers", func() {
+				BeforeEach(func() {
+					testhelper.Mux.HandleFunc("/os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						Expect(r.Method).To(Equal(http.MethodGet))
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "test-id", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up"}]}`)).ToNot(BeNil())
+					})
+					testhelper.Mux.HandleFunc("/os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+						Expect(r.Method).To(Equal(http.MethodPut))
+						w.WriteHeader(http.StatusOK)
+						Expect(fmt.Fprintf(w, `{"service": {"id": "test-id", "status": "disabled"}}`)).ToNot(BeNil())
+					})
+				})
+				It("should succeed the reconciliation", func() {
+					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+					Expect(err).NotTo(HaveOccurred())
+
+					resource := &kvmv1.Eviction{}
+					err = k8sClient.Get(ctx, typeNamespacedName, resource)
+					Expect(err).NotTo(HaveOccurred())
+
+					// expect eviction condition to be true
+					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, "Eviction")
+					Expect(reconcileStatus).NotTo(BeNil())
+					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
+					Expect(reconcileStatus.Reason).To(Equal("Update"))
+					Expect(reconcileStatus.Message).To(ContainSubstring("already disabled"))
 
 					// expect reconciliation to be successfully finished
 					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, "Reconciling")
