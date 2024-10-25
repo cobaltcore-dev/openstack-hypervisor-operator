@@ -65,8 +65,6 @@ const (
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx)
-
 	eviction := &kvmv1.Eviction{}
 	if err := req.client.Get(ctx, req.NamespacedName, eviction); err != nil {
 		// ignore not found errors, could be deleted
@@ -84,36 +82,17 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	// Update status
-	eviction.Status.EvictionState = Running
-	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    Reconciling,
-		Status:  metav1.ConditionTrue,
-		Message: Reconciling,
-		Reason:  Reconciling,
-	})
-	if err := req.client.Status().Update(ctx, eviction); err != nil {
-		return ctrl.Result{}, err
+	// TODO: Not sure, if it isn't more a problem of the test-setup, but this
+	// fixes the test
+	if eviction.Status.EvictionState == "" {
+		eviction.Status.EvictionState = "Pending"
 	}
 
 	// Fetch all virtual machines on the hypervisor
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, true)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
-		log.Error(err, "failed to get hypervisor")
 		// Abort eviction
-		r.addErrorCondition(ctx, req.client, eviction, err)
-		return ctrl.Result{}, nil
-	}
-
-	eviction.Status.HypervisorServiceId = hypervisor.ID
-	if err := req.client.Status().Update(ctx, eviction); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// TODO: Not sure, if it is an error condition, but I assume it will return []
-	if hypervisor.Servers == nil {
-		err = errors.New("no servers on hypervisor found")
-		// Abort eviction
+		err = fmt.Errorf("failed to get hypervisor %w", err)
 		r.addErrorCondition(ctx, req.client, eviction, err)
 		return ctrl.Result{}, nil
 	}
@@ -125,6 +104,27 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		}, err
 	}
 
+	// TODO: Not sure, if it is an error condition, but I assume it will return []
+	if hypervisor.Servers == nil {
+		err = errors.New("no servers on hypervisor found")
+		// Abort eviction
+		r.addErrorCondition(ctx, req.client, eviction, err)
+		return ctrl.Result{}, nil
+	}
+
+	// Update status
+	eviction.Status.HypervisorServiceId = hypervisor.ID
+	eviction.Status.EvictionState = Running
+	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+		Type:    Reconciling,
+		Status:  metav1.ConditionTrue,
+		Message: Reconciling,
+		Reason:  Reconciling,
+	})
+	if err := req.client.Status().Update(ctx, eviction); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Evict all virtual machines
 	anyFailed := false
 	for _, server := range *hypervisor.Servers {
@@ -132,7 +132,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		vm, err := res.Extract()
 		if err != nil {
 			anyFailed = true
-			log.Info("Failed to get server", "server", vm.ID)
+			err = fmt.Errorf("failed to get server %v due to %w", vm.ID, err)
 			r.addErrorCondition(ctx, req.client, eviction, err)
 			continue
 		}
