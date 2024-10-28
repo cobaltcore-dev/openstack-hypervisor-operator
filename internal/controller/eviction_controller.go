@@ -221,12 +221,11 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
-	log := logger.FromContext(ctx)
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
-		log.Error(err, "failed to get hypervisor")
+		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)
 		// Abort eviction
-		r.addErrorCondition(ctx, client, eviction, err)
+		r.addErrorCondition(ctx, client, eviction, err2)
 		return err
 	}
 
@@ -277,8 +276,8 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Clie
 
 	res := servers.LiveMigrate(ctx, r.serviceClient, vm.ID, liveMigrateOpts)
 	if res.Err != nil {
-		log.Error(res.Err, "Failed to evict running server", "server", vm.ID)
-		r.addErrorCondition(ctx, client, eviction, res.Err)
+		err := fmt.Errorf("failed to evict VM %s due to %w", vm.ID, res.Err)
+		r.addErrorCondition(ctx, client, eviction, err)
 		return false
 	}
 
@@ -299,9 +298,8 @@ func (r *EvictionReconciler) pollInstance(ctx context.Context, client client.Cli
 		return true
 	}
 
-	log := logger.FromContext(ctx)
-	log.Info("Failed to poll server", "server", vm.ID)
-	r.addErrorCondition(ctx, client, eviction, err)
+	err2 := fmt.Errorf("failed to poll server %s due to %w", vm.ID, err)
+	r.addErrorCondition(ctx, client, eviction, err2)
 	return false
 }
 
@@ -349,8 +347,8 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Clie
 
 	res := servers.Migrate(ctx, r.serviceClient, vm.ID)
 	if res.Err != nil {
-		log.Error(res.Err, "Failed to evict stopped server", "server", vm.ID)
-		r.addErrorCondition(ctx, client, eviction, res.Err)
+		err := fmt.Errorf("failed to evict stopped server %s due to %w", vm.ID, res.Err)
+		r.addErrorCondition(ctx, client, eviction, err)
 		return false
 	}
 
