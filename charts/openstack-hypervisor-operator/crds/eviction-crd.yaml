@@ -130,6 +130,8 @@ spec:
                 - Failed
                 - Succeeded
                 type: string
+              hypervisorServiceId:
+                type: string
             required:
             - evictionState
             type: object
