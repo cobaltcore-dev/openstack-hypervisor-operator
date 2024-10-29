@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime" // Required for Watching
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -149,7 +150,7 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Cl
 	}}
 
 	if !neededFound && !approvedFound {
-		return client.Delete(ctx, eviction)
+		return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
