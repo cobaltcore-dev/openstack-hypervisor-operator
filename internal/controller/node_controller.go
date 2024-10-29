@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
@@ -67,18 +66,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Resul
 
 	host, err := r.normalizeName(ctx, req.client, node)
 	if err != nil {
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, err
+		return ctrl.Result{}, err
 	}
 
 	err = r.reconcileEviction(ctx, req.client, node, host)
 	if err != nil {
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, err
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
