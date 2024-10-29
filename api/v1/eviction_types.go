@@ -45,6 +45,9 @@ type EvictionStatus struct {
 	EvictionState string `json:"evictionState"`
 	// +kubebuilder:validation:Optional
 	HypervisorServiceId string `json:"hypervisorServiceId"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=0
+	OutstandingRamMb int `json:"outstandingRamMb"`
 
 	// Conditions is an array of current conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

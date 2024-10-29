@@ -132,6 +132,9 @@ spec:
                 type: string
               hypervisorServiceId:
                 type: string
+              outstandingRamMb:
+                default: 0
+                type: integer
             required:
             - evictionState
             type: object
