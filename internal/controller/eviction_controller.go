@@ -113,6 +113,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	}
 
 	// Update status
+	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
 	eviction.Status.HypervisorServiceId = hypervisor.ID
 	eviction.Status.EvictionState = Running
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
@@ -184,6 +185,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		Reason:  Reconciled,
 	})
 
+	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
