@@ -98,10 +98,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	}
 
 	if err = r.disableHypervisor(ctx, req, hypervisor, eviction); err != nil {
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, err
+		return ctrl.Result{}, err
 	}
 
 	// TODO: Not sure, if it is an error condition, but I assume it will return []
