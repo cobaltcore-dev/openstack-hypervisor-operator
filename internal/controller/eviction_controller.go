@@ -19,7 +19,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -101,14 +100,6 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// TODO: Not sure, if it is an error condition, but I assume it will return []
-	if hypervisor.Servers == nil {
-		err = errors.New("no servers on hypervisor found")
-		// Abort eviction
-		r.addErrorCondition(ctx, req.client, eviction, err)
-		return ctrl.Result{}, nil
-	}
-
 	// Update status
 	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
 	eviction.Status.HypervisorServiceId = hypervisor.ID
@@ -124,51 +115,8 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	}
 
 	// Evict all virtual machines
-	anyFailed := false
-	for _, server := range *hypervisor.Servers {
-		res := servers.Get(ctx, r.serviceClient, server.UUID)
-		vm, err := res.Extract()
-		if err != nil {
-			anyFailed = true
-			err = fmt.Errorf("failed to get server %v due to %w", vm.ID, err)
-			r.addErrorCondition(ctx, req.client, eviction, err)
-			continue
-		}
-
-		if vm.HypervisorHostname != hypervisor.HypervisorHostname {
-			// Someone else might have triggered a migration (in parallel)
-			continue
-		}
-
-		vmIsActive := vm.Status == "ACTIVE" || vm.PowerState == 1
-
-		switch vm.Status {
-		case "MIGRATING", "RESIZE":
-			// wait for migration to finish
-			if !r.waitForMigration(ctx, req.client, vm, eviction) {
-				anyFailed = true
-			}
-			continue
-		case "ERROR":
-			// Needs manual intervention (or another operator fixes it)
-			anyFailed = true
-			continue
-		default:
-		}
-
-		if vmIsActive {
-			if !r.liveMigrate(ctx, req.client, vm, eviction) {
-				anyFailed = true
-			}
-		} else {
-			if !r.coldMigrate(ctx, req.client, vm, eviction) {
-				anyFailed = true
-			}
-		}
-	}
-
-	// Requeue after 30 seconds
-	if anyFailed {
+	if !r.evictAll(ctx, hypervisor, req, eviction) {
+		// Requeue after 30 seconds on error
 		return ctrl.Result{
 			Requeue:      true,
 			RequeueAfter: time.Second * 30,
@@ -185,6 +133,55 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+}
+
+func (r *EvictionReconciler) evictAll(ctx context.Context, hypervisor *openstack.Hypervisor, req request, eviction *kvmv1.Eviction) (success bool) {
+	success = true
+	if hypervisor.Servers == nil {
+		return success
+	}
+	for _, server := range *hypervisor.Servers {
+		res := servers.Get(ctx, r.serviceClient, server.UUID)
+		vm, err := res.Extract()
+		if err != nil {
+			success = false
+			err = fmt.Errorf("failed to get server %v due to %w", vm.ID, err)
+			r.addErrorCondition(ctx, req.client, eviction, err)
+			continue
+		}
+
+		if vm.HypervisorHostname != hypervisor.HypervisorHostname {
+			// Someone else might have triggered a migration (in parallel)
+			continue
+		}
+
+		vmIsActive := vm.Status == "ACTIVE" || vm.PowerState == 1
+
+		switch vm.Status {
+		case "MIGRATING", "RESIZE":
+			// wait for migration to finish
+			if !r.waitForMigration(ctx, req.client, vm, eviction) {
+				success = false
+			}
+			continue
+		case "ERROR":
+			// Needs manual intervention (or another operator fixes it)
+			success = false
+			continue
+		default:
+		}
+
+		if vmIsActive {
+			if !r.liveMigrate(ctx, req.client, vm, eviction) {
+				success = false
+			}
+		} else {
+			if !r.coldMigrate(ctx, req.client, vm, eviction) {
+				success = false
+			}
+		}
+	}
+	return success
 }
 
 func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
