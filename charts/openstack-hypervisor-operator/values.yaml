@@ -9,8 +9,15 @@ controllerManager:
       capabilities:
         drop:
         - ALL
+    env:
+      osAuthUrl: ""
+      osProjectDomainName: ""
+      osProjectName: ""
+      osRegionName: ""
+      osUserDomainName: ""
+      osUsername: ""
     image:
-      repository: controller
+      repository: keppel.eu-de-1.cloud.sap/ccloud/openstack-hypervisor-operator
       tag: latest
     resources:
       limits:
@@ -32,3 +39,5 @@ metricsService:
     protocol: TCP
     targetPort: 8443
   type: ClusterIP
+secret:
+  servicePassword: ""

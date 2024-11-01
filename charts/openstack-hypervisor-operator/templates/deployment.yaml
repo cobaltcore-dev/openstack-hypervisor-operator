@@ -24,6 +24,23 @@ spec:
         command:
         - /manager
         env:
+        - name: OS_AUTH_URL
+          value: {{ quote .Values.controllerManager.manager.env.osAuthUrl }}
+        - name: OS_PROJECT_DOMAIN_NAME
+          value: {{ quote .Values.controllerManager.manager.env.osProjectDomainName }}
+        - name: OS_PROJECT_NAME
+          value: {{ quote .Values.controllerManager.manager.env.osProjectName }}
+        - name: OS_REGION_NAME
+          value: {{ quote .Values.controllerManager.manager.env.osRegionName }}
+        - name: OS_USER_DOMAIN_NAME
+          value: {{ quote .Values.controllerManager.manager.env.osUserDomainName }}
+        - name: OS_USERNAME
+          value: {{ quote .Values.controllerManager.manager.env.osUsername }}
+        - name: OS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: SERVICE_PASSWORD
+              name: {{ include "openstack-hypervisor-operator.fullname" . }}-secret
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag

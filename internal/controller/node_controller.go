@@ -50,9 +50,10 @@ type NodeReconciler struct {
 	ServiceClient *gophercloud.ServiceClient
 }
 
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// +kubebuilder:rbac:group=core,resources=nodes,verbs=get;list;watch;patch
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var node corev1.Node
 	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {

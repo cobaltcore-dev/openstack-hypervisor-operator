@@ -63,7 +63,19 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-        image: controller:latest
+        env:
+          - name: OS_AUTH_URL
+          - name: OS_PROJECT_DOMAIN_NAME
+          - name: OS_PROJECT_NAME
+          - name: OS_REGION_NAME
+          - name: OS_USER_DOMAIN_NAME
+          - name: OS_USERNAME
+          - name: OS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: secret
+                key: SERVICE_PASSWORD
+        image: keppel.eu-de-1.cloud.sap/ccloud/openstack-hypervisor-operator:latest
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

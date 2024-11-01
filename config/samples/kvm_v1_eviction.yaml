@@ -6,4 +6,5 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: eviction-sample
 spec:
-  hypervisor: node001-bb274
+  hypervisor: node007-bb273
+  reason: "sample reason"

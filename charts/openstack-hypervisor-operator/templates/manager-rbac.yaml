@@ -6,6 +6,15 @@ metadata:
   {{- include "openstack-hypervisor-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - kvm.cloud.sap
   resources:
   - evictions
