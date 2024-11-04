@@ -27,6 +27,7 @@ import (
 // EvictionSpec defines the desired state of Eviction
 type EvictionSpec struct {
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 
 	// Name of hypervisor to evict
 	Hypervisor string `json:"hypervisor"`

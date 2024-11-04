@@ -53,6 +53,7 @@ spec:
             properties:
               hypervisor:
                 description: Name of hypervisor to evict
+                minLength: 1
                 type: string
               reason:
                 description: Reason for eviction, always required
