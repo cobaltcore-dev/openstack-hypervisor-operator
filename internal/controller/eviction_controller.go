@@ -201,8 +201,11 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 	} else {
 		// being deleted
 		if controllerutil.RemoveFinalizer(eviction, finalizerName) {
-			if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
-				return false, err
+			if eviction.Status.EvictionState != "" && eviction.Status.EvictionState != "Pending" {
+				// Cannot have been disabled, so no need to re-enable either
+				if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
+					return false, err
+				}
 			}
 
 			if err := client.Update(ctx, eviction); err != nil {
@@ -217,6 +220,9 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
+	if eviction.Spec.Hypervisor == "" {
+		return nil
+	}
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)

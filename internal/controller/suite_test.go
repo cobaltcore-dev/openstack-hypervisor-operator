@@ -53,7 +53,7 @@ func TestControllers(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
-var _ = BeforeEach(func() {
+var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancel = context.WithCancel(context.TODO())
@@ -89,7 +89,7 @@ var _ = BeforeEach(func() {
 
 })
 
-var _ = AfterEach(func() {
+var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	cancel()
 	err := testEnv.Stop()
