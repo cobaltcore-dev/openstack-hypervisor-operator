@@ -25,7 +25,6 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
-	gopherclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -39,6 +38,10 @@ import (
 
 var _ = Describe("Eviction Controller", func() {
 	const resourceName = "test-resource"
+	const hypervisorName = "test-hypervisor"
+	const serviceId = "test-id"
+	var controllerReconciler *EvictionReconciler
+
 	ctx := context.Background()
 	typeNamespacedName := types.NamespacedName{
 		Name:      resourceName,
@@ -57,31 +60,27 @@ var _ = Describe("Eviction Controller", func() {
 	AfterEach(func() {
 		resource := &kvmv1.Eviction{}
 		err := k8sClient.Get(ctx, typeNamespacedName, resource)
-		if err == nil || !errors.IsNotFound(err) {
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				Expect(err).ShouldNot(HaveOccurred())
+			}
+		} else {
 			By("Cleanup the specific resource instance Eviction")
+			Expect(controllerReconciler).NotTo(BeNil())
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).Should(HaveOccurred())
 		}
 
 		By("Tearing down the OpenStack http mock server")
 		testhelper.TeardownHTTP()
+		controllerReconciler = nil
 	})
 
-	Describe("Reconciling an eviction resource", func() {
-		When("creating an eviction without reason", func() {
+	Describe("API validation", func() {
+		When("creating an eviction without hypervisor", func() {
 			It("it should fail creating the resource", func() {
-				resource := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-				}
-				expected := fmt.Sprintf(`Eviction.kvm.cloud.sap "%s" is invalid: spec.reason: Invalid value: "": spec.reason in body should be at least 1 chars long`, resourceName)
-				Expect(k8sClient.Create(ctx, resource)).To(MatchError(expected))
-			})
-		})
-
-		When("creating an eviction with reason", func() {
-			It("it should successfully create the resource", func() {
 				resource := &kvmv1.Eviction{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
@@ -91,20 +90,47 @@ var _ = Describe("Eviction Controller", func() {
 						Reason: "test-reason",
 					},
 				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-
-				controllerReconciler := &EvictionReconciler{
-					serviceClient: gopherclient.ServiceClient(),
-					rand:          rand.New(rand.NewSource(42)),
-				}
-
-				_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
-				Expect(err).NotTo(HaveOccurred())
+				expected := fmt.Sprintf(`Eviction.kvm.cloud.sap "%s" is invalid: spec.hypervisor: Invalid value: "": spec.hypervisor in body should be at least 1 chars long`, resourceName)
+				Expect(k8sClient.Create(ctx, resource)).To(MatchError(expected))
 			})
 		})
 
-		Describe("creating an eviction for 'test-hypervisor' and reconciling", func() {
-			var controllerReconciler *EvictionReconciler
+		When("creating an eviction without reason", func() {
+			It("it should fail creating the resource", func() {
+				resource := &kvmv1.Eviction{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      resourceName,
+						Namespace: "default",
+					},
+					Spec: kvmv1.EvictionSpec{
+						Hypervisor: hypervisorName,
+					},
+				}
+				expected := fmt.Sprintf(`Eviction.kvm.cloud.sap "%s" is invalid: spec.reason: Invalid value: "": spec.reason in body should be at least 1 chars long`, resourceName)
+				Expect(k8sClient.Create(ctx, resource)).To(MatchError(expected))
+			})
+		})
+
+		When("creating an eviction with reason and hypervisor", func() {
+			It("it should successfully create the resource", func() {
+				resource := &kvmv1.Eviction{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      resourceName,
+						Namespace: "default",
+					},
+					Spec: kvmv1.EvictionSpec{
+						Reason:     "test-reason",
+						Hypervisor: hypervisorName,
+					},
+				}
+				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			})
+		})
+	})
+
+	Describe("Reconciliation", func() {
+		Describe("an eviction for 'test-hypervisor'", func() {
 			BeforeEach(func() {
 				By("Creating the resource")
 				resource := &kvmv1.Eviction{
@@ -114,7 +140,7 @@ var _ = Describe("Eviction Controller", func() {
 					},
 					Spec: kvmv1.EvictionSpec{
 						Reason:     "test-reason",
-						Hypervisor: "test-hypervisor",
+						Hypervisor: hypervisorName,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -127,6 +153,14 @@ var _ = Describe("Eviction Controller", func() {
 			})
 
 			When("hypervisor is not found in openstack", func() {
+				BeforeEach(func() {
+					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						Expect(fmt.Fprintf(w, `{"hypervisors": []}`)).ToNot(BeNil())
+					})
+				})
+
 				It("should fail reconciliation", func() {
 					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
 					Expect(err).NotTo(HaveOccurred())
@@ -140,24 +174,22 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
 					Expect(reconcileStatus.Reason).To(Equal("Failed"))
-					Expect(reconcileStatus.Message).To(And(
-						ContainSubstring("404 page not found"),
-						ContainSubstring("os-hypervisors")),
-					)
+					Expect(reconcileStatus.Message).To(ContainSubstring("no hypervisor found"))
+					Expect(resource.Status.HypervisorServiceId).To(Equal(""))
 				})
+
 			})
 			When("enabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("/os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						Expect(r.Method).To(Equal(http.MethodGet))
+					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "test-id"}, "servers": [], "status": "enabled", "state": "up"}]}`)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v"}, "servers": [], "status": "enabled", "state": "up"}]}`, serviceId)).ToNot(BeNil())
 					})
-					testhelper.Mux.HandleFunc("/os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
-						Expect(r.Method).To(Equal(http.MethodPut))
+					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "test-id", "status": "disabled"}}`)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
 					})
 				})
 				It("should succeed the reconciliation", func() {
@@ -182,18 +214,16 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
 				})
 			})
-			When("disabvled hypervisor has no servers", func() {
+			When("disabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("/os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						Expect(r.Method).To(Equal(http.MethodGet))
+					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "test-id", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up"}]}`)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up"}]}`, serviceId)).ToNot(BeNil())
 					})
-					testhelper.Mux.HandleFunc("/os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
-						Expect(r.Method).To(Equal(http.MethodPut))
+					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "test-id", "status": "disabled"}}`)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
 					})
 				})
 				It("should succeed the reconciliation", func() {
