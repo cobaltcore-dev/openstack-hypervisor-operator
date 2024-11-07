@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,6 +41,7 @@ var _ = Describe("Eviction Controller", func() {
 	const resourceName = "test-resource"
 	const hypervisorName = "test-hypervisor"
 	const serviceId = "test-id"
+	const maxReconcileSteps = 10
 	var controllerReconciler *EvictionReconciler
 
 	ctx := context.Background()
@@ -48,8 +50,15 @@ var _ = Describe("Eviction Controller", func() {
 		Namespace: "default",
 	}
 
-	generateReconcileRequest := func() request {
-		return request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient}
+	reconcileLoop := func() (ctrl.Result, error) {
+		for i := 0; i < maxReconcileSteps; i++ {
+			res, err := controllerReconciler.Reconcile(ctx, request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient})
+			if res.IsZero() || err != nil {
+				return res, err
+			}
+		}
+
+		return ctrl.Result{}, fmt.Errorf("Reconciliation did not complete after %v steps", maxReconcileSteps)
 	}
 
 	BeforeEach(func() {
@@ -68,7 +77,7 @@ var _ = Describe("Eviction Controller", func() {
 			By("Cleanup the specific resource instance Eviction")
 			Expect(controllerReconciler).NotTo(BeNil())
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-			_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+			_, err := reconcileLoop()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).Should(HaveOccurred())
 		}
@@ -162,14 +171,14 @@ var _ = Describe("Eviction Controller", func() {
 				})
 
 				It("should fail reconciliation", func() {
-					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+					_, err := reconcileLoop()
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
 					err = k8sClient.Get(ctx, typeNamespacedName, resource)
 					Expect(err).NotTo(HaveOccurred())
 
-					// expect evicition condition to be false due to missing hypervisor
+					// expect eviction condition to be false due to missing hypervisor
 					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, "Eviction")
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
@@ -193,7 +202,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+					_, err := reconcileLoop()
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -227,7 +236,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+					_, err := reconcileLoop()
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
