@@ -34,17 +34,17 @@ type Hypervisor struct {
 	CPUInfo            string `json:"cpu_info"`
 	CurrentWorkload    int    `json:"current_workload"`
 	DiskAvailableLeast any    `json:"disk_available_least"`
-	FreeDiskGb         int    `json:"free_disk_gb"`
-	FreeRAMMb          int    `json:"free_ram_mb"`
+	FreeDiskGb         int64  `json:"free_disk_gb"`
+	FreeRAMMb          int64  `json:"free_ram_mb"`
 	HostIP             string `json:"host_ip"`
 	HypervisorHostname string `json:"hypervisor_hostname"`
 	HypervisorType     string `json:"hypervisor_type"`
 	HypervisorVersion  int    `json:"hypervisor_version"`
 	ID                 string `json:"id"`
-	LocalGb            int    `json:"local_gb"`
-	LocalGbUsed        int    `json:"local_gb_used"`
-	MemoryMb           int    `json:"memory_mb"`
-	MemoryMbUsed       int    `json:"memory_mb_used"`
+	LocalGb            int64  `json:"local_gb"`
+	LocalGbUsed        int64  `json:"local_gb_used"`
+	MemoryMb           int64  `json:"memory_mb"`
+	MemoryMbUsed       int64  `json:"memory_mb_used"`
 	RunningVms         int    `json:"running_vms"`
 	Service            struct {
 		DisabledReason any    `json:"disabled_reason"`

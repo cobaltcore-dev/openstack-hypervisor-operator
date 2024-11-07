@@ -143,6 +143,7 @@ spec:
                 type: array
               outstandingRamMb:
                 default: 0
+                format: int64
                 type: integer
             required:
             - evictionState

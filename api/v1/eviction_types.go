@@ -49,7 +49,7 @@ type EvictionStatus struct {
 	HypervisorServiceId string `json:"hypervisorServiceId"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=0
-	OutstandingRamMb int `json:"outstandingRamMb"`
+	OutstandingRamMb int64 `json:"outstandingRamMb"`
 	// +kubebuilder:validation:Optional
 	OutstandingInstances []string `json:"outstandingInstances"`
 
