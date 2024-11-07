@@ -220,9 +220,6 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
-	if eviction.Spec.Hypervisor == "" {
-		return nil
-	}
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)
