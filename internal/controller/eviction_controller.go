@@ -318,14 +318,10 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client
 		return nil
 	}
 
-	return r.enableHypervisorServiceInternal(ctx, hypervisor.Service.ID)
-}
-
-func (r *EvictionReconciler) enableHypervisorServiceInternal(ctx context.Context, id string) error {
 	log := logger.FromContext(ctx)
 	enableService := services.UpdateOpts{Status: services.ServiceEnabled}
-	log.Info("Enabling hypervisor", "id", id)
-	_, err := services.Update(ctx, r.serviceClient, id, enableService).Extract()
+	log.Info("Enabling hypervisor", "id", hypervisor.Service.ID)
+	_, err = services.Update(ctx, r.serviceClient, hypervisor.Service.ID, enableService).Extract()
 	return err
 }
 
