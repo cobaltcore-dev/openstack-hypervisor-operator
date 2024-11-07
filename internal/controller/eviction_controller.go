@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -70,46 +71,30 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	finalized, err := r.handleFinalizer(ctx, req.client, eviction)
-
-	if err != nil || finalized {
+	// Being deleted
+	if !eviction.DeletionTimestamp.IsZero() {
+		err := r.handleFinalizer(ctx, req.client, eviction)
 		return ctrl.Result{}, err
 	}
 
-	// Ignore if eviction already succeeded
-	if eviction.Status.EvictionState == Succeeded {
+	switch eviction.Status.EvictionState {
+	case Succeeded, "Error":
+		// Nothing left to be done
 		return ctrl.Result{}, nil
+	case "Pending", "":
+		// Let's see if we can take it up
+		eviction.Status.EvictionState = "Pending" // "" -> "Pending: Fixes the test
+		return r.handlePending(ctx, eviction, req)
 	}
 
-	// TODO: Not sure, if it isn't more a problem of the test-setup, but this
-	// fixes the test
-	if eviction.Status.EvictionState == "" {
-		eviction.Status.EvictionState = "Pending"
-	}
-
-	// Fetch all virtual machines on the hypervisor
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
+	// That should leave us with "Running" and the hypervisor should be deactivated
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, true)
 	if err != nil {
-		// Abort eviction
-		err = fmt.Errorf("failed to get hypervisor %w", err)
-		r.addErrorCondition(ctx, req.client, eviction, err)
-		return ctrl.Result{}, nil
-	}
-
-	if err = r.disableHypervisor(ctx, req, hypervisor, eviction); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// Update status
 	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
-	eviction.Status.HypervisorServiceId = hypervisor.ID
-	eviction.Status.EvictionState = Running
-	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    Reconciling,
-		Status:  metav1.ConditionTrue,
-		Message: Reconciling,
-		Reason:  Reconciling,
-	})
 	if err := req.client.Status().Update(ctx, eviction); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -133,6 +118,39 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+}
+
+func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
+	hypervisorName := eviction.Spec.Hypervisor
+
+	// Fetch all virtual machines on the hypervisor
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
+	if err != nil {
+		// Abort eviction
+		err = fmt.Errorf("failed to get hypervisor %w", err)
+		r.addErrorCondition(ctx, req.client, eviction, err)
+		return ctrl.Result{}, nil
+	}
+
+	if err = r.disableHypervisor(ctx, req, hypervisor, eviction); err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not disable the hypervisor %v due to %w", hypervisorName, err)
+	}
+
+	// Update status
+	eviction.Status.HypervisorServiceId = hypervisor.ID
+	eviction.Status.EvictionState = Running
+	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+		Type:    Reconciling,
+		Status:  metav1.ConditionTrue,
+		Message: Reconciling,
+		Reason:  Reconciling,
+	})
+	if err := req.client.Status().Update(ctx, eviction); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Go on with the normal reconciliation
+	return reconcile.Result{Requeue: true}, nil
 }
 
 func (r *EvictionReconciler) evictAll(ctx context.Context, hypervisor *openstack.Hypervisor, req request, eviction *kvmv1.Eviction) (success bool) {
@@ -188,35 +206,17 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 	return fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)
 }
 
-func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) (bool, error) {
-	containsFinalizer := controllerutil.ContainsFinalizer(eviction, finalizerName)
-	// Not being deleted
-	if eviction.DeletionTimestamp.IsZero() {
-		if !containsFinalizer {
-			controllerutil.AddFinalizer(eviction, finalizerName)
-			if err := client.Update(ctx, eviction); err != nil {
-				return false, err
-			}
-		}
-	} else {
-		// being deleted
-		if controllerutil.RemoveFinalizer(eviction, finalizerName) {
-			if eviction.Status.EvictionState != "" && eviction.Status.EvictionState != "Pending" {
-				// Cannot have been disabled, so no need to re-enable either
-				if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
-					return false, err
-				}
-			}
-
-			if err := client.Update(ctx, eviction); err != nil {
-				return false, err
-			}
+func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
+	if controllerutil.RemoveFinalizer(eviction, finalizerName) {
+		if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
+			return err
 		}
 
-		return true, nil
+		if err := client.Update(ctx, eviction); err != nil {
+			return err
+		}
 	}
-
-	return false, nil
+	return nil
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
@@ -247,6 +247,12 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request,
 	if hypervisor.Service.DisabledReason != nil && hypervisor.Service.DisabledReason != "" {
 		r.addProgressCondition(ctx, req.client, eviction, "Found host already disabled", "Update")
 	} else {
+		if controllerutil.AddFinalizer(eviction, finalizerName) {
+			if err := req.client.Update(ctx, eviction); err != nil {
+				return err
+			}
+		}
+
 		disableService := services.UpdateOpts{Status: services.ServiceDisabled,
 			DisabledReason: r.evictionReason(eviction)}
 

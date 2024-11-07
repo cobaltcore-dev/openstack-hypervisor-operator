@@ -185,6 +185,8 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus.Reason).To(Equal("Failed"))
 					Expect(reconcileStatus.Message).To(ContainSubstring("no hypervisor found"))
 					Expect(resource.Status.HypervisorServiceId).To(Equal(""))
+
+					Expect(resource.GetFinalizers()).To(BeEmpty())
 				})
 
 			})
@@ -221,6 +223,8 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
 					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
+
+					Expect(resource.GetFinalizers()).NotTo(BeEmpty())
 				})
 			})
 			When("disabled hypervisor has no servers", func() {
@@ -255,6 +259,8 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
 					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
+
+					Expect(resource.GetFinalizers()).To(BeEmpty())
 				})
 			})
 		})
