@@ -43,12 +43,14 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/scheduler"
 )
 
 const (
 	EVICTION_REQUIRED_LABEL = "cloud.sap/hypervisor-eviction-required"
 	EVICTION_APPROVED_LABEL = "cloud.sap/hypervisor-eviction-succeeded"
 	HOST_LABEL              = "kubernetes.metal.cloud.sap/host"
+	ZONE_LABEL              = "topology.kubernetes.io/zone"
 	MANAGED_BY              = "app.kubernetes.io/managed-by"
 	MANAGER_NAME            = "openstack-node-controller"
 	// Changing MANAGER_NAME will cause the app to lose track of already
@@ -57,6 +59,7 @@ const (
 
 type NodeReconciler struct {
 	serviceClient *gophercloud.ServiceClient
+	scheduler     scheduler.Scheduler
 }
 
 type NodeMetadata = metav1.PartialObjectMetadata
@@ -108,6 +111,15 @@ func (r *NodeReconciler) reconcileNode(ctx context.Context, req nodeControllerRe
 
 	if changed {
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if zone, found := node.Labels[ZONE_LABEL]; found {
+		err = r.scheduler.EnsureHypervisorAvailabilityZone(ctx, node.Name, zone)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		log.Info("no zone label for node found")
 	}
 
 	err = r.reconcileEvictionForNode(ctx, req.client, node, host, req.state)
@@ -247,7 +259,7 @@ func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters map[string]cluster.Cluster) error {
+func (r *NodeReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Cluster, sched scheduler.Scheduler) error {
 	_ = logger.FromContext(context.Background())
 
 	var err error
@@ -258,6 +270,8 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 	if !strings.HasSuffix(r.serviceClient.Endpoint, "v2.0/") {
 		r.serviceClient.ResourceBase = r.serviceClient.Endpoint + "v2.0/"
 	}
+
+	r.scheduler = sched
 
 	b := builder.TypedControllerManagedBy[nodeControllerRequest](mgr).
 		Named(MANAGER_NAME)
@@ -284,11 +298,13 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 				}}
 			}),
 			predicate.TypedFuncs[*NodeMetadata]{
+				CreateFunc: func(tce event.TypedCreateEvent[*NodeMetadata]) bool { return true },
 				UpdateFunc: func(e event.TypedUpdateEvent[*NodeMetadata]) bool {
 					newValue := e.ObjectNew.Labels[EVICTION_REQUIRED_LABEL]
 					oldValue := e.ObjectOld.Labels[EVICTION_REQUIRED_LABEL]
 
-					return newValue != oldValue
+					return newValue != oldValue ||
+						e.ObjectNew.Labels[ZONE_LABEL] != e.ObjectOld.Labels[ZONE_LABEL]
 				},
 				DeleteFunc:  func(e event.TypedDeleteEvent[*NodeMetadata]) bool { return false },
 				GenericFunc: func(e event.TypedGenericEvent[*NodeMetadata]) bool { return false },

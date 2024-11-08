@@ -19,15 +19,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
-	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,13 +35,43 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/scheduler"
 )
+
+type MockScheduler struct {
+	scheduler.Scheduler
+	hypervisor                *openstack.Hypervisor
+	tryAcquireHypervisorError error
+	pollHypervisorError       error
+	disableHypervisorError    error
+	enableHypervisorError     error
+}
+
+func (s *MockScheduler) TryAcquireHypervisor(ctx context.Context, hypervisorName string) (*openstack.Hypervisor, error) {
+	return s.hypervisor, s.tryAcquireHypervisorError
+}
+
+func (s *MockScheduler) UndoAcquireHypervisor(hypervisorName string) {
+}
+
+func (s *MockScheduler) PollHypervisor(ctx context.Context, hypervisorName string, withServers bool) (*openstack.Hypervisor, error) {
+	return s.hypervisor, s.pollHypervisorError
+}
+
+func (s *MockScheduler) DisableHypervisor(ctx context.Context, hypervisorName, reason string) error {
+	return s.disableHypervisorError
+}
+
+func (s *MockScheduler) EnableHypervisor(ctx context.Context, hypervisorName, reason string) error {
+	return s.enableHypervisorError
+}
 
 var _ = Describe("Eviction Controller", func() {
 	const resourceName = "test-resource"
 	const hypervisorName = "test-hypervisor"
-	const serviceId = "test-id"
 	var controllerReconciler *EvictionReconciler
+	var mockScheduler *MockScheduler
 
 	ctx := context.Background()
 	typeNamespacedName := types.NamespacedName{
@@ -69,7 +99,7 @@ var _ = Describe("Eviction Controller", func() {
 		resource := &kvmv1.Eviction{}
 		err := k8sClient.Get(ctx, typeNamespacedName, resource)
 		if err != nil {
-			if !errors.IsNotFound(err) {
+			if !k8serrors.IsNotFound(err) {
 				Expect(err).ShouldNot(HaveOccurred())
 			}
 		} else {
@@ -153,22 +183,23 @@ var _ = Describe("Eviction Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
+				By("Creating the scheduler")
+
+				mockScheduler = &MockScheduler{}
+
 				By("Creating the controller")
 				controllerReconciler = &EvictionReconciler{
 					serviceClient: client.ServiceClient(),
+					scheduler:     mockScheduler,
 					rand:          rand.New(rand.NewSource(42)),
 				}
 			})
 
 			When("hypervisor is not found in openstack", func() {
+				const errorString = "no hypervisor found"
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": []}`)).ToNot(BeNil())
-					})
+					mockScheduler.tryAcquireHypervisorError = errors.New(errorString)
 				})
-
 				It("should fail reconciliation", func() {
 					_, err := reconcileLoop(1)
 					Expect(err).To(HaveOccurred())
@@ -182,7 +213,7 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
 					Expect(reconcileStatus.Reason).To(Equal("Failed"))
-					Expect(reconcileStatus.Message).To(ContainSubstring("no hypervisor found"))
+					Expect(reconcileStatus.Message).To(ContainSubstring(errorString))
 					Expect(resource.Status.HypervisorServiceId).To(Equal(""))
 
 					Expect(resource.GetFinalizers()).To(BeEmpty())
@@ -191,16 +222,7 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("enabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v"}, "servers": [], "status": "enabled", "state": "up", "hypervisor_hostname": %q}]}`, serviceId, hypervisorName)).ToNot(BeNil())
-					})
-					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
-					})
+					mockScheduler.hypervisor = &openstack.Hypervisor{HypervisorHostname: hypervisorName, Status: "enabled"}
 				})
 				It("should succeed the reconciliation", func() {
 					_, err := reconcileLoop(4)
@@ -228,15 +250,8 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("disabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up", "hypervisor_hostname": %q}]}`, serviceId, hypervisorName)).ToNot(BeNil())
-					})
-					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
-					})
+					mockScheduler.hypervisor = &openstack.Hypervisor{HypervisorHostname: hypervisorName, Status: "disabled"}
+					mockScheduler.hypervisor.Service.DisabledReason = "Who knows"
 				})
 				It("should succeed the reconciliation", func() {
 					_, err := reconcileLoop(4)

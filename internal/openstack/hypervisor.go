@@ -19,11 +19,69 @@ package openstack
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"hash/fnv"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
+	hypervisorsv2 "github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 )
+
+var _QUOTED = regexp.MustCompile(`"([^"]+)"`)
+var _KV = regexp.MustCompile(`"([^"]+)":([0-9]+)`)
+
+type topology struct {
+	Cells   int `json:"cells"`
+	Cores   int `json:"cores"`
+	Sockets int `json:"sockets"`
+	Threads int `json:"threads"`
+}
+
+func (t *topology) UnmarshalJSON(b []byte) (err error) {
+	s := string(b)
+	for _, match := range _KV.FindAllStringSubmatch(s, -1) {
+		var i int
+		i, err = strconv.Atoi(match[2])
+		if err != nil {
+			return
+		}
+		switch match[1] {
+		case "cells":
+			t.Cells = i
+		case "cores":
+			t.Cores = i
+		case "sockets":
+			t.Sockets = i
+		case "threads":
+			t.Threads = i
+		}
+	}
+	return
+}
+
+type features []string
+
+func (f *features) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	for _, match := range _QUOTED.FindAllStringSubmatch(s, -1) {
+		*f = append(*f, match[1])
+	}
+	slices.Sort(*f)
+	return nil
+}
+
+type cpuInfo struct {
+	Arch     string    `json:"arch"`
+	Model    string    `json:"model"`
+	Vendor   string    `json:"vendor"`
+	Features features  `json:"features"` // Neither []string, nor *[]string worked
+	Topology *topology `json:"topology"`
+}
 
 type hypervisorServer struct {
 	Name string `json:"name"`
@@ -31,23 +89,23 @@ type hypervisorServer struct {
 }
 
 type Hypervisor struct {
-	CPUInfo            string `json:"cpu_info"`
-	CurrentWorkload    int    `json:"current_workload"`
-	DiskAvailableLeast any    `json:"disk_available_least"`
-	FreeDiskGb         int64  `json:"free_disk_gb"`
-	FreeRAMMb          int64  `json:"free_ram_mb"`
-	HostIP             string `json:"host_ip"`
-	HypervisorHostname string `json:"hypervisor_hostname"`
-	HypervisorType     string `json:"hypervisor_type"`
-	HypervisorVersion  int    `json:"hypervisor_version"`
-	ID                 string `json:"id"`
-	LocalGb            int64  `json:"local_gb"`
-	LocalGbUsed        int64  `json:"local_gb_used"`
-	MemoryMb           int64  `json:"memory_mb"`
-	MemoryMbUsed       int64  `json:"memory_mb_used"`
-	RunningVms         int    `json:"running_vms"`
+	CPUInfo            cpuInfo `json:"cpu_info"`
+	CurrentWorkload    int     `json:"current_workload"`
+	DiskAvailableLeast any     `json:"disk_available_least"`
+	FreeDiskGb         int64   `json:"free_disk_gb"`
+	FreeRAMMb          int64   `json:"free_ram_mb"`
+	HostIP             string  `json:"host_ip"`
+	HypervisorHostname string  `json:"hypervisor_hostname"`
+	HypervisorType     string  `json:"hypervisor_type"`
+	HypervisorVersion  int     `json:"hypervisor_version"`
+	ID                 string  `json:"id"`
+	LocalGb            int64   `json:"local_gb"`
+	LocalGbUsed        int64   `json:"local_gb_used"`
+	MemoryMb           int64   `json:"memory_mb"`
+	MemoryMbUsed       int64   `json:"memory_mb_used"`
+	RunningVms         int     `json:"running_vms"`
 	Service            struct {
-		DisabledReason any    `json:"disabled_reason"`
+		DisabledReason string `json:"disabled_reason"`
 		Host           string `json:"host"`
 		ID             string `json:"id"`
 	} `json:"service"`
@@ -61,20 +119,47 @@ type HyperVisorsDetails struct {
 	Hypervisors []Hypervisor `json:"hypervisors"`
 }
 
-func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string, withServers bool) (*Hypervisor, error) {
-	listOpts := hypervisors.ListOpts{
-		HypervisorHostnamePattern: &hypervisorHostnamePattern,
+// Gives a unique identifier for all hypervisors which should be compatible
+// Missing is the availability-zone
+func (h Hypervisor) GetHypervisorClassId() uint64 {
+	hasher := fnv.New64()
+	hasher.Write([]byte(h.HypervisorType))
+	hasher.Write([]byte(h.CPUInfo.Model))
+	/* That seems too specific. Need to figure out, which feature flags matter
+	for _, feature := range h.CPUInfo.Features {
+		hasher.Write([]byte(feature))
+	}
+	*/
+
+	if h.CPUInfo.Topology != nil {
+		bs := make([]byte, 4)
+		binary.LittleEndian.PutUint32(bs, uint32(h.CPUInfo.Topology.Cells))
+		hasher.Write(bs)
+		binary.LittleEndian.PutUint32(bs, uint32(h.CPUInfo.Topology.Sockets))
+		hasher.Write(bs)
+		binary.LittleEndian.PutUint32(bs, uint32(h.CPUInfo.Topology.Cores))
+		hasher.Write(bs)
+		binary.LittleEndian.PutUint32(bs, uint32(h.CPUInfo.Topology.Threads))
+		hasher.Write(bs)
+	}
+
+	return hasher.Sum64()
+}
+
+func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostname string, withServers bool) (*Hypervisor, error) {
+	listOpts := hypervisorsv2.ListOpts{
+		HypervisorHostnamePattern: &hypervisorHostname,
 		WithServers:               &withServers,
 	}
 
-	pages, err := hypervisors.List(sc, listOpts).AllPages(ctx)
+	pages, err := hypervisorsv2.List(sc, listOpts).AllPages(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// due some(tm) bug, gohperclouds hypervisors.ExtractPage is failing
 	h := &HyperVisorsDetails{}
-	if err = (pages.(hypervisors.HypervisorPage)).ExtractInto(h); err != nil {
+	if err = (pages.(hypervisorsv2.HypervisorPage)).ExtractInto(h); err != nil {
 		return nil, err
 	}
 
@@ -84,5 +169,42 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 		return nil, errors.New("multiple hypervisors found")
 	}
 
-	return &h.Hypervisors[0], nil
+	for _, hypervisor := range h.Hypervisors {
+		if strings.HasPrefix(hypervisor.HypervisorHostname, hypervisorHostname) {
+			return &hypervisor, nil
+		}
+	}
+
+	return nil, fmt.Errorf("could not find exact match")
+}
+
+// GetHypervisors returns a list of hypervisors that are candidates for migration.
+func GetHypervisors(ctx context.Context, sc *gophercloud.ServiceClient) (hypervisors []Hypervisor, err error) {
+	pages, err := hypervisorsv2.List(sc, hypervisorsv2.ListOpts{}).AllPages(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// due some(tm) bug, gopherclouds hypervisors.ExtractPage is failing
+	var h HyperVisorsDetails
+	if err = (pages.(hypervisorsv2.HypervisorPage)).ExtractInto(&h); err != nil {
+		return nil, err
+	}
+
+	for _, hv := range h.Hypervisors {
+		if hv.HypervisorType != "QEMU" {
+			continue
+		}
+
+		hypervisors = append(hypervisors, hv)
+	}
+
+	return
+}
+
+func GetHypervisorById(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorID string) (hypervisor *Hypervisor, err error) {
+	hypervisor = &Hypervisor{}
+	err = hypervisorsv2.Get(ctx, sc, hypervisorID).ExtractInto(hypervisor)
+	return
 }

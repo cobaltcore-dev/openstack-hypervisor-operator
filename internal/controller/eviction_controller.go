@@ -28,7 +28,6 @@ import (
 	"github.com/go-openapi/swag"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,11 +43,13 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/scheduler"
 )
 
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
 	serviceClient *gophercloud.ServiceClient
+	scheduler     scheduler.Scheduler
 	rand          *rand.Rand
 }
 
@@ -107,6 +108,11 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 		return r.evictNext(ctx, req, eviction)
 	}
 
+	_, err := r.scheduler.PollHypervisor(ctx, eviction.Spec.Hypervisor, false)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
 		Status:  metav1.ConditionTrue,
@@ -122,9 +128,7 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 
 func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
-
-	// Does the hypervisor even exist? Is it enabled/disabled?
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, false)
+	hypervisor, err := r.scheduler.TryAcquireHypervisor(ctx, hypervisorName)
 	if err != nil {
 		// Abort eviction
 		err = fmt.Errorf("failed to get hypervisor %w", err)
@@ -132,11 +136,19 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		return ctrl.Result{}, err
 	}
 
+	// no error, but also couldn't reserve the hypervisor, that means no resources
+	if hypervisor == nil {
+		r.addProgressCondition(ctx, req.client, eviction, "Not enough resources", "Pending")
+		return ctrl.Result{
+			RequeueAfter: time.Minute * 5,
+		}, nil
+	}
+
 	log := logger.FromContext(ctx)
 	currentHypervisor, _, _ := strings.Cut(hypervisor.HypervisorHostname, ".")
 	if currentHypervisor != hypervisorName {
 		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, hypervisorName)
-		log.Error(err, "Hpyervisor name mismatch")
+		log.Error(err, "Hypervisor name mismatch")
 		if eviction.Status.EvictionState != Failed ||
 			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 				Type:    "Eviction",
@@ -153,16 +165,21 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		return ctrl.Result{}, nil
 	}
 
+	// It doesn't hurt to do that at a later time, we just need to have it
+	// around long enough, so that we can actually disable the host.
+	// If anything fails now, we will retry all of it and either we succeeded
+	// in disabling the host, and the reservation is not needed any more,
+	// or we failed to reserve it, and then will do same dance again.
+	defer r.scheduler.UndoAcquireHypervisor(hypervisorName)
+
 	crdModified, err := r.disableHypervisor(ctx, req, hypervisor, eviction)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not disable the hypervisor %v due to %w", hypervisorName, err)
-	}
-	if crdModified {
-		return ctrl.Result{}, nil
+	if err != nil || crdModified {
+		return ctrl.Result{}, err
 	}
 
+	hypervisor, err = r.scheduler.PollHypervisor(ctx, hypervisorName, true)
+
 	// Fetch all virtual machines on the hypervisor
-	hypervisor, err = openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, true)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -294,7 +311,8 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
 	if controllerutil.RemoveFinalizer(eviction, finalizerName) {
-		if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
+		err := r.scheduler.EnableHypervisor(ctx, eviction.Spec.Hypervisor, r.evictionReason(eviction))
+		if err != nil {
 			return err
 		}
 
@@ -305,31 +323,11 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.
 	return nil
 }
 
-func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
-	if err != nil {
-		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)
-		// Abort eviction
-		r.addErrorCondition(ctx, client, eviction, err2)
-		return err
-	}
-
-	if hypervisor.Service.DisabledReason != r.evictionReason(eviction) {
-		return nil
-	}
-
-	log := logger.FromContext(ctx)
-	enableService := services.UpdateOpts{Status: services.ServiceEnabled}
-	log.Info("Enabling hypervisor", "id", hypervisor.Service.ID)
-	_, err = services.Update(ctx, r.serviceClient, hypervisor.Service.ID, enableService).Extract()
-	return err
-}
-
 func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request, hypervisor *openstack.Hypervisor, eviction *kvmv1.Eviction) (bool, error) {
 	evictionReason := r.evictionReason(eviction)
 	disabledReason := hypervisor.Service.DisabledReason
 
-	if disabledReason != nil && disabledReason != "" && disabledReason != evictionReason {
+	if disabledReason != "" && disabledReason != evictionReason {
 		// Disabled for another reason already
 		return r.addProgressCondition(ctx, req.client, eviction, "Found host already disabled", "Update"), nil
 	}
@@ -342,10 +340,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request,
 		return false, nil
 	}
 
-	disableService := services.UpdateOpts{Status: services.ServiceDisabled,
-		DisabledReason: r.evictionReason(eviction)}
-
-	_, err := services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
+	err := r.scheduler.DisableHypervisor(ctx, eviction.Spec.Hypervisor, r.evictionReason(eviction))
 	if err != nil {
 		return r.addErrorCondition(ctx, req.client, eviction, err), err
 	}
@@ -417,14 +412,17 @@ func (r *EvictionReconciler) addErrorCondition(ctx context.Context, client clien
 	return r.addCondition(ctx, client, eviction, metav1.ConditionFalse, err.Error(), Failed)
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *EvictionReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters map[string]cluster.Cluster) error {
-	_ = logger.FromContext(context.Background())
+// Setup sets up the controller with the Manager and related items
+func (r *EvictionReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Cluster, scheduler scheduler.Scheduler) error {
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 	r.serviceClient.Microversion = "2.90" // Xena (or later)
+	r.scheduler = scheduler
+
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	b := builder.TypedControllerManagedBy[request](mgr).Named("eviction-controller")

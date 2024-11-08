@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/scheduler"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -140,6 +142,13 @@ func main() {
 	}
 	restConfig := ctrl.GetConfigOrDie()
 
+	ctx := context.Background()
+	sched, err := scheduler.NewScheduler(ctx)
+	if err != nil {
+		setupLog.Error(err, "unable to setup scheduler")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -203,12 +212,12 @@ func main() {
 		allClusters[context] = cluster
 	}
 
-	if err = (&controller.EvictionReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
+	if err = (&controller.EvictionReconciler{}).Setup(mgr, allClusters, sched); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Eviction")
 		os.Exit(1)
 	}
 
-	if err = (&controller.NodeReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
+	if err = (&controller.NodeReconciler{}).Setup(mgr, allClusters, sched); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
