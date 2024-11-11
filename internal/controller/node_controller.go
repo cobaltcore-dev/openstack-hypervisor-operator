@@ -142,9 +142,14 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Cl
 		Namespace: "monsoon3", // todo: change to the correct namespace or use cluster scoped CRs
 	}}
 
-	if !neededFound && !approvedFound {
-		return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
+	if !neededFound {
+		if !approvedFound {
+			return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
+		} else {
+			return nil
+		}
 	}
+
 	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
 		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, neededValue)
