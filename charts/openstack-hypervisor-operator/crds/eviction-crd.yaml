@@ -55,6 +55,9 @@ spec:
                 description: Name of hypervisor to evict
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: Value is immutable
+                  rule: self == oldSelf
               reason:
                 description: Reason for eviction, always required
                 minLength: 1

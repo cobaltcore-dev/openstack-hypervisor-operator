@@ -28,6 +28,7 @@ import (
 type EvictionSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 
 	// Name of hypervisor to evict
 	Hypervisor string `json:"hypervisor"`
