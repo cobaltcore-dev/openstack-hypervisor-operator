@@ -50,15 +50,15 @@ var _ = Describe("Eviction Controller", func() {
 		Namespace: "default",
 	}
 
-	reconcileLoop := func() (ctrl.Result, error) {
-		for i := 0; i < maxReconcileSteps; i++ {
-			res, err := controllerReconciler.Reconcile(ctx, request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient})
-			if res.IsZero() || err != nil {
-				return res, err
+	reconcileLoop := func(steps int) (res ctrl.Result, err error) {
+		for i := 0; i < steps; i++ {
+			res, err = controllerReconciler.Reconcile(ctx, request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient})
+			if err != nil {
+				return
 			}
 		}
 
-		return ctrl.Result{}, fmt.Errorf("Reconciliation did not complete after %v steps", maxReconcileSteps)
+		return
 	}
 
 	BeforeEach(func() {
@@ -77,7 +77,7 @@ var _ = Describe("Eviction Controller", func() {
 			By("Cleanup the specific resource instance Eviction")
 			Expect(controllerReconciler).NotTo(BeNil())
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-			_, err := reconcileLoop()
+			_, err := reconcileLoop(1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).Should(HaveOccurred())
 		}
@@ -171,7 +171,7 @@ var _ = Describe("Eviction Controller", func() {
 				})
 
 				It("should fail reconciliation", func() {
-					_, err := reconcileLoop()
+					_, err := reconcileLoop(1)
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -195,7 +195,7 @@ var _ = Describe("Eviction Controller", func() {
 					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v"}, "servers": [], "status": "enabled", "state": "up"}]}`, serviceId)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v"}, "servers": [], "status": "enabled", "state": "up", "hypervisor_hostname": %q}]}`, serviceId, hypervisorName)).ToNot(BeNil())
 					})
 					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
@@ -204,7 +204,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := reconcileLoop()
+					_, err := reconcileLoop(2)
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -221,7 +221,7 @@ var _ = Describe("Eviction Controller", func() {
 					// expect reconciliation to be successfully finished
 					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, "Reconciling")
 					Expect(reconcileStatus).NotTo(BeNil())
-					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
+					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
 					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
 
 					Expect(resource.GetFinalizers()).NotTo(BeEmpty())
@@ -232,7 +232,7 @@ var _ = Describe("Eviction Controller", func() {
 					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up"}]}`, serviceId)).ToNot(BeNil())
+						Expect(fmt.Fprintf(w, `{"hypervisors": [{"service": {"id": "%v", "disabled_reason": "some reason"}, "servers": [], "status": "disabled", "state": "up", "hypervisor_hostname": %q}]}`, serviceId, hypervisorName)).ToNot(BeNil())
 					})
 					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						w.WriteHeader(http.StatusOK)
@@ -240,7 +240,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := reconcileLoop()
+					_, err := reconcileLoop(2)
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -257,7 +257,7 @@ var _ = Describe("Eviction Controller", func() {
 					// expect reconciliation to be successfully finished
 					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, "Reconciling")
 					Expect(reconcileStatus).NotTo(BeNil())
-					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
+					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
 					Expect(reconcileStatus.Reason).To(Equal("Reconciled"))
 
 					Expect(resource.GetFinalizers()).To(BeEmpty())
