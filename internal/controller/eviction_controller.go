@@ -21,6 +21,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-openapi/swag"
@@ -71,59 +73,48 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	log := logger.FromContext(ctx).WithName("Eviction").WithValues("hypervisor", eviction.Spec.Hypervisor, "status", eviction.Status.EvictionState)
+	ctx = logger.IntoContext(ctx, log)
 	// Being deleted
 	if !eviction.DeletionTimestamp.IsZero() {
 		err := r.handleFinalizer(ctx, req.client, eviction)
+		log.Info("deleted")
 		return ctrl.Result{}, err
 	}
 
 	switch eviction.Status.EvictionState {
 	case Succeeded, "Error":
 		// Nothing left to be done
+		log.Info("finished")
 		return ctrl.Result{}, nil
 	case "Pending", "":
 		// Let's see if we can take it up
 		eviction.Status.EvictionState = "Pending" // "" -> "Pending: Fixes the test
+		log.Info("setup")
 		return r.handlePending(ctx, eviction, req)
 	}
 
-	// That should leave us with "Running" and the hypervisor should be deactivated
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, true)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Update status
-	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
-	if err := req.client.Status().Update(ctx, eviction); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Evict all virtual machines
-	if !r.evictAll(ctx, hypervisor, req, eviction) {
-		// Requeue after 30 seconds on error
-		return ctrl.Result{
-			Requeue:      true,
-			RequeueAfter: time.Second * 30,
-		}, nil
+	if len(eviction.Status.OutstandingInstances) > 0 {
+		return r.evictNext(ctx, req, eviction)
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
-		Status:  metav1.ConditionFalse,
+		Status:  metav1.ConditionTrue,
 		Message: Reconciled,
 		Reason:  Reconciled,
 	})
 
 	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
+	log.Info("succeeded")
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
 
 func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
 
-	// Fetch all virtual machines on the hypervisor
+	// Does the hypervisor even exist? Is it enabled/disabled?
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		// Abort eviction
@@ -132,74 +123,145 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		return ctrl.Result{}, nil
 	}
 
+	currentHypervisor, _, _ := strings.Cut(hypervisor.HypervisorHostname, ".")
+	if currentHypervisor != eviction.Spec.Hypervisor {
+		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, eviction.Spec.Hypervisor)
+		r.addErrorCondition(ctx, req.client, eviction, err)
+		return ctrl.Result{}, err
+	}
+
 	if err = r.disableHypervisor(ctx, req, hypervisor, eviction); err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not disable the hypervisor %v due to %w", hypervisorName, err)
+	}
+
+	// Fetch all virtual machines on the hypervisor
+	hypervisor, err = openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, true)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var uuids []string
+	if hypervisor.Servers == nil {
+		uuids = make([]string, 0)
+	} else {
+		uuids = make([]string, len(*hypervisor.Servers))
+		for i, server := range *hypervisor.Servers {
+			uuids[i] = server.UUID
+		}
 	}
 
 	// Update status
 	eviction.Status.HypervisorServiceId = hypervisor.ID
 	eviction.Status.EvictionState = Running
+	eviction.Status.OutstandingInstances = uuids
+	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
 		Status:  metav1.ConditionTrue,
 		Message: Reconciling,
 		Reason:  Reconciling,
 	})
-	if err := req.client.Status().Update(ctx, eviction); err != nil {
-		return ctrl.Result{}, err
-	}
 
-	// Go on with the normal reconciliation
-	return reconcile.Result{Requeue: true}, nil
+	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) evictAll(ctx context.Context, hypervisor *openstack.Hypervisor, req request, eviction *kvmv1.Eviction) (success bool) {
-	success = true
-	if hypervisor.Servers == nil {
-		return success
+func (r *EvictionReconciler) evictNext(ctx context.Context, req request, eviction *kvmv1.Eviction) (reconcile.Result, error) {
+	instances := &eviction.Status.OutstandingInstances
+	uuid := (*instances)[len(*instances)-1]
+	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
+
+	res := servers.Get(ctx, r.serviceClient, uuid)
+	vm, err := res.Extract()
+
+	if err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			log.Info("Instance is gone")
+			*instances = (*instances)[:len(*instances)-1]
+			return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+		}
+		return reconcile.Result{}, err
 	}
-	for _, server := range *hypervisor.Servers {
-		res := servers.Get(ctx, r.serviceClient, server.UUID)
-		vm, err := res.Extract()
-		if err != nil {
-			success = false
-			err = fmt.Errorf("failed to get server %v due to %w", vm.ID, err)
-			r.addErrorCondition(ctx, req.client, eviction, err)
-			continue
+
+	log = log.WithValues("server_status", vm.Status)
+
+	currentHypervisor, _, _ := strings.Cut(vm.HypervisorHostname, ".")
+
+	if currentHypervisor != eviction.Spec.Hypervisor {
+		log.Info("migrated")
+		// So, it is already off this one, do we need to verify it?
+		if vm.Status == "VERIFY_RESIZE" {
+			if err := servers.ConfirmResize(ctx, r.serviceClient, vm.ID).ExtractErr(); err != nil {
+				if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+					log.Info("Instance is gone")
+					// Fall-back to beginning, which will clean it out
+					return reconcile.Result{Requeue: true}, nil
+				}
+				// Retry confirm in next reconciliation
+				return reconcile.Result{}, err
+			}
 		}
 
-		if vm.HypervisorHostname != hypervisor.HypervisorHostname {
-			// Someone else might have triggered a migration (in parallel)
-			continue
+		// All done
+		*instances = (*instances)[:len(*instances)-1]
+		return reconcile.Result{}, req.client.Status().Update(ctx, eviction)
+	}
+
+	switch vm.Status {
+	case "MIGRATING", "RESIZE":
+		// wait for the migration to finish
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	case "ERROR":
+		// Needs manual intervention (or another operator fixes it)
+		// put it at the end of the list (beginning of array)
+		copy((*instances)[1:], (*instances)[:len(*instances)-1])
+		(*instances)[0] = uuid
+		log.Info("error", "faultMessage", vm.Fault.Message)
+		if err := req.client.Status().Update(ctx, eviction); err != nil {
+			return ctrl.Result{}, err
 		}
 
-		vmIsActive := vm.Status == "ACTIVE" || vm.PowerState == 1
+		return reconcile.Result{}, fmt.Errorf("error migrating instance %v", uuid)
+	}
 
-		switch vm.Status {
-		case "MIGRATING", "RESIZE":
-			// wait for migration to finish
-			if !r.waitForMigration(ctx, req.client, vm, eviction) {
-				success = false
+	if vm.Status == "ACTIVE" || vm.PowerState == 1 {
+		log.Info("trigger live-migration")
+		if err := r.liveMigrate(ctx, req.client, vm.ID, eviction); err != nil {
+			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+				log.Info("Instance is gone")
+				// Fall-back to beginning, which will clean it out
+				return reconcile.Result{Requeue: true}, nil
 			}
-			continue
-		case "ERROR":
-			// Needs manual intervention (or another operator fixes it)
-			success = false
-			continue
-		default:
+			copy((*instances)[1:], (*instances)[:len(*instances)-1])
+			(*instances)[0] = uuid
+
+			if err2 := req.client.Status().Update(ctx, eviction); err != nil {
+				return ctrl.Result{}, fmt.Errorf("could not live-migrate due to %w and %w", err, err2)
+			}
+
+			return ctrl.Result{}, err
 		}
+	} else {
+		log.Info("trigger cold-migration")
+		if err := r.coldMigrate(ctx, req.client, vm.ID, eviction); err != nil {
+			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+				log.Info("Instance is gone")
+				return reconcile.Result{Requeue: true}, nil
+			}
+			copy((*instances)[1:], (*instances)[:len(*instances)-1])
+			(*instances)[0] = uuid
 
-		if vmIsActive {
-			if !r.liveMigrate(ctx, req.client, vm, eviction) {
-				success = false
+			if err2 := req.client.Status().Update(ctx, eviction); err != nil {
+				return ctrl.Result{}, fmt.Errorf("could not cold-migrate due to %w and %w", err, err2)
 			}
-		} else {
-			if !r.coldMigrate(ctx, req.client, vm, eviction) {
-				success = false
-			}
+
+			return ctrl.Result{}, err
 		}
 	}
-	return success
+
+	// Triggered a migration, give it a generous time to start, so we do not
+	// see the old state because the migration didn't start
+	log.Info("poll")
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 }
 
 func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
@@ -248,9 +310,12 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request,
 		r.addProgressCondition(ctx, req.client, eviction, "Found host already disabled", "Update")
 	} else {
 		if controllerutil.AddFinalizer(eviction, finalizerName) {
+			// The update only updates anything except the status subresource
+			saved := eviction.Status
 			if err := req.client.Update(ctx, eviction); err != nil {
 				return err
 			}
+			eviction.Status = saved
 		}
 
 		disableService := services.UpdateOpts{Status: services.ServiceDisabled,
@@ -272,93 +337,36 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request,
 	return nil
 }
 
-func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
+func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, uuid string, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 
 	liveMigrateOpts := servers.LiveMigrateOpts{
 		BlockMigration: swag.Bool(false),
 	}
 
-	res := servers.LiveMigrate(ctx, r.serviceClient, vm.ID, liveMigrateOpts)
+	res := servers.LiveMigrate(ctx, r.serviceClient, uuid, liveMigrateOpts)
 	if res.Err != nil {
-		err := fmt.Errorf("failed to evict VM %s due to %w", vm.ID, res.Err)
+		err := fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
 		r.addErrorCondition(ctx, client, eviction, err)
-		return false
+		return res.Err
 	}
 
-	log.Info("Live migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
-	return r.waitForMigration(ctx, client, vm, eviction)
+	log.Info("Live migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	return nil
 }
 
-func (r *EvictionReconciler) pollInstance(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
-	res := servers.Get(ctx, r.serviceClient, vm.ID)
-
-	// We are find with VMs being deleted, while we try to evict the host
-	if res.StatusCode == 404 {
-		return true
-	}
-
-	err := res.ExtractInto(vm)
-	if err == nil {
-		return true
-	}
-
-	err2 := fmt.Errorf("failed to poll server %s due to %w", vm.ID, err)
-	r.addErrorCondition(ctx, client, eviction, err2)
-	return false
-}
-
-func (r *EvictionReconciler) waitForMigration(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
-	if !r.pollInstance(ctx, client, vm, eviction) {
-		return false
-	}
-
-	log := logger.FromContext(ctx)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Monitoring of migration cancelled")
-			return false
-		default:
-			switch vm.Status {
-			case "ACTIVE", "SHUTOFF":
-				return true
-			case "RESIZE", "MIGRATING":
-				// Sleep and poll.
-				select {
-				case <-ctx.Done():
-					log.Info("Monitoring of migration cancelled")
-					return false
-				case <-time.After(1 * time.Second):
-					if !r.pollInstance(ctx, client, vm, eviction) {
-						return false
-					}
-				}
-			case "VERIFY_RESIZE":
-				if err := servers.ConfirmResize(ctx, r.serviceClient, vm.ID).ExtractErr(); err != nil {
-					log.Error(err, "ColdMigration")
-					return false
-				}
-			default:
-				log.Info("Unexpected state when migrating", "vm", vm.ID, "status", vm.Status)
-				return false
-			}
-		}
-	}
-}
-
-func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Client, vm *servers.Server, eviction *kvmv1.Eviction) bool {
+func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Client, uuid string, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 
-	res := servers.Migrate(ctx, r.serviceClient, vm.ID)
+	res := servers.Migrate(ctx, r.serviceClient, uuid)
 	if res.Err != nil {
-		err := fmt.Errorf("failed to evict stopped server %s due to %w", vm.ID, res.Err)
+		err := fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
 		r.addErrorCondition(ctx, client, eviction, err)
-		return false
+		return err
 	}
 
-	log.Info("Cold-migrating server", "server", vm.ID, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
-	return r.waitForMigration(ctx, client, vm, eviction)
+	log.Info("Cold-migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	return nil
 }
 
 // addCondition adds a condition to the Eviction status and updates the status

@@ -136,6 +136,10 @@ spec:
                 type: string
               hypervisorServiceId:
                 type: string
+              outstandingInstances:
+                items:
+                  type: string
+                type: array
               outstandingRamMb:
                 default: 0
                 type: integer
