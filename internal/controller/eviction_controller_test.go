@@ -204,7 +204,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := reconcileLoop(2)
+					_, err := reconcileLoop(4)
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
@@ -240,7 +240,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func() {
-					_, err := reconcileLoop(2)
+					_, err := reconcileLoop(4)
 					Expect(err).NotTo(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
