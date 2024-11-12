@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -205,11 +206,18 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 	b := builder.TypedControllerManagedBy[request](mgr).
 		Named("openstack-node-controller")
 
+	metaObj := &metav1.PartialObjectMetadata{}
+	gvk, err := apiutil.GVKForObject(&corev1.Node{}, mgr.GetScheme())
+	if err != nil {
+		return fmt.Errorf("unable to determine GVK of corev1.Node for a metadata-only watch: %w", err)
+	}
+	metaObj.SetGroupVersionKind(gvk)
+
 	for clusterName, cluster := range clusters {
 		b = b.WatchesRawSource(source.TypedKind(
 			cluster.GetCache(),
-			&corev1.Node{},
-			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, n *corev1.Node) []request {
+			metaObj,
+			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, n *metav1.PartialObjectMetadata) []request {
 				return []request{{
 					NamespacedName: types.NamespacedName{Namespace: n.Namespace, Name: n.Name},
 					clusterName:    clusterName,
