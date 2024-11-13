@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime" // Required for Watching
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -62,7 +61,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Resul
 	var node corev1.Node
 	if err := req.client.Get(ctx, req.NamespacedName, &node); err != nil {
 		// ignore not found errors, could be deleted
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
 	host, err := r.normalizeName(ctx, req.client, node)
@@ -85,7 +84,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Resul
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
 // kubernetes.metal.cloud.sap/node-ip
-func (r *NodeReconciler) normalizeName(ctx context.Context, client client.Client, node corev1.Node) (string, error) {
+func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Client, node corev1.Node) (string, error) {
 	if host, found := node.Labels[HOST_LABEL]; found {
 		return host, nil
 	}
@@ -133,7 +132,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, client client.Client
 }
 
 // reconcileEviction ensures that an eviction is created if the node has the maintenance label.
-func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Client, node corev1.Node, host string) error {
+func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient.Client, node corev1.Node, host string) error {
 	neededValue, neededFound := node.Labels[MAINTENANCE_NEEDED_LABEL]
 	_, approvedFound := node.Labels[MAINTENANCE_APPROVED_LABEL]
 
@@ -172,7 +171,7 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client client.Cl
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setHostLabel(ctx context.Context, client client.Client, node corev1.Node, host string) {
+func (r *NodeReconciler) setHostLabel(ctx context.Context, client k8sclient.Client, node corev1.Node, host string) {
 	err := r.setNodeLabels(ctx, client, node, map[string]string{
 		HOST_LABEL: host,
 	})
@@ -183,11 +182,11 @@ func (r *NodeReconciler) setHostLabel(ctx context.Context, client client.Client,
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setNodeLabels(ctx context.Context, c client.Client, node corev1.Node, labels map[string]string) error {
+func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, node corev1.Node, labels map[string]string) error {
 	newNode := node.DeepCopy()
 	maps.Copy(newNode.Labels, labels)
 
-	return c.Patch(ctx, newNode, client.MergeFrom(&node))
+	return c.Patch(ctx, newNode, k8sclient.MergeFrom(&node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
