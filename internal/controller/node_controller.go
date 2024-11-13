@@ -64,17 +64,17 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Resul
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	host, err := r.normalizeName(ctx, req.client, node)
+	host, changed, err := r.normalizeName(ctx, req.client, node)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	err = r.reconcileEviction(ctx, req.client, node, host)
-	if err != nil {
-		return ctrl.Result{}, err
+	if changed {
+		return ctrl.Result{Requeue: true}, nil
 	}
 
-	return ctrl.Result{}, nil
+	changed, err = r.reconcileEviction(ctx, req.client, node, host)
+	return ctrl.Result{Requeue: changed}, err
 }
 
 // normalizeName returns the host name of the node. If the host name is not set, it will be set to the node name.
@@ -84,9 +84,9 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req request) (ctrl.Resul
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
 // kubernetes.metal.cloud.sap/node-ip
-func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Client, node *corev1.Node) (string, error) {
+func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Client, node *corev1.Node) (string, bool, error) {
 	if host, found := node.Labels[HOST_LABEL]; found {
-		return host, nil
+		return host, false, nil
 	}
 
 	providerId := node.Spec.ProviderID
@@ -94,8 +94,8 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Cli
 	// openstack:/// is the prefix for Ironic nodes
 	if !strings.HasPrefix(providerId, "openstack:///") {
 		// Assumption: The node name will be correct
-		r.setHostLabel(ctx, client, node, node.Name)
-		return node.Name, nil
+		changed := r.setHostLabel(ctx, client, node, node.Name)
+		return node.Name, changed, nil
 	}
 
 	serverId := providerId[strings.LastIndex(providerId, "/")+1:]
@@ -106,33 +106,33 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Cli
 
 	pages, err := ports.List(r.serviceClient, listOpts).AllPages(ctx)
 	if err != nil {
-		return "", fmt.Errorf("could not retrieve ports for %v (%v) due to %w", node.Name, serverId, err)
+		return "", false, fmt.Errorf("could not retrieve ports for %v (%v) due to %w", node.Name, serverId, err)
 	}
 
 	nodePorts, err := ports.ExtractPorts(pages)
 	// will raise error, if no nodePorts have been found (404)
 	if err != nil {
-		return "", fmt.Errorf("could not extract ports for %v (%v) due to %w", node.Name, serverId, err)
+		return "", false, fmt.Errorf("could not extract ports for %v (%v) due to %w", node.Name, serverId, err)
 	}
 
 	if len(nodePorts) == 0 {
-		return "", fmt.Errorf("no Port found for %v (%v)", node.Name, serverId)
+		return "", false, fmt.Errorf("no Port found for %v (%v)", node.Name, serverId)
 	}
 
 	macAddress := nodePorts[0].MACAddress
 	host, err := netbox.GetHostName(ctx, macAddress)
 
 	if err != nil {
-		return host, err
+		return host, false, err
 	}
 
-	r.setHostLabel(ctx, client, node, host)
+	changed := r.setHostLabel(ctx, client, node, host)
 
-	return host, nil
+	return host, changed, nil
 }
 
 // reconcileEviction ensures that an eviction is created if the node has the maintenance label.
-func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient.Client, node *corev1.Node, host string) error {
+func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient.Client, node *corev1.Node, host string) (bool, error) {
 	requiredValue, requiredFound := node.Labels[MAINTENANCE_REQUIRED_LABEL]
 	_, approvedFound := node.Labels[MAINTENANCE_APPROVED_LABEL]
 
@@ -144,9 +144,9 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient
 
 	if !requiredFound {
 		if !approvedFound {
-			return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
+			return false, k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
 		} else {
-			return nil
+			return false, nil
 		}
 	}
 
@@ -157,36 +157,40 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient
 	})
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		err = r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
+		return r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
 	case "Failed":
-		err = r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
+		return r.setNodeLabels(ctx, client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
 	}
 
-	return err
+	return false, nil
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setHostLabel(ctx context.Context, client k8sclient.Client, node *corev1.Node, host string) {
-	err := r.setNodeLabels(ctx, client, node, map[string]string{
+func (r *NodeReconciler) setHostLabel(ctx context.Context, client k8sclient.Client, node *corev1.Node, host string) bool {
+	changed, err := r.setNodeLabels(ctx, client, node, map[string]string{
 		HOST_LABEL: host,
 	})
 	if err != nil {
 		log := logger.FromContext(ctx)
 		log.Error(err, "cannot set host label on node", "host", host)
 	}
+	return changed
 }
 
 // setHostLabel sets the host label on the node.
-func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, node *corev1.Node, labels map[string]string) error {
+func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, node *corev1.Node, labels map[string]string) (bool, error) {
 	newNode := node.DeepCopy()
 	maps.Copy(newNode.Labels, labels)
+	if maps.Equal(node.Labels, newNode.Labels) {
+		return false, nil
+	}
 
-	return c.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+	return true, c.Patch(ctx, newNode, k8sclient.MergeFrom(node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
