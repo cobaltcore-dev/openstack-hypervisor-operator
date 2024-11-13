@@ -24,66 +24,67 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 var _ = Describe("Node Controller", func() {
+	var nodeReconciler *NodeReconciler
+
 	Context("When reconciling a node", func() {
-		const resourceName = "node-test"
+		const nodeName = "node-test"
 
 		ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "monsoon3",
-		}
-		node := corev1.Node{}
-		generateReconcileRequest := func() request {
-			return request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient}
+		reconcileNodeLoop := func(steps int, state string) (res ctrl.Result, err error) {
+			req := nodeControllerRequest{kind: "Node",
+				namespacedName: types.NamespacedName{Name: nodeName},
+				clusterName:    "self",
+				client:         k8sClient,
+				state:          state,
+			}
+			for range steps {
+				res, err = nodeReconciler.Reconcile(ctx, req)
+				if err != nil {
+					return
+				}
+			}
+			return
 		}
 
 		BeforeEach(func() {
-			By("creating the core resource for the Kind Node")
-			err := k8sClient.Get(ctx, typeNamespacedName, &node)
-			if err != nil && errors.IsNotFound(err) {
-				ns := &corev1.Namespace{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "monsoon3",
-					},
-				}
-				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			nodeReconciler = &NodeReconciler{}
 
-				resource := &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      typeNamespacedName.Name,
-						Namespace: typeNamespacedName.Namespace,
-						Labels:    map[string]string{HOST_LABEL: "test", MAINTENANCE_REQUIRED_LABEL: "true"},
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			By("creating the namespace for the reconciler")
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+
+			By("creating the core resource for the Kind Node")
+			resource := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{HOST_LABEL: "test", MAINTENANCE_REQUIRED_LABEL: "true"},
+				},
 			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		})
 
 		AfterEach(func() {
-			resource := &corev1.Node{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance Eviction")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			By("Cleanup the specific node")
+			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
 		})
+
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			controllerReconciler := &NodeReconciler{}
-
-			_, err := controllerReconciler.Reconcile(ctx, generateReconcileRequest())
+			_, err := reconcileNodeLoop(1, "true")
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
