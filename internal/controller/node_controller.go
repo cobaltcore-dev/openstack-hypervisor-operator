@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	MAINTENANCE_NEEDED_LABEL   = "cloud.sap/maintenance-required"
+	MAINTENANCE_REQUIRED_LABEL = "cloud.sap/maintenance-required"
 	MAINTENANCE_APPROVED_LABEL = "cloud.sap/maintenance-approved"
 	HOST_LABEL                 = "kubernetes.metal.cloud.sap/host"
 )
@@ -133,7 +133,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Cli
 
 // reconcileEviction ensures that an eviction is created if the node has the maintenance label.
 func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient.Client, node *corev1.Node, host string) error {
-	neededValue, neededFound := node.Labels[MAINTENANCE_NEEDED_LABEL]
+	requiredValue, requiredFound := node.Labels[MAINTENANCE_REQUIRED_LABEL]
 	_, approvedFound := node.Labels[MAINTENANCE_APPROVED_LABEL]
 
 	name := fmt.Sprintf("maintenance-required-%v", host)
@@ -142,7 +142,7 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient
 		Namespace: "monsoon3", // todo: change to the correct namespace or use cluster scoped CRs
 	}}
 
-	if !neededFound {
+	if !requiredFound {
 		if !approvedFound {
 			return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
 		} else {
@@ -152,7 +152,7 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, client k8sclient
 
 	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Spec.Hypervisor = node.Name
-		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_NEEDED_LABEL, neededValue)
+		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_REQUIRED_LABEL, requiredValue)
 		return nil
 	})
 

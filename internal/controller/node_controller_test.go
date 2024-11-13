@@ -61,7 +61,7 @@ var _ = Describe("Node Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      typeNamespacedName.Name,
 						Namespace: typeNamespacedName.Namespace,
-						Labels:    map[string]string{HOST_LABEL: "test", MAINTENANCE_NEEDED_LABEL: "true"},
+						Labels:    map[string]string{HOST_LABEL: "test", MAINTENANCE_REQUIRED_LABEL: "true"},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
