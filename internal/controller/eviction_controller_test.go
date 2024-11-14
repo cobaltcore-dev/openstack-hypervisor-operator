@@ -41,7 +41,6 @@ var _ = Describe("Eviction Controller", func() {
 	const resourceName = "test-resource"
 	const hypervisorName = "test-hypervisor"
 	const serviceId = "test-id"
-	const maxReconcileSteps = 10
 	var controllerReconciler *EvictionReconciler
 
 	ctx := context.Background()
@@ -172,7 +171,7 @@ var _ = Describe("Eviction Controller", func() {
 
 				It("should fail reconciliation", func() {
 					_, err := reconcileLoop(1)
-					Expect(err).NotTo(HaveOccurred())
+					Expect(err).To(HaveOccurred())
 
 					resource := &kvmv1.Eviction{}
 					err = k8sClient.Get(ctx, typeNamespacedName, resource)

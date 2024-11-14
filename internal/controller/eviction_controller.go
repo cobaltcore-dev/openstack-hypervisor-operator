@@ -58,6 +58,7 @@ const (
 	Running       = "Running"
 	Reconciling   = "Reconciling"
 	Reconciled    = "Reconciled"
+	Failed        = "Failed"
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -83,7 +84,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	}
 
 	switch eviction.Status.EvictionState {
-	case Succeeded, "Error":
+	case Succeeded, Failed:
 		// Nothing left to be done
 		log.Info("finished")
 		return ctrl.Result{}, nil
@@ -115,31 +116,45 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	hypervisorName := eviction.Spec.Hypervisor
 
 	// Does the hypervisor even exist? Is it enabled/disabled?
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, false)
 	if err != nil {
 		// Abort eviction
 		err = fmt.Errorf("failed to get hypervisor %w", err)
 		r.addErrorCondition(ctx, req.client, eviction, err)
-		return ctrl.Result{}, nil
-	}
-
-	currentHypervisor, _, _ := strings.Cut(hypervisor.HypervisorHostname, ".")
-	if currentHypervisor != eviction.Spec.Hypervisor {
-		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, eviction.Spec.Hypervisor)
-		r.addErrorCondition(ctx, req.client, eviction, err)
 		return ctrl.Result{}, err
 	}
 
-	updated, err := r.disableHypervisor(ctx, req, hypervisor, eviction)
+	log := logger.FromContext(ctx)
+	currentHypervisor, _, _ := strings.Cut(hypervisor.HypervisorHostname, ".")
+	if currentHypervisor != hypervisorName {
+		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, hypervisorName)
+		log.Error(err, "Hpyervisor name mismatch")
+		if eviction.Status.EvictionState != Failed ||
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    "Eviction",
+				Status:  metav1.ConditionFalse,
+				Message: err.Error(),
+				Reason:  Failed}) {
+			eviction.Status.EvictionState = Failed
+			log.Info("Update", "status", eviction.Status)
+			if err := req.client.Status().Update(ctx, eviction); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	crdModified, err := r.disableHypervisor(ctx, req, hypervisor, eviction)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not disable the hypervisor %v due to %w", hypervisorName, err)
 	}
-	if updated {
+	if crdModified {
 		return ctrl.Result{}, nil
 	}
 
 	// Fetch all virtual machines on the hypervisor
-	hypervisor, err = openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, true)
+	hypervisor, err = openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, true)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -398,7 +413,7 @@ func (r *EvictionReconciler) addProgressCondition(ctx context.Context, client cl
 }
 
 func (r *EvictionReconciler) addErrorCondition(ctx context.Context, client client.Client, eviction *kvmv1.Eviction, err error) bool {
-	return r.addCondition(ctx, client, eviction, metav1.ConditionFalse, err.Error(), "Failed")
+	return r.addCondition(ctx, client, eviction, metav1.ConditionFalse, err.Error(), Failed)
 }
 
 // SetupWithManager sets up the controller with the Manager.
