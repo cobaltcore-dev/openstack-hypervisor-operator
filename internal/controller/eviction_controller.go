@@ -93,8 +93,16 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		eviction.Status.EvictionState = "Pending" // "" -> "Pending: Fixes the test
 		log.Info("setup")
 		return r.handlePending(ctx, eviction, req)
+	case "Running":
+		return r.handleRunning(ctx, eviction, req)
+	default:
+		log.Info("Unknown eviction-state", "EvictionState", eviction.Status.EvictionState)
+		return ctrl.Result{}, nil
 	}
+}
 
+func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
+	// That should leave us with "Running" and the hypervisor should be deactivated
 	if len(eviction.Status.OutstandingInstances) > 0 {
 		return r.evictNext(ctx, req, eviction)
 	}
@@ -108,7 +116,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 
 	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
-	log.Info("succeeded")
+	logger.FromContext(ctx).Info("succeeded")
 	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
 }
 
