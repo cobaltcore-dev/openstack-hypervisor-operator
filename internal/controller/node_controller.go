@@ -269,9 +269,9 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 	}
 	metaObj.SetGroupVersionKind(gvk)
 
-	for clusterName, cluster := range clusters {
+	for clusterName, clusterObj := range clusters {
 		b = b.WatchesRawSource(source.TypedKind(
-			cluster.GetCache(),
+			clusterObj.GetCache(),
 			metaObj,
 			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, n *NodeMetadata) []nodeControllerRequest {
 				// This will be called twice: once for the old and once for the new value (unfortunately)
@@ -279,7 +279,7 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 					kind:           "Node",
 					namespacedName: types.NamespacedName{Namespace: n.Namespace, Name: n.Name},
 					clusterName:    clusterName,
-					client:         cluster.GetClient(),
+					client:         clusterObj.GetClient(),
 					state:          n.Labels[MAINTENANCE_REQUIRED_LABEL],
 				}}
 			}),
@@ -296,7 +296,7 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 		))
 
 		b = b.WatchesRawSource(source.TypedKind(
-			cluster.GetCache(),
+			clusterObj.GetCache(),
 			&kvmv1.Eviction{},
 			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, e *kvmv1.Eviction) []nodeControllerRequest {
 				// This will be called twice: once for the old and once for the new value (unfortunately)
@@ -304,7 +304,7 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 					kind:           "Eviction",
 					namespacedName: types.NamespacedName{Namespace: e.Namespace, Name: e.Name},
 					clusterName:    clusterName,
-					client:         cluster.GetClient(),
+					client:         clusterObj.GetClient(),
 					state:          e.Status.EvictionState,
 				}}
 			}),
