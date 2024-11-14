@@ -167,20 +167,17 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		return ctrl.Result{}, err
 	}
 
-	var uuids []string
-	if hypervisor.Servers == nil {
-		uuids = make([]string, 0)
-	} else {
-		uuids = make([]string, len(*hypervisor.Servers))
+	if hypervisor.Servers != nil {
+		uuids := make([]string, len(*hypervisor.Servers))
 		for i, server := range *hypervisor.Servers {
 			uuids[i] = server.UUID
 		}
+		eviction.Status.OutstandingInstances = uuids
 	}
 
 	// Update status
 	eviction.Status.HypervisorServiceId = hypervisor.ID
 	eviction.Status.EvictionState = Running
-	eviction.Status.OutstandingInstances = uuids
 	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
