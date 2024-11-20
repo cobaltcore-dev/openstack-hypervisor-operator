@@ -18,73 +18,20 @@ limitations under the License.
 package netbox
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 )
 
-type netboxDevice struct {
-	Name string `json:"name"`
-}
-
-type netboxInterfaceItem struct {
-	Device netboxDevice `json:"device"`
-}
-
-type netboxData struct {
-	InterfaceList []netboxInterfaceItem `json:"interface_list"`
-}
-
-type netboxResponse struct {
-	Data netboxData `json:"data"`
-}
-
-type netboxQuery struct {
-	Query string `json:"query"`
-}
-
 // GetHostName retrieves the host name from Netbox by the given MAC address.
-func GetHostName(ctx context.Context, macAddress string) (string, error) {
-	// TODO: move to config/env
-	graphql := "https://netbox.global.cloud.sap/graphql/"
-
-	query := fmt.Sprintf(`	{
-		interface_list(mac_address: "%v") {
-			device {
-				name
-			}
-		}
-	}`, macAddress)
-
-	payload := new(bytes.Buffer)
-	if err := json.NewEncoder(payload).Encode(netboxQuery{Query: query}); err != nil {
-		return "", err
-	}
-	r, err := http.NewRequest("POST", graphql, payload)
-	if err != nil {
-		return "", err
-	}
-	r.Header.Add("Content-Type", "application/json")
-
-	c := http.DefaultClient
-	res, err := c.Do(r.WithContext(ctx))
-	if err != nil {
+func (n *netboxClient) GetHostName(ctx context.Context, macAddress string) (string, error) {
+	if err := n.pollClusters(ctx); err != nil {
 		return "", err
 	}
 
-	defer func() { _ = res.Body.Close() }()
-
-	response := &netboxResponse{}
-	err = json.NewDecoder(res.Body).Decode(response)
-	if err != nil {
-		return "", err
+	hostname, found := n.hostnameForMac[macAddress]
+	if !found {
+		return "", fmt.Errorf("cannot find hostname for mac %q", macAddress)
 	}
 
-	if len(response.Data.InterfaceList) == 0 {
-		return "", fmt.Errorf("no device found for MAC address %v", macAddress)
-	}
-
-	return response.Data.InterfaceList[0].Device.Name, nil
+	return hostname, nil
 }

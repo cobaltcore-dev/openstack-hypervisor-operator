@@ -57,6 +57,7 @@ const (
 
 type NodeReconciler struct {
 	serviceClient *gophercloud.ServiceClient
+	netboxClient  netbox.Client
 }
 
 type NodeMetadata = metav1.PartialObjectMetadata
@@ -157,7 +158,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, client k8sclient.Cli
 	}
 
 	macAddress := nodePorts[0].MACAddress
-	host, err := netbox.GetHostName(ctx, macAddress)
+	host, err := r.netboxClient.GetHostName(ctx, macAddress)
 
 	if err != nil {
 		return host, false, err
@@ -247,13 +248,15 @@ func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters map[string]cluster.Cluster) error {
+func (r *NodeReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Cluster, netboxClient netbox.Client) error {
 	_ = logger.FromContext(context.Background())
 
 	var err error
 	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "network"); err != nil {
 		return err
 	}
+
+	r.netboxClient = netboxClient
 
 	if !strings.HasSuffix(r.serviceClient.Endpoint, "v2.0/") {
 		r.serviceClient.ResourceBase = r.serviceClient.Endpoint + "v2.0/"
