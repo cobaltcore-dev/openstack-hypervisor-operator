@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 module github.com/cobaltcore-dev/openstack-hypervisor-operator
 
-go 1.22.0
+go 1.23.0
 
-toolchain go1.22.5
+toolchain go1.23.3
 
 require (
 	github.com/go-openapi/swag v0.22.4
