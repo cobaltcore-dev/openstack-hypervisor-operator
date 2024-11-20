@@ -13,9 +13,9 @@ require (
 	github.com/gophercloud/utils/v2 v2.0.0-20241008104625-7cbb8fd76bb7
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
-	k8s.io/api v0.31.0
-	k8s.io/apimachinery v0.31.0
-	k8s.io/client-go v0.31.0
+	k8s.io/api v0.31.2
+	k8s.io/apimachinery v0.31.2
+	k8s.io/client-go v0.31.2
 	sigs.k8s.io/controller-runtime v0.19.0
 )
 
