@@ -24,6 +24,10 @@ spec:
         command:
         - /manager
         env:
+        - name: NETBOX_GRAPHQL_URL
+          value: {{ quote .Values.controllerManager.manager.env.netboxGraphqlUrl }}
+        - name: CLUSTER_TYPE_ID
+          value: {{ quote .Values.controllerManager.manager.env.clusterTypeId }}
         - name: OS_AUTH_URL
           value: {{ quote .Values.controllerManager.manager.env.osAuthUrl }}
         - name: OS_PROJECT_DOMAIN_NAME

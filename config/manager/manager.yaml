@@ -63,7 +63,12 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          - --netbox-graphql-url=${NETBOX_GRAPHQL_URL}
+          - --region=${OS_REGION_NAME}
+          - --cluster-type-id=${CLUSTER_TYPE_ID}
         env:
+          - name: NETBOX_GRAPHQL_URL
+          - name: CLUSTER_TYPE_ID
           - name: OS_AUTH_URL
           - name: OS_PROJECT_DOMAIN_NAME
           - name: OS_PROJECT_NAME

@@ -19,6 +19,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -41,6 +42,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -77,6 +79,9 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	var clusters stringArray
+	var netboxGraphQLURL string
+	var region string
+	var clusterTypeIDs stringArray
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -88,6 +93,11 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.Var(&clusters, "cluster", "Name of the target cluster(s).")
+	flag.StringVar(&netboxGraphQLURL, "netbox-graphql-url", "",
+		"The url pointing to the graphql endpoint of a Netbox installation.")
+	flag.StringVar(&region, "region", "",
+		"The name of the region.")
+	flag.Var(&clusterTypeIDs, "cluster-type-id", "Id of the cluster-type (in Netbox).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -95,6 +105,24 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if netboxGraphQLURL == "" {
+		err := errors.New("the flag -netbox-graphql-url is required")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if region == "" {
+		err := errors.New("the flag -region is required")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if len(clusterTypeIDs) == 0 {
+		err := errors.New("need at least one -cluster-type-id")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -208,7 +236,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NodeReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
+	netboxClient := netbox.NewClient(netboxGraphQLURL, region, clusterTypeIDs)
+
+	if err = (&controller.NodeReconciler{}).Setup(mgr, allClusters, netboxClient); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
