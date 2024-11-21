@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -40,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -58,6 +60,8 @@ const (
 type NodeReconciler struct {
 	serviceClient *gophercloud.ServiceClient
 	netboxClient  netbox.Client
+	namespace     string
+	issuerRef     cmmeta.ObjectReference
 }
 
 type NodeMetadata = metav1.PartialObjectMetadata
@@ -72,6 +76,7 @@ type nodeControllerRequest struct {
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -97,18 +102,56 @@ func (r *NodeReconciler) reconcileNode(ctx context.Context, req nodeControllerRe
 	log = log.WithValues("node", req.namespacedName.Name)
 	ctx = logger.IntoContext(ctx, log)
 
-	if err := req.client.Get(ctx, req.namespacedName, node); err != nil {
+	if err := req.client.Get(ctx, req.namespacedName, node); k8sclient.IgnoreNotFound(err) != nil {
 		// ignore not found errors, could be deleted
-		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+		err = fmt.Errorf("could get node due to %w", err)
+		return ctrl.Result{}, err
 	}
 
 	host, changed, err := r.normalizeName(ctx, req.client, node)
 	if err != nil {
+		err = fmt.Errorf("could retrieve ips for host due to %w", err)
 		return ctrl.Result{}, err
 	}
 
 	if changed {
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	ips, err := r.netboxClient.GetIpsForHost(ctx, host)
+	if err != nil {
+		err = fmt.Errorf("could retrieve ips for host due to %w", err)
+		return ctrl.Result{}, err
+	}
+
+	names := make([]string, 1)
+	names[0] = host
+
+	for _, address := range node.Status.Addresses {
+		switch address.Type {
+		case "InternalIP", "ExternalIP":
+			ips = append(ips, address.Address)
+		case "HostName":
+			names = append(names, address.Address)
+			continue
+		}
+	}
+
+	slices.Sort(ips)
+	ips = slices.Compact(ips)
+
+	slices.Sort(names)
+	names = slices.Compact(names)
+
+	if len(ips) == 0 {
+		// Mostly for the test-case
+		log.Info("Not issuing certificate for node without any IPs")
+	} else {
+		err = r.ensureCertificate(ctx, req.client, host, names, ips)
+		if err != nil {
+			err = fmt.Errorf("could not ensure existence of certificate due to %w", err)
+			return ctrl.Result{}, err
+		}
 	}
 
 	err = r.reconcileEvictionForNode(ctx, req.client, node, host, req.state)
@@ -174,7 +217,7 @@ func (r *NodeReconciler) reconcileEvictionForNode(ctx context.Context, client k8
 	name := fmt.Sprintf("maintenance-required-%v", host)
 	eviction := &kvmv1.Eviction{ObjectMeta: metav1.ObjectMeta{
 		Name:      name,
-		Namespace: "monsoon3", // todo: change to the correct namespace or use cluster scoped CRs
+		Namespace: r.namespace,
 		Labels:    map[string]string{MANAGED_BY: MANAGER_NAME},
 	}}
 
@@ -182,7 +225,10 @@ func (r *NodeReconciler) reconcileEvictionForNode(ctx context.Context, client k8
 
 	if state == "" {
 		log.Info("no label", "eviction", eviction)
-		return k8sclient.IgnoreNotFound(client.Delete(ctx, eviction))
+		if err := client.Delete(ctx, eviction); k8sclient.IgnoreNotFound(err) != nil {
+			err = fmt.Errorf("failed to delete eviction due to %w", err)
+			return err
+		}
 	}
 
 	log.Info("with label", "eviction", eviction)
@@ -247,8 +293,8 @@ func (r *NodeReconciler) setNodeLabels(ctx context.Context, c k8sclient.Client, 
 	return true, c.Patch(ctx, newNode, k8sclient.MergeFrom(node))
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Cluster, netboxClient netbox.Client) error {
+// Setup sets up the controller
+func (r *NodeReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Cluster, netboxClient netbox.Client, namespace string, issuerRef cmmeta.ObjectReference) error {
 	_ = logger.FromContext(context.Background())
 
 	var err error
@@ -257,6 +303,8 @@ func (r *NodeReconciler) Setup(mgr ctrl.Manager, clusters map[string]cluster.Clu
 	}
 
 	r.netboxClient = netboxClient
+	r.namespace = namespace
+	r.issuerRef = issuerRef
 
 	if !strings.HasSuffix(r.serviceClient.Endpoint, "v2.0/") {
 		r.serviceClient.ResourceBase = r.serviceClient.Endpoint + "v2.0/"

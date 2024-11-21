@@ -60,12 +60,7 @@ func (n *netboxClient) GetIpsForHost(ctx context.Context, hostname string) ([]st
 		return nil, err
 	}
 
-	ips, found := n.ipsForHost[hostname]
-	if !found {
-		return nil, fmt.Errorf("cannot find ips for host %q", hostname)
-	}
-
-	return ips, nil
+	return n.ipsForHost[hostname], nil
 }
 
 func (n *netboxClient) GetClusterNames(ctx context.Context) ([]string, error) {

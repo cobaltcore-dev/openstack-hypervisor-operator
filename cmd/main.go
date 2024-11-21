@@ -43,7 +43,10 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/netbox"
+
 	// +kubebuilder:scaffold:imports
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 )
 
 var (
@@ -53,9 +56,9 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(kvmv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+	utilruntime.Must(cmapi.AddToScheme(scheme))
 }
 
 type stringArray []string
@@ -82,6 +85,10 @@ func main() {
 	var netboxGraphQLURL string
 	var region string
 	var clusterTypeIDs stringArray
+	var namespace string
+	var issuerGroup string
+	var issuerKind string
+	var issuerName string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -98,6 +105,14 @@ func main() {
 	flag.StringVar(&region, "region", "",
 		"The name of the region.")
 	flag.Var(&clusterTypeIDs, "cluster-type-id", "Id of the cluster-type (in Netbox).")
+	flag.StringVar(&namespace, "namespace", "",
+		"The namespace to create evictions and certificates in.")
+	flag.StringVar(&issuerGroup, "issuer-group", "cert-manager.io",
+		"The group of the certificate issuer")
+	flag.StringVar(&issuerKind, "issuer-kind", cmapi.IssuerKind,
+		"The kind of the certificate issuer")
+	flag.StringVar(&issuerName, "issuer-name", "",
+		"The name of certificate issuer")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -120,6 +135,18 @@ func main() {
 
 	if len(clusterTypeIDs) == 0 {
 		err := errors.New("need at least one -cluster-type-id")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if namespace == "" {
+		err := errors.New("the flag -namespace is required")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if issuerName == "" {
+		err := errors.New("the flag -issuer-name is required")
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
@@ -238,7 +265,8 @@ func main() {
 
 	netboxClient := netbox.NewClient(netboxGraphQLURL, region, clusterTypeIDs)
 
-	if err = (&controller.NodeReconciler{}).Setup(mgr, allClusters, netboxClient); err != nil {
+	issuerRef := cmmeta.ObjectReference{Name: issuerName, Kind: issuerKind, Group: issuerGroup}
+	if err = (&controller.NodeReconciler{}).Setup(mgr, allClusters, netboxClient, namespace, issuerRef); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}

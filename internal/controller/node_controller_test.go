@@ -32,11 +32,34 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
+type mockNetboxClient struct {
+	hostname        string
+	hostnameErr     error
+	ips             []string
+	ipsErr          error
+	clusterNames    []string
+	clusterNamesErr error
+}
+
+func (m *mockNetboxClient) GetHostName(ctx context.Context, macAddress string) (string, error) {
+	return m.hostname, m.hostnameErr
+}
+
+func (m *mockNetboxClient) GetIpsForHost(ctx context.Context, hostname string) ([]string, error) {
+	return m.ips, m.ipsErr
+}
+
+func (m *mockNetboxClient) GetClusterNames(ctx context.Context) ([]string, error) {
+	return m.clusterNames, m.clusterNamesErr
+}
+
 var _ = Describe("Node Controller", func() {
 	var nodeReconciler *NodeReconciler
+	var netboxClient *mockNetboxClient
 
 	Context("When reconciling a node", func() {
 		const nodeName = "node-test"
+		const namespaceName = "namespace-test"
 
 		ctx := context.Background()
 
@@ -57,10 +80,13 @@ var _ = Describe("Node Controller", func() {
 		}
 
 		BeforeEach(func() {
+			netboxClient = &mockNetboxClient{}
 			nodeReconciler = &NodeReconciler{}
+			nodeReconciler.netboxClient = netboxClient
+			nodeReconciler.namespace = namespaceName
 
 			By("creating the namespace for the reconciler")
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
 			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 
 			By("creating the core resource for the Kind Node")
@@ -84,13 +110,13 @@ var _ = Describe("Node Controller", func() {
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			_, err := reconcileNodeLoop(1, "true")
+			_, err := reconcileNodeLoop(4, "true")
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
 			err = k8sClient.Get(ctx, types.NamespacedName{
 				Name:      "maintenance-required-test",
-				Namespace: "monsoon3",
+				Namespace: namespaceName,
 			}, &kvmv1.Eviction{})
 			Expect(err).NotTo(HaveOccurred())
 		})
