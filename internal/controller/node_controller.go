@@ -46,11 +46,11 @@ import (
 )
 
 const (
-	MAINTENANCE_REQUIRED_LABEL = "cloud.sap/maintenance-required"
-	MAINTENANCE_APPROVED_LABEL = "cloud.sap/maintenance-approved"
-	HOST_LABEL                 = "kubernetes.metal.cloud.sap/host"
-	MANAGED_BY                 = "app.kubernetes.io/managed-by"
-	MANAGER_NAME               = "openstack-node-controller"
+	EVICTION_REQUIRED_LABEL = "cloud.sap/hypervisor-eviction-required"
+	EVICTION_APPROVED_LABEL = "cloud.sap/hypervisor-eviction-succeeded"
+	HOST_LABEL              = "kubernetes.metal.cloud.sap/host"
+	MANAGED_BY              = "app.kubernetes.io/managed-by"
+	MANAGER_NAME            = "openstack-node-controller"
 	// Changing MANAGER_NAME will cause the app to lose track of already
 	// created Evictions by this controller
 )
@@ -188,7 +188,7 @@ func (r *NodeReconciler) reconcileEvictionForNode(ctx context.Context, client k8
 	_, err := controllerutil.CreateOrUpdate(ctx, client, eviction, func() error {
 		eviction.Labels[MANAGED_BY] = MANAGER_NAME
 		eviction.Spec.Hypervisor = node.Name
-		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, MAINTENANCE_REQUIRED_LABEL, state)
+		eviction.Spec.Reason = fmt.Sprintf("Node %v, label %v=%v", node.Name, EVICTION_REQUIRED_LABEL, state)
 		return nil
 	})
 	return err
@@ -212,10 +212,10 @@ func (r *NodeReconciler) reconcileEviction(ctx context.Context, req nodeControll
 
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		_, err := r.setNodeLabels(ctx, req.client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "true"})
+		_, err := r.setNodeLabels(ctx, req.client, node, map[string]string{EVICTION_APPROVED_LABEL: "true"})
 		return ctrl.Result{}, err
 	case "Failed":
-		_, err := r.setNodeLabels(ctx, req.client, node, map[string]string{MAINTENANCE_APPROVED_LABEL: "false"})
+		_, err := r.setNodeLabels(ctx, req.client, node, map[string]string{EVICTION_APPROVED_LABEL: "false"})
 		return ctrl.Result{}, err
 	default:
 		// We will also be called for the old state (i.e. Running) and simply ignore that
@@ -280,13 +280,13 @@ func (r *NodeReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters 
 					namespacedName: types.NamespacedName{Namespace: n.Namespace, Name: n.Name},
 					clusterName:    clusterName,
 					client:         clusterObj.GetClient(),
-					state:          n.Labels[MAINTENANCE_REQUIRED_LABEL],
+					state:          n.Labels[EVICTION_REQUIRED_LABEL],
 				}}
 			}),
 			predicate.TypedFuncs[*NodeMetadata]{
 				UpdateFunc: func(e event.TypedUpdateEvent[*NodeMetadata]) bool {
-					newValue := e.ObjectNew.Labels[MAINTENANCE_REQUIRED_LABEL]
-					oldValue := e.ObjectOld.Labels[MAINTENANCE_REQUIRED_LABEL]
+					newValue := e.ObjectNew.Labels[EVICTION_REQUIRED_LABEL]
+					oldValue := e.ObjectOld.Labels[EVICTION_REQUIRED_LABEL]
 
 					return newValue != oldValue
 				},
