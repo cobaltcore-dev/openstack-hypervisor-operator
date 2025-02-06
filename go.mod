@@ -5,7 +5,7 @@ module github.com/cobaltcore-dev/openstack-hypervisor-operator
 
 go 1.23.0
 
-toolchain go1.23.3
+toolchain go1.23.6
 
 require (
 	github.com/go-openapi/swag v0.23.0
