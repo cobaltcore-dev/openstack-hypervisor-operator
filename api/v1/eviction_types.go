@@ -59,6 +59,7 @@ type EvictionStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster,shortName=evi
 // +kubebuilder:printcolumn:JSONPath=".spec.hypervisor",name="Hypervisor",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.reason",name="Reason",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.evictionState",name="State",type="string"

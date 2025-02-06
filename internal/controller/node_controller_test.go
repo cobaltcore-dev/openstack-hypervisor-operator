@@ -40,12 +40,9 @@ var _ = Describe("Node Controller", func() {
 
 		ctx := context.Background()
 
-		reconcileNodeLoop := func(steps int, state string) (res ctrl.Result, err error) {
-			req := nodeControllerRequest{kind: "Node",
-				namespacedName: types.NamespacedName{Name: nodeName},
-				clusterName:    "self",
-				client:         k8sClient,
-				state:          state,
+		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
+			req := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
 			}
 			for range steps {
 				res, err = nodeReconciler.Reconcile(ctx, req)
@@ -57,7 +54,10 @@ var _ = Describe("Node Controller", func() {
 		}
 
 		BeforeEach(func() {
-			nodeReconciler = &NodeReconciler{}
+			nodeReconciler = &NodeReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
 
 			By("creating the namespace for the reconciler")
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
@@ -84,7 +84,7 @@ var _ = Describe("Node Controller", func() {
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			_, err := reconcileNodeLoop(1, "true")
+			_, err := reconcileNodeLoop(1)
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node

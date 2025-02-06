@@ -24,16 +24,19 @@ import (
 	"fmt"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -186,63 +189,39 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
+
+		// Cache options allow to subscribe to events from Kubernetes objects and to read
+		// those objects more efficiently by avoiding to call out to the API.
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Label: labels.SelectorFromSet(labels.Set{controller.EVICTION_REQUIRED_LABEL: "true"}),
+				},
+			},
+		},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	allClusters := map[string]cluster.Cluster{}
-	if len(clusters) == 0 {
-		cluster, err := cluster.New(restConfig, func(o *cluster.Options) {
-			o.Scheme = scheme
-		})
-		if err != nil {
-			setupLog.Error(err, "failed to construct clusters")
-			os.Exit(1)
-		}
-		if err := mgr.Add(cluster); err != nil {
-			setupLog.Error(err, "failed to add cluster to manager")
-			os.Exit(1)
-		}
-		// Ensure we can actually get a client
-		cluster.GetClient()
-		allClusters["self"] = cluster
-	}
-
-	for _, context := range clusters {
-		clusterConfig, err := config.GetConfigWithContext(context)
-		if err != nil {
-			setupLog.Error(err, "failed to load context", "context", context)
-			os.Exit(1)
-		}
-		cluster, err := cluster.New(clusterConfig, func(o *cluster.Options) {
-			o.Scheme = scheme
-		})
-		if err != nil {
-			setupLog.Error(err, "failed to construct clusters")
-			os.Exit(1)
-		}
-		if err := mgr.Add(cluster); err != nil {
-			setupLog.Error(err, "failed to add cluster to manager")
-			os.Exit(1)
-		}
-		cluster.GetClient()
-		allClusters[context] = cluster
-	}
-
-	if err = (&controller.EvictionReconciler{}).SetupWithManagerAndClusters(mgr, allClusters); err != nil {
+	if err = (&controller.EvictionReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Eviction")
 		os.Exit(1)
 	}
 
 	netboxClient := netbox.NewClient(netboxGraphQLURL, region, clusterTypeIDs)
-
-	if err = (&controller.NodeReconciler{}).Setup(mgr, allClusters, netboxClient); err != nil {
+	if err = (&controller.NodeReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		NetboxClient: netboxClient,
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
-
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

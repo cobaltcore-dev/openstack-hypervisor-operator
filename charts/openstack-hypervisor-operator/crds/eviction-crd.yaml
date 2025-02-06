@@ -10,8 +10,10 @@ spec:
     kind: Eviction
     listKind: EvictionList
     plural: evictions
+    shortNames:
+    - evi
     singular: eviction
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.hypervisor
