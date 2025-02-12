@@ -51,7 +51,7 @@ var _ = Describe("Eviction Controller", func() {
 
 	reconcileLoop := func(steps int) (res ctrl.Result, err error) {
 		for i := 0; i < steps; i++ {
-			res, err = controllerReconciler.Reconcile(ctx, request{NamespacedName: typeNamespacedName, clusterName: "self", client: k8sClient})
+			res, err = controllerReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: typeNamespacedName})
 			if err != nil {
 				return
 			}
@@ -155,6 +155,8 @@ var _ = Describe("Eviction Controller", func() {
 
 				By("Creating the controller")
 				controllerReconciler = &EvictionReconciler{
+					Client:        k8sClient,
+					Scheme:        k8sClient.Scheme(),
 					serviceClient: client.ServiceClient(),
 					rand:          rand.New(rand.NewSource(42)),
 				}

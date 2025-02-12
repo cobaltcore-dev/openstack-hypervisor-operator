@@ -31,16 +31,12 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -48,6 +44,8 @@ import (
 
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
+	client.Client
+	Scheme        *runtime.Scheme
 	serviceClient *gophercloud.ServiceClient
 	rand          *rand.Rand
 }
@@ -67,9 +65,9 @@ const (
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.Result, error) {
+func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	eviction := &kvmv1.Eviction{}
-	if err := req.client.Get(ctx, req.NamespacedName, eviction); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, eviction); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -78,7 +76,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 	ctx = logger.IntoContext(ctx, log)
 	// Being deleted
 	if !eviction.DeletionTimestamp.IsZero() {
-		err := r.handleFinalizer(ctx, req.client, eviction)
+		err := r.handleFinalizer(ctx, eviction)
 		log.Info("deleted")
 		return ctrl.Result{}, err
 	}
@@ -92,19 +90,19 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req request) (ctrl.R
 		// Let's see if we can take it up
 		eviction.Status.EvictionState = "Pending" // "" -> "Pending: Fixes the test
 		log.Info("setup")
-		return r.handlePending(ctx, eviction, req)
+		return r.handlePending(ctx, eviction)
 	case "Running":
-		return r.handleRunning(ctx, eviction, req)
+		return r.handleRunning(ctx, eviction)
 	default:
 		log.Info("Unknown eviction-state", "EvictionState", eviction.Status.EvictionState)
 		return ctrl.Result{}, nil
 	}
 }
 
-func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
+func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
 	// That should leave us with "Running" and the hypervisor should be deactivated
 	if len(eviction.Status.OutstandingInstances) > 0 {
-		return r.evictNext(ctx, req, eviction)
+		return r.evictNext(ctx, eviction)
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
@@ -117,10 +115,10 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	eviction.Status.OutstandingRamMb = 0
 	eviction.Status.EvictionState = Succeeded
 	logger.FromContext(ctx).Info("succeeded")
-	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction, req request) (reconcile.Result, error) {
+func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
 
 	// Does the hypervisor even exist? Is it enabled/disabled?
@@ -128,7 +126,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	if err != nil {
 		// Abort eviction
 		err = fmt.Errorf("failed to get hypervisor %w", err)
-		r.addErrorCondition(ctx, req.client, eviction, err)
+		r.addErrorCondition(ctx, eviction, err)
 		return ctrl.Result{}, err
 	}
 
@@ -145,7 +143,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 				Reason:  Failed}) {
 			eviction.Status.EvictionState = Failed
 			log.Info("Update", "status", eviction.Status)
-			if err := req.client.Status().Update(ctx, eviction); err != nil {
+			if err := r.Status().Update(ctx, eviction); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -153,7 +151,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		return ctrl.Result{}, nil
 	}
 
-	crdModified, err := r.disableHypervisor(ctx, req, hypervisor, eviction)
+	crdModified, err := r.disableHypervisor(ctx, hypervisor, eviction)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not disable the hypervisor %v due to %w", hypervisorName, err)
 	}
@@ -186,10 +184,10 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		Reason:  Reconciling,
 	})
 
-	return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) evictNext(ctx context.Context, req request, eviction *kvmv1.Eviction) (reconcile.Result, error) {
+func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
 	instances := &eviction.Status.OutstandingInstances
 	uuid := (*instances)[len(*instances)-1]
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
@@ -201,7 +199,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 			log.Info("Instance is gone")
 			*instances = (*instances)[:len(*instances)-1]
-			return ctrl.Result{}, req.client.Status().Update(ctx, eviction)
+			return ctrl.Result{}, r.Status().Update(ctx, eviction)
 		}
 		return reconcile.Result{}, err
 	}
@@ -227,7 +225,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 
 		// All done
 		*instances = (*instances)[:len(*instances)-1]
-		return reconcile.Result{}, req.client.Status().Update(ctx, eviction)
+		return reconcile.Result{}, r.Status().Update(ctx, eviction)
 	}
 
 	switch vm.Status {
@@ -240,7 +238,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 		copy((*instances)[1:], (*instances)[:len(*instances)-1])
 		(*instances)[0] = uuid
 		log.Info("error", "faultMessage", vm.Fault.Message)
-		if err := req.client.Status().Update(ctx, eviction); err != nil {
+		if err := r.Status().Update(ctx, eviction); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -249,7 +247,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 
 	if vm.Status == "ACTIVE" || vm.PowerState == 1 {
 		log.Info("trigger live-migration")
-		if err := r.liveMigrate(ctx, req.client, vm.ID, eviction); err != nil {
+		if err := r.liveMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
 				// Fall-back to beginning, which will clean it out
@@ -258,7 +256,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
 
-			if err2 := req.client.Status().Update(ctx, eviction); err != nil {
+			if err2 := r.Status().Update(ctx, eviction); err != nil {
 				return ctrl.Result{}, fmt.Errorf("could not live-migrate due to %w and %w", err, err2)
 			}
 
@@ -266,7 +264,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 		}
 	} else {
 		log.Info("trigger cold-migration")
-		if err := r.coldMigrate(ctx, req.client, vm.ID, eviction); err != nil {
+		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
 				return reconcile.Result{Requeue: true}, nil
@@ -274,7 +272,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, req request, evictio
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
 
-			if err2 := req.client.Status().Update(ctx, eviction); err != nil {
+			if err2 := r.Status().Update(ctx, eviction); err != nil {
 				return ctrl.Result{}, fmt.Errorf("could not cold-migrate due to %w and %w", err, err2)
 			}
 
@@ -292,25 +290,25 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 	return fmt.Sprintf("Eviction %v/%v: %v", eviction.Namespace, eviction.Name, eviction.Spec.Reason)
 }
 
-func (r *EvictionReconciler) handleFinalizer(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
+func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
 	if controllerutil.RemoveFinalizer(eviction, finalizerName) {
-		if err := r.enableHypervisorService(ctx, client, eviction); err != nil {
+		if err := r.enableHypervisorService(ctx, eviction); err != nil {
 			return err
 		}
 
-		if err := client.Update(ctx, eviction); err != nil {
+		if err := r.Update(ctx, eviction); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client client.Client, eviction *kvmv1.Eviction) error {
+func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, eviction *kvmv1.Eviction) error {
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)
 		// Abort eviction
-		r.addErrorCondition(ctx, client, eviction, err2)
+		r.addErrorCondition(ctx, eviction, err2)
 		return err
 	}
 
@@ -325,17 +323,17 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, client
 	return err
 }
 
-func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request, hypervisor *openstack.Hypervisor, eviction *kvmv1.Eviction) (bool, error) {
+func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *openstack.Hypervisor, eviction *kvmv1.Eviction) (bool, error) {
 	evictionReason := r.evictionReason(eviction)
 	disabledReason := hypervisor.Service.DisabledReason
 
 	if disabledReason != nil && disabledReason != "" && disabledReason != evictionReason {
 		// Disabled for another reason already
-		return r.addProgressCondition(ctx, req.client, eviction, "Found host already disabled", "Update"), nil
+		return r.addProgressCondition(ctx, eviction, "Found host already disabled", "Update"), nil
 	}
 
 	if controllerutil.AddFinalizer(eviction, finalizerName) {
-		return true, req.client.Update(ctx, eviction)
+		return true, r.Update(ctx, eviction)
 	}
 
 	if hypervisor.Service.DisabledReason == evictionReason {
@@ -347,17 +345,17 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, req request,
 
 	_, err := services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
 	if err != nil {
-		return r.addErrorCondition(ctx, req.client, eviction, err), err
+		return r.addErrorCondition(ctx, eviction, err), err
 	}
 
-	if r.addProgressCondition(ctx, req.client, eviction, "Host disabled", "Update") {
+	if r.addProgressCondition(ctx, eviction, "Host disabled", "Update") {
 		return true, nil
 	}
 
 	return false, nil
 }
 
-func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Client, uuid string, eviction *kvmv1.Eviction) error {
+func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 
 	liveMigrateOpts := servers.LiveMigrateOpts{
@@ -367,7 +365,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Clie
 	res := servers.LiveMigrate(ctx, r.serviceClient, uuid, liveMigrateOpts)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
-		r.addErrorCondition(ctx, client, eviction, err)
+		r.addErrorCondition(ctx, eviction, err)
 		return res.Err
 	}
 
@@ -375,13 +373,13 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, client client.Clie
 	return nil
 }
 
-func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Client, uuid string, eviction *kvmv1.Eviction) error {
+func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 
 	res := servers.Migrate(ctx, r.serviceClient, uuid)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
-		r.addErrorCondition(ctx, client, eviction, err)
+		r.addErrorCondition(ctx, eviction, err)
 		return err
 	}
 
@@ -390,7 +388,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, client client.Clie
 }
 
 // addCondition adds a condition to the Eviction status and updates the status
-func (r *EvictionReconciler) addCondition(ctx context.Context, client client.Client, eviction *kvmv1.Eviction, status metav1.ConditionStatus, message string, reason string) bool {
+func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction, status metav1.ConditionStatus, message string, reason string) bool {
 	if !meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    "Eviction",
 		Status:  status,
@@ -400,7 +398,7 @@ func (r *EvictionReconciler) addCondition(ctx context.Context, client client.Cli
 		return false
 	}
 
-	if err := client.Status().Update(ctx, eviction); err != nil {
+	if err := r.Status().Update(ctx, eviction); err != nil {
 		log := logger.FromContext(ctx)
 		log.Error(err, "Failed to update conditions")
 		return false
@@ -409,16 +407,16 @@ func (r *EvictionReconciler) addCondition(ctx context.Context, client client.Cli
 	return true
 }
 
-func (r *EvictionReconciler) addProgressCondition(ctx context.Context, client client.Client, eviction *kvmv1.Eviction, message string, reason string) bool {
-	return r.addCondition(ctx, client, eviction, metav1.ConditionTrue, message, reason)
+func (r *EvictionReconciler) addProgressCondition(ctx context.Context, eviction *kvmv1.Eviction, message string, reason string) bool {
+	return r.addCondition(ctx, eviction, metav1.ConditionTrue, message, reason)
 }
 
-func (r *EvictionReconciler) addErrorCondition(ctx context.Context, client client.Client, eviction *kvmv1.Eviction, err error) bool {
-	return r.addCondition(ctx, client, eviction, metav1.ConditionFalse, err.Error(), Failed)
+func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kvmv1.Eviction, err error) bool {
+	return r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), Failed)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *EvictionReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clusters map[string]cluster.Cluster) error {
+func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
 	var err error
 	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
@@ -427,22 +425,7 @@ func (r *EvictionReconciler) SetupWithManagerAndClusters(mgr ctrl.Manager, clust
 	r.serviceClient.Microversion = "2.90" // Xena (or later)
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	b := builder.TypedControllerManagedBy[request](mgr).Named("eviction-controller")
-
-	eviction := kvmv1.Eviction{}
-	for clusterName, cluster := range clusters {
-		b = b.WatchesRawSource(source.TypedKind(
-			cluster.GetCache(),
-			&eviction,
-			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, e *kvmv1.Eviction) []request {
-				return []request{{
-					NamespacedName: types.NamespacedName{Namespace: e.Namespace, Name: e.Name},
-					clusterName:    clusterName,
-					client:         cluster.GetClient(),
-				}}
-			}),
-		))
-	}
-
-	return b.Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&kvmv1.Eviction{}).
+		Complete(r)
 }
