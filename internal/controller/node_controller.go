@@ -43,7 +43,8 @@ import (
 const (
 	EVICTION_REQUIRED_LABEL = "cloud.sap/hypervisor-eviction-required"
 	EVICTION_APPROVED_LABEL = "cloud.sap/hypervisor-eviction-succeeded"
-	HOST_LABEL              = "kubernetes.metal.cloud.sap/host"
+	HOST_LABEL              = "kubernetes.metal.cloud.sap/host" // metal3
+	NAME_LABEL              = "kubernetes.metal.cloud.sap/name" // metal
 )
 
 type NodeReconciler struct {
@@ -119,8 +120,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // kubernetes.metal.cloud.sap/role: kvm (rather set these in gardener, as it is fixed)
 // kubernetes.metal.cloud.sap/bb
 // kubernetes.metal.cloud.sap/host
+// kubernetes.metal.cloud.sap/name
 // kubernetes.metal.cloud.sap/node-ip
 func (r *NodeReconciler) normalizeName(ctx context.Context, node *corev1.Node) (string, bool, error) {
+	if name, found := node.Labels[NAME_LABEL]; found {
+		return name, false, nil
+	}
+
 	if host, found := node.Labels[HOST_LABEL]; found {
 		return host, false, nil
 	}
@@ -171,6 +177,7 @@ func (r *NodeReconciler) normalizeName(ctx context.Context, node *corev1.Node) (
 func (r *NodeReconciler) setHostLabel(ctx context.Context, node *corev1.Node, host string) bool {
 	changed, err := r.setNodeLabels(ctx, node, map[string]string{
 		HOST_LABEL: host,
+		NAME_LABEL: host,
 	})
 	if err != nil {
 		log := logger.FromContext(ctx)
