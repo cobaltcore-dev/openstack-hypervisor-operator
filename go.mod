@@ -9,7 +9,7 @@ toolchain go1.23.6
 
 require (
 	github.com/go-openapi/swag v0.23.0
-	github.com/gophercloud/gophercloud/v2 v2.4.0
+	github.com/gophercloud/gophercloud/v2 v2.5.0
 	github.com/gophercloud/utils/v2 v2.0.0-20241008104625-7cbb8fd76bb7
 	github.com/onsi/ginkgo/v2 v2.22.1
 	github.com/onsi/gomega v1.36.2
@@ -81,7 +81,7 @@ require (
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/term v0.27.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
