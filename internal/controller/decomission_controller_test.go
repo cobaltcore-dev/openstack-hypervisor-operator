@@ -28,12 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-var _ = Describe("Node Controller", func() {
-	var nodeReconciler *NodeReconciler
+var _ = Describe("Decommission Controller", func() {
+	var decomReconciler *NodeDecommissionReconciler
 
 	Context("When reconciling a node", func() {
 		const nodeName = "node-test"
@@ -45,7 +43,7 @@ var _ = Describe("Node Controller", func() {
 				NamespacedName: types.NamespacedName{Name: nodeName},
 			}
 			for range steps {
-				res, err = nodeReconciler.Reconcile(ctx, req)
+				res, err = decomReconciler.Reconcile(ctx, req)
 				if err != nil {
 					return
 				}
@@ -54,7 +52,7 @@ var _ = Describe("Node Controller", func() {
 		}
 
 		BeforeEach(func() {
-			nodeReconciler = &NodeReconciler{
+			decomReconciler = &NodeDecommissionReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
@@ -76,7 +74,7 @@ var _ = Describe("Node Controller", func() {
 		AfterEach(func() {
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
-			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
 		})
 
 		It("should successfully reconcile the resource", func() {
@@ -85,13 +83,6 @@ var _ = Describe("Node Controller", func() {
 			defer testhelper.TeardownHTTP()
 
 			_, err := reconcileNodeLoop(1)
-			Expect(err).NotTo(HaveOccurred())
-
-			// expect node controller to create an eviction for the node
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "maintenance-required-test",
-				Namespace: "monsoon3",
-			}, &kvmv1.Eviction{})
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

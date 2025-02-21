@@ -19,7 +19,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 
@@ -28,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -40,9 +40,10 @@ const (
 	EVICTION_APPROVED_LABEL = "cloud.sap/hypervisor-eviction-succeeded"
 	HOST_LABEL              = "kubernetes.metal.cloud.sap/host" // metal3
 	NAME_LABEL              = "kubernetes.metal.cloud.sap/name" // metal
+	HYPERVISOR_LABEL        = "nova.openstack.cloud.sap/virt-driver"
 )
 
-type NodeReconciler struct {
+type NodeEvictionLabelReconciler struct {
 	k8sclient.Client
 	Scheme *runtime.Scheme
 }
@@ -50,8 +51,8 @@ type NodeReconciler struct {
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
 
-func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx).WithName(fmt.Sprintf("%T %s", r, req.Name))
+func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logger.FromContext(ctx).WithName(req.Name)
 
 	node := &corev1.Node{}
 	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
@@ -64,6 +65,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	value, found := node.Labels[EVICTION_REQUIRED_LABEL]
+
 	name := fmt.Sprintf("maintenance-required-%v", host)
 	eviction := kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
@@ -72,8 +75,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		Spec: kvmv1.EvictionSpec{
 			Hypervisor: node.Name,
 			Reason: fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", EVICTION_REQUIRED_LABEL,
-				node.Labels[EVICTION_REQUIRED_LABEL]),
+				value),
 		},
+	}
+
+	if !found {
+		err = r.Delete(ctx, &eviction)
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
 	// check for existing eviction, else create it
@@ -95,44 +103,32 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// check if the eviction is already succeeded
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		return ctrl.Result{}, r.setNodeLabels(ctx, node, map[string]string{EVICTION_APPROVED_LABEL: "true"})
+		return ctrl.Result{}, setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: "true"})
 	case "Failed":
-		return ctrl.Result{}, r.setNodeLabels(ctx, node, map[string]string{EVICTION_APPROVED_LABEL: "false"})
+		return ctrl.Result{}, setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: "false"})
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// normalizeName returns the host name of the node.
-func normalizeName(node *corev1.Node) (string, error) {
-	if name, found := node.Labels[NAME_LABEL]; found {
-		return name, nil
-	}
-
-	if host, found := node.Labels[HOST_LABEL]; found {
-		return host, nil
-	}
-
-	return "", errors.New("could not find node name")
-}
-
 // setNodeLabels sets the labels on the node.
-func (r *NodeReconciler) setNodeLabels(ctx context.Context, node *corev1.Node, labels map[string]string) error {
+func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) error {
 	newNode := node.DeepCopy()
 	maps.Copy(newNode.Labels, labels)
 	if maps.Equal(node.Labels, newNode.Labels) {
 		return nil
 	}
 
-	return r.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+	return writer.Patch(ctx, newNode, k8sclient.MergeFrom(node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *NodeEvictionLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Node{}).     // trigger the r.Reconcile whenever a node is created/updated/deleted
+		Named("nodeEvictionLabel").
+		For(&corev1.Node{}).     // trigger the r.Reconcile whenever a node is created/updated/deleted.
 		Owns(&kvmv1.Eviction{}). // trigger the r.Reconcile whenever an Own-ed eviction is created/updated/deleted
 		Complete(r)
 }
