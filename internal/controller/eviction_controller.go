@@ -51,12 +51,12 @@ type EvictionReconciler struct {
 }
 
 const (
-	finalizerName = "eviction-controller.cloud.sap/finalizer"
-	Succeeded     = "Succeeded"
-	Running       = "Running"
-	Reconciling   = "Reconciling"
-	Reconciled    = "Reconciled"
-	Failed        = "Failed"
+	evictionFinalizerName = "eviction-controller.cloud.sap/finalizer"
+	Succeeded             = "Succeeded"
+	Running               = "Running"
+	Reconciling           = "Reconciling"
+	Reconciled            = "Reconciled"
+	Failed                = "Failed"
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -291,7 +291,7 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 }
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
-	if controllerutil.RemoveFinalizer(eviction, finalizerName) {
+	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
 		if err := r.enableHypervisorService(ctx, eviction); err != nil {
 			return err
 		}
@@ -332,7 +332,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 		return r.addProgressCondition(ctx, eviction, "Found host already disabled", "Update"), nil
 	}
 
-	if controllerutil.AddFinalizer(eviction, finalizerName) {
+	if controllerutil.AddFinalizer(eviction, evictionFinalizerName) {
 		return true, r.Update(ctx, eviction)
 	}
 
