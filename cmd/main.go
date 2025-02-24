@@ -38,7 +38,10 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+
 	// +kubebuilder:scaffold:imports
+
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 )
 
 var (
@@ -51,6 +54,8 @@ func init() {
 
 	utilruntime.Must(kvmv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	utilruntime.Must(cmapi.AddToScheme(scheme))
 }
 
 func main() {
@@ -60,6 +65,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var certificateNamespace string
+	var certificateIssuerName string
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -70,6 +78,11 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+
+	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
+	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
+		"Name of the certificate issuer.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -168,6 +181,14 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NodeDecommission")
+		os.Exit(1)
+	}
+
+	if err = (&controller.OnboardingController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Onboarding")
 		os.Exit(1)
 	}
 

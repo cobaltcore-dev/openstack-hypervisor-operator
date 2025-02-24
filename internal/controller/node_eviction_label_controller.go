@@ -103,23 +103,29 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// check if the eviction is already succeeded
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		return ctrl.Result{}, setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: "true"})
+		value = "true"
 	case "Failed":
-		return ctrl.Result{}, setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: "false"})
+		value = "false"
+	default:
+		value = ""
 	}
 
-	return ctrl.Result{}, nil
+	if value != "" {
+		_, err = setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: value})
+	}
+
+	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 }
 
 // setNodeLabels sets the labels on the node.
-func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) error {
+func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) (bool, error) {
 	newNode := node.DeepCopy()
 	maps.Copy(newNode.Labels, labels)
 	if maps.Equal(node.Labels, newNode.Labels) {
-		return nil
+		return false, nil
 	}
 
-	return writer.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+	return true, writer.Patch(ctx, newNode, k8sclient.MergeFrom(node))
 }
 
 // SetupWithManager sets up the controller with the Manager.
