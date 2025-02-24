@@ -134,7 +134,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	currentHypervisor, _, _ := strings.Cut(hypervisor.HypervisorHostname, ".")
 	if currentHypervisor != hypervisorName {
 		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, hypervisorName)
-		log.Error(err, "Hpyervisor name mismatch")
+		log.Error(err, "Hypervisor name mismatch")
 		if eviction.Status.EvictionState != Failed ||
 			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 				Type:    "Eviction",
