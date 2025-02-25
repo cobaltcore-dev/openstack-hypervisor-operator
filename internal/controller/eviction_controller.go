@@ -292,8 +292,14 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
 	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
-		if err := r.enableHypervisorService(ctx, eviction); err != nil {
-			return err
+		err := r.enableHypervisorService(ctx, eviction)
+		if err != nil {
+			if _, ok := err.(*openstack.NoHypervisorError); ok {
+				log := logger.FromContext(ctx)
+				log.Info("Can't enable host, it is gone")
+			} else {
+				return err
+			}
 		}
 
 		if err := r.Update(ctx, eviction); err != nil {
