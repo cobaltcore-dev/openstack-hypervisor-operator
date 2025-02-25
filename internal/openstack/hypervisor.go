@@ -19,7 +19,7 @@ package openstack
 
 import (
 	"context"
-	"errors"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
@@ -61,6 +61,18 @@ type HyperVisorsDetails struct {
 	Hypervisors []Hypervisor `json:"hypervisors"`
 }
 
+type NoHypervisorError struct{}
+
+func (*NoHypervisorError) Error() string {
+	return "no hypervisor found"
+}
+
+type MultipleHypervisorsError struct{}
+
+func (*MultipleHypervisorsError) Error() string {
+	return "multiple hypervisors found"
+}
+
 func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string, withServers bool) (*Hypervisor, error) {
 	listOpts := hypervisors.ListOpts{
 		HypervisorHostnamePattern: &hypervisorHostnamePattern,
@@ -69,6 +81,9 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 
 	pages, err := hypervisors.List(sc, listOpts).AllPages(ctx)
 	if err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			return nil, &NoHypervisorError{}
+		}
 		return nil, err
 	}
 
@@ -79,9 +94,9 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 	}
 
 	if len(h.Hypervisors) == 0 {
-		return nil, errors.New("no hypervisor found")
+		return nil, &NoHypervisorError{}
 	} else if len(h.Hypervisors) > 1 {
-		return nil, errors.New("multiple hypervisors found")
+		return nil, &MultipleHypervisorsError{}
 	}
 
 	return &h.Hypervisors[0], nil
