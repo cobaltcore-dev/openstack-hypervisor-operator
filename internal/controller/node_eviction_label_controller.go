@@ -60,25 +60,26 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	host, err := normalizeName(node)
-	if err != nil {
-		return ctrl.Result{}, err
+	hostname, found := node.Labels["kubernetes.io/hostname"]
+	if !found {
+		// Should never happen (tm)
+		return ctrl.Result{}, nil
 	}
 
 	value, found := node.Labels[EVICTION_REQUIRED_LABEL]
-
-	name := fmt.Sprintf("maintenance-required-%v", host)
+	name := fmt.Sprintf("maintenance-required-%v", hostname)
 	eviction := kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: kvmv1.EvictionSpec{
-			Hypervisor: node.Name,
+			Hypervisor: hostname,
 			Reason: fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", EVICTION_REQUIRED_LABEL,
 				value),
 		},
 	}
 
+	var err error
 	if !found {
 		err = r.Delete(ctx, &eviction)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
