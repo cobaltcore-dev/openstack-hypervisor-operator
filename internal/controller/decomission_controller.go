@@ -24,6 +24,7 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,7 +39,7 @@ import (
 
 const (
 	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
-	lifecycleLabel            = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	LIFECYCLE_OPT_IN          = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
 )
 
 type NodeDecommissionReconciler struct {
@@ -46,6 +47,9 @@ type NodeDecommissionReconciler struct {
 	Scheme        *runtime.Scheme
 	serviceClient *gophercloud.ServiceClient
 }
+
+// The counter-side in gardener is here:
+// https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -58,25 +62,107 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	host, err := normalizeName(node)
-
-	_, found := node.Labels[lifecycleLabel]
+	found := hasAnyLabel(node.Labels, LIFECYCLE_OPT_IN)
 
 	if !found {
 		// Get out of the way
-		controllerutil.RemoveFinalizer(node, decommissionFinalizerName)
-		return ctrl.Result{}, r.Update(ctx, node)
+		var err error
+		if controllerutil.RemoveFinalizer(node, decommissionFinalizerName) {
+			err = r.Update(ctx, node)
+			if err != nil {
+				err = fmt.Errorf("failed to remove finalizer due to %w", err)
+			}
+		}
+
+		return ctrl.Result{}, err
 	}
 
 	if controllerutil.AddFinalizer(node, decommissionFinalizerName) {
 		log.Info("Added finalizer")
-		return ctrl.Result{}, r.Update(ctx, node)
+		err := r.Update(ctx, node)
+		if err != nil {
+			err = fmt.Errorf("failed to add finalizer due to %w", err)
+		}
+		return ctrl.Result{}, err
 	}
 
-	// Not deleting node, nothing to do
+	conditions := node.Status.Conditions
+	if conditions == nil {
+		return ctrl.Result{}, nil
+	}
+
+	// First event exposed by
+	// https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L658-L659
+	terminating := false
+	for _, condition := range conditions {
+		if condition.Type == "Terminating" {
+			terminating = true
+			break
+		}
+	}
+
+	onboarded := hasAnyLabel(node.Labels, ONBOARDING_STATE_LABEL)
+
+	var eviction *kvmv1.Eviction
+	if terminating && onboarded {
+		name := fmt.Sprintf("decomissioning-%v", node.Name)
+		eviction = &kvmv1.Eviction{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+			Spec: kvmv1.EvictionSpec{
+				Hypervisor: node.Name,
+				Reason:     "openstack-hypervisor-operator: decommissioning",
+			},
+		}
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
+			addNodeOwnerReference(&eviction.ObjectMeta, node)
+			// attach ownerReference to the eviction, so we get notified about its changes
+			return controllerutil.SetControllerReference(node, eviction, r.Scheme)
+		})
+
+		if err != nil {
+			return ctrl.Result{}, k8sclient.IgnoreAlreadyExists(err)
+		}
+	}
+
+	// Not yet deleting node, nothing more to do
 	if node.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
+
+	if !terminating {
+		// Someone just deleted the node without shutting it down, so it might as well come back
+		return r.removeFinalizer(ctx, node)
+
+	}
+
+	if !onboarded {
+		return r.shutdownService(ctx, node)
+	}
+
+	key := k8sclient.ObjectKeyFromObject(eviction)
+	if err := r.Client.Get(ctx, key, eviction); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Only allow continue deletion when the node is evicted
+	switch eviction.Status.EvictionState {
+	case "Succeeded", "Failed":
+		return r.shutdownService(ctx, node)
+	default:
+		return ctrl.Result{}, nil
+	}
+}
+
+func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
+	// Remove the label for the hypervisor to shutdown the agents
+	changed, err := unsetNodeLabels(ctx, r.Client, node, HYPERVISOR_LABEL)
+	if err != nil || changed { // reconcile again or retry
+		return ctrl.Result{}, err
+	}
+
+	host, err := normalizeName(node)
 
 	if err != nil {
 		return ctrl.Result{}, err
@@ -107,6 +193,10 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Host empty, service deleted, we are good to go
+	return r.removeFinalizer(ctx, node)
+}
+
+func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
 	if controllerutil.RemoveFinalizer(node, decommissionFinalizerName) {
 		if err := r.Update(ctx, node); err != nil {
 			return ctrl.Result{}, err
