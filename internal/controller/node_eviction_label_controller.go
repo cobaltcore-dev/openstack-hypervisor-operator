@@ -20,14 +20,12 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -116,17 +114,6 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-}
-
-// setNodeLabels sets the labels on the node.
-func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) (bool, error) {
-	newNode := node.DeepCopy()
-	maps.Copy(newNode.Labels, labels)
-	if maps.Equal(node.Labels, newNode.Labels) {
-		return false, nil
-	}
-
-	return true, writer.Patch(ctx, newNode, k8sclient.MergeFrom(node))
 }
 
 // SetupWithManager sets up the controller with the Manager.

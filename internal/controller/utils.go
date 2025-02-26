@@ -18,8 +18,12 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"maps"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
@@ -40,4 +44,25 @@ func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
 	})
 
 	return true
+}
+
+// setNodeLabels sets the labels on the node.
+func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) (bool, error) {
+	newNode := node.DeepCopy()
+	maps.Copy(newNode.Labels, labels)
+	if maps.Equal(node.Labels, newNode.Labels) {
+		return false, nil
+	}
+
+	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
+}
+
+func hasAnyLabel(labels map[string]string, list ...string) bool {
+	for _, label := range list {
+		if _, found := labels[label]; found {
+			return true
+		}
+	}
+
+	return false
 }
