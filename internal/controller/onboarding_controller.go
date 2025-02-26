@@ -188,7 +188,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	_, found := node.Labels[HYPERVISOR_LABEL]
+	found := hasAnyLabel(node.Labels, HYPERVISOR_LABEL)
 
 	if !found {
 		return ctrl.Result{}, nil
