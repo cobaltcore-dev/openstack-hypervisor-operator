@@ -67,7 +67,7 @@ var _ = Describe("Node Controller", func() {
 			resource := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   nodeName,
-					Labels: map[string]string{HOST_LABEL: "test", EVICTION_REQUIRED_LABEL: "true"},
+					Labels: map[string]string{"kubernetes.io/hostname": "test", EVICTION_REQUIRED_LABEL: "true"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
