@@ -47,7 +47,7 @@ const (
 	DEFAULT_WAIT_TIME        = 1 * time.Minute
 	HYPERVISOR_ID_LABEL      = "nova.openstack.cloud.sap/hypervisor-id"
 	SERVICE_ID_LABEL         = "nova.openstack.cloud.sap/service-id"
-	ONBOARDING_LABEL         = "cobaltcore.cloud.sap/onboarding-state"
+	ONBOARDING_STATE_LABEL   = "cobaltcore.cloud.sap/onboarding-state"
 	ONBOARDING_INITIAL_VALUE = "initial"
 	AVAILABILITY_ZONE_LABEL  = "topology.kubernetes.io/zone"
 	TEST_AGGREGATE_NAME      = "tenant_filter_tests"
@@ -196,7 +196,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	host, err := normalizeName(node)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not normalize name %w", err)
+		return ctrl.Result{}, nil // That is expected, the label will be set eventually
 	}
 
 	if err := r.ensureCertificate(ctx, node, host); err != nil {
@@ -235,7 +235,7 @@ func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceCli
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, node *corev1.Node, host string) error {
-	_, found := node.Labels[ONBOARDING_LABEL]
+	_, found := node.Labels[ONBOARDING_STATE_LABEL]
 	if found {
 		return nil
 	}
@@ -251,30 +251,33 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		return fmt.Errorf("cannot list aggregates %w", err)
 	}
 
-	err = addToAggregate(ctx, r.serviceClient, aggs, zone, zone, host)
+	err = addToAggregate(ctx, r.serviceClient, aggs, host, zone, zone)
 	if err != nil {
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
-	err = addToAggregate(ctx, r.serviceClient, aggs, TEST_AGGREGATE_NAME, "", host)
+	err = addToAggregate(ctx, r.serviceClient, aggs, host, TEST_AGGREGATE_NAME, "")
 	if err != nil {
 		return fmt.Errorf("failed to agg to test aggregate %w", err)
 	}
 
-	serviceId := node.Labels[SERVICE_ID_LABEL]
+	serviceId, found := node.Labels[SERVICE_ID_LABEL]
+	if !found || serviceId == "" {
+		return fmt.Errorf("empty service-id for label %v on node", SERVICE_ID_LABEL)
+	}
 	result := services.Update(ctx, r.serviceClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
 	if result.Err != nil {
 		return result.Err
 	}
 
 	_, err = setNodeLabels(ctx, r, node, map[string]string{
-		ONBOARDING_LABEL: ONBOARDING_INITIAL_VALUE,
+		ONBOARDING_STATE_LABEL: ONBOARDING_INITIAL_VALUE,
 	})
 
 	return err
 }
 
-func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, name, zone, host string) (err error) {
+func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name, zone string) (err error) {
 	aggregate, found := aggs[name]
 	if !found {
 		aggregate, err = aggregates.Create(ctx, serviceClient,
