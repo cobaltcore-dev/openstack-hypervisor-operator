@@ -52,6 +52,8 @@ type NodeDecommissionReconciler struct {
 // https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
+
 func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
 	ctx = logger.IntoContext(ctx, log)
