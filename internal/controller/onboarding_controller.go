@@ -201,8 +201,10 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil // That is expected, the label will be set eventually
 	}
 
-	if err := r.ensureCertificate(ctx, node, host); err != nil {
-		return ctrl.Result{}, fmt.Errorf("could create certificate %w", err)
+	if hasAnyLabel(node.Labels, "RANDOM_LABEL") {
+		if err := r.ensureCertificate(ctx, node, host); err != nil {
+			return ctrl.Result{}, fmt.Errorf("could create certificate %w", err)
+		}
 	}
 
 	result, err := r.ensureOpenstackLabels(ctx, node)
