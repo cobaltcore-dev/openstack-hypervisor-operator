@@ -21,6 +21,16 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - cert-manager.io
   resources:
   - certificates
@@ -56,3 +66,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
