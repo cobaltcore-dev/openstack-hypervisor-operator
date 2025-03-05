@@ -34,11 +34,11 @@ import (
 )
 
 const (
-	EVICTION_REQUIRED_LABEL = "cloud.sap/hypervisor-eviction-required"
-	EVICTION_APPROVED_LABEL = "cloud.sap/hypervisor-eviction-succeeded"
-	HOST_LABEL              = "kubernetes.metal.cloud.sap/host" // metal3
-	NAME_LABEL              = "kubernetes.metal.cloud.sap/name" // metal
-	HYPERVISOR_LABEL        = "nova.openstack.cloud.sap/virt-driver"
+	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
+	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
+	HOST_LABEL            = "kubernetes.metal.cloud.sap/host" // metal3
+	NAME_LABEL            = "kubernetes.metal.cloud.sap/name" // metal
+	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
 )
 
 type NodeEvictionLabelReconciler struct {
@@ -58,13 +58,13 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	hostname, found := node.Labels["kubernetes.io/hostname"]
+	hostname, found := node.Labels[corev1.LabelHostname]
 	if !found {
 		// Should never happen (tm)
 		return ctrl.Result{}, nil
 	}
 
-	value, found := node.Labels[EVICTION_REQUIRED_LABEL]
+	value, found := node.Labels[labelEvictionRequired]
 	name := fmt.Sprintf("maintenance-required-%v", hostname)
 	eviction := kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
@@ -72,7 +72,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		},
 		Spec: kvmv1.EvictionSpec{
 			Hypervisor: hostname,
-			Reason: fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", EVICTION_REQUIRED_LABEL,
+			Reason: fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired,
 				value),
 		},
 	}
@@ -110,7 +110,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if value != "" {
-		_, err = setNodeLabels(ctx, r, node, map[string]string{EVICTION_APPROVED_LABEL: value})
+		_, err = setNodeLabels(ctx, r, node, map[string]string{labelEvictionApproved: value})
 	}
 
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)

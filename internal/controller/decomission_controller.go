@@ -39,7 +39,7 @@ import (
 
 const (
 	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
-	LIFECYCLE_OPT_IN          = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	labelLifecycleOptIn       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
 )
 
 type NodeDecommissionReconciler struct {
@@ -64,7 +64,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, LIFECYCLE_OPT_IN)
+	found := hasAnyLabel(node.Labels, labelLifecycleOptIn)
 
 	if !found {
 		// Get out of the way
@@ -103,7 +103,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	onboarded := hasAnyLabel(node.Labels, ONBOARDING_STATE_LABEL)
+	onboarded := hasAnyLabel(node.Labels, labelOnboardingState)
 
 	var eviction *kvmv1.Eviction
 	if terminating && onboarded {
@@ -159,7 +159,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
 	// Remove the label for the hypervisor to shutdown the agents
-	changed, err := unsetNodeLabels(ctx, r.Client, node, HYPERVISOR_LABEL)
+	changed, err := unsetNodeLabels(ctx, r.Client, node, labelHypervisor)
 	if err != nil || changed { // reconcile again or retry
 		return ctrl.Result{}, err
 	}

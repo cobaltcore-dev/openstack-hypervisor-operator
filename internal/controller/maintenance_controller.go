@@ -67,20 +67,20 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, LIFECYCLE_OPT_IN)
+	found := hasAnyLabel(node.Labels, labelLifecycleOptIn)
 	if !found {
 		return ctrl.Result{}, nil
 	}
 
 	if isTerminating(node) {
-		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{EVICTION_REQUIRED_LABEL: "true"})
+		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{labelEvictionRequired: "true"})
 		if changed || err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	var minAvailable int32 = 1
-	value, found := node.Labels[EVICTION_APPROVED_LABEL]
+	value, found := node.Labels[labelEvictionApproved]
 	if found && value == "true" {
 		minAvailable = 0
 	}

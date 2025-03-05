@@ -44,13 +44,12 @@ import (
 )
 
 const (
-	DEFAULT_WAIT_TIME        = 1 * time.Minute
-	HYPERVISOR_ID_LABEL      = "nova.openstack.cloud.sap/hypervisor-id"
-	SERVICE_ID_LABEL         = "nova.openstack.cloud.sap/service-id"
-	ONBOARDING_STATE_LABEL   = "cobaltcore.cloud.sap/onboarding-state"
-	ONBOARDING_INITIAL_VALUE = "initial"
-	AVAILABILITY_ZONE_LABEL  = "topology.kubernetes.io/zone"
-	TEST_AGGREGATE_NAME      = "tenant_filter_tests"
+	defaultWaitTime        = 1 * time.Minute
+	labelHypervisorID      = "nova.openstack.cloud.sap/hypervisor-id"
+	labelServiceID         = "nova.openstack.cloud.sap/service-id"
+	labelOnboardingState   = "cobaltcore.cloud.sap/onboarding-state"
+	onboardingValueInitial = "initial"
+	testAggregateName      = "tenant_filter_tests"
 )
 
 type OnboardingController struct {
@@ -190,7 +189,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, HYPERVISOR_LABEL)
+	found := hasAnyLabel(node.Labels, labelHypervisor)
 
 	if !found {
 		return ctrl.Result{}, nil
@@ -239,14 +238,14 @@ func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceCli
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, node *corev1.Node, host string) error {
-	_, found := node.Labels[ONBOARDING_STATE_LABEL]
+	_, found := node.Labels[labelOnboardingState]
 	if found {
 		return nil
 	}
 
-	zone, found := node.Labels[AVAILABILITY_ZONE_LABEL]
+	zone, found := node.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
-		return fmt.Errorf("cannot find availability-zone label %v on node", AVAILABILITY_ZONE_LABEL)
+		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
 	aggs, err := aggregatesByName(ctx, r.serviceClient)
@@ -260,14 +259,14 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
-	err = addToAggregate(ctx, r.serviceClient, aggs, host, TEST_AGGREGATE_NAME, "")
+	err = addToAggregate(ctx, r.serviceClient, aggs, host, testAggregateName, "")
 	if err != nil {
 		return fmt.Errorf("failed to agg to test aggregate %w", err)
 	}
 
-	serviceId, found := node.Labels[SERVICE_ID_LABEL]
+	serviceId, found := node.Labels[labelServiceID]
 	if !found || serviceId == "" {
-		return fmt.Errorf("empty service-id for label %v on node", SERVICE_ID_LABEL)
+		return fmt.Errorf("empty service-id for label %v on node", labelServiceID)
 	}
 	result := services.Update(ctx, r.serviceClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
 	if result.Err != nil {
@@ -275,7 +274,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 	}
 
 	_, err = setNodeLabels(ctx, r, node, map[string]string{
-		ONBOARDING_STATE_LABEL: ONBOARDING_INITIAL_VALUE,
+		labelOnboardingState: onboardingValueInitial,
 	})
 
 	return err
@@ -311,8 +310,8 @@ func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClien
 }
 
 func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	_, hypervisorIdSet := node.Labels[HYPERVISOR_ID_LABEL]
-	_, serviceIdSet := node.Labels[SERVICE_ID_LABEL]
+	_, hypervisorIdSet := node.Labels[labelHypervisorID]
+	_, serviceIdSet := node.Labels[labelServiceID]
 
 	// We bail here out, because the openstack api is not the best to poll
 	if hypervisorIdSet && serviceIdSet {
@@ -321,7 +320,7 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 
 	hypervisorAddress := getHypervisorAddress(node)
 	if hypervisorAddress == "" {
-		return ctrl.Result{RequeueAfter: DEFAULT_WAIT_TIME}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 
 	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 1)[0]
@@ -330,7 +329,7 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 	hypervisorPages, err := hypervisors.List(r.serviceClient, hypervisorQuery).AllPages(ctx)
 
 	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{RequeueAfter: DEFAULT_WAIT_TIME}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	} else if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -341,7 +340,7 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 	}
 
 	if len(hs) < 1 {
-		return ctrl.Result{RequeueAfter: DEFAULT_WAIT_TIME}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 
 	var found = false
@@ -360,8 +359,8 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 	}
 
 	changed, err := setNodeLabels(ctx, r, node, map[string]string{
-		HYPERVISOR_ID_LABEL: myHypervisor.ID,
-		SERVICE_ID_LABEL:    myHypervisor.Service.ID,
+		labelHypervisorID: myHypervisor.ID,
+		labelServiceID:    myHypervisor.Service.ID,
 	})
 
 	if err != nil || changed {

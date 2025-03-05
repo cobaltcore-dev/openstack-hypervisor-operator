@@ -196,7 +196,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr, certificateNamespace); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Onboarding")
+		setupLog.Error(err, "unable to create controller", "controller", "Maintenance")
 		os.Exit(1)
 	}
 
