@@ -24,7 +24,6 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -88,73 +87,18 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	conditions := node.Status.Conditions
-	if conditions == nil {
-		return ctrl.Result{}, nil
-	}
-
-	// First event exposed by
-	// https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L658-L659
-	terminating := false
-	for _, condition := range conditions {
-		if condition.Type == "Terminating" {
-			terminating = true
-			break
-		}
-	}
-
-	onboarded := hasAnyLabel(node.Labels, labelOnboardingState)
-
-	var eviction *kvmv1.Eviction
-	if terminating && onboarded {
-		name := fmt.Sprintf("decomissioning-%v", node.Name)
-		eviction = &kvmv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-			Spec: kvmv1.EvictionSpec{
-				Hypervisor: node.Name,
-				Reason:     "openstack-hypervisor-operator: decommissioning",
-			},
-		}
-		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, eviction, func() error {
-			addNodeOwnerReference(&eviction.ObjectMeta, node)
-			// attach ownerReference to the eviction, so we get notified about its changes
-			return controllerutil.SetControllerReference(node, eviction, r.Scheme)
-		})
-
-		if err != nil {
-			return ctrl.Result{}, k8sclient.IgnoreAlreadyExists(err)
-		}
-	}
-
 	// Not yet deleting node, nothing more to do
 	if node.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
-	if !terminating {
-		// Someone just deleted the node without shutting it down, so it might as well come back
+	// Someone is just deleting the node, without going through termination
+	if !isTerminating(node) {
+		// So we just get out of the way for now
 		return r.removeFinalizer(ctx, node)
-
 	}
 
-	if !onboarded {
-		return r.shutdownService(ctx, node)
-	}
-
-	key := k8sclient.ObjectKeyFromObject(eviction)
-	if err := r.Client.Get(ctx, key, eviction); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Only allow continue deletion when the node is evicted
-	switch eviction.Status.EvictionState {
-	case "Succeeded", "Failed":
-		return r.shutdownService(ctx, node)
-	default:
-		return ctrl.Result{}, nil
-	}
+	return r.shutdownService(ctx, node)
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
