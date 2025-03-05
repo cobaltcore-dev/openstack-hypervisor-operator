@@ -195,8 +195,8 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	host, err := normalizeName(node)
-	if err != nil {
+	host, found := node.Labels[labelMetalName]
+	if !found {
 		return ctrl.Result{}, nil // That is expected, the label will be set eventually
 	}
 

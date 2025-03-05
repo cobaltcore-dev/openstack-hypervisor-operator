@@ -65,7 +65,7 @@ var _ = Describe("Maintenance Controller", func() {
 			resource := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   nodeName,
-					Labels: map[string]string{HOST_LABEL: "test", labelEvictionRequired: "true"},
+					Labels: map[string]string{labelMetalName: "test", labelEvictionRequired: "true"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
