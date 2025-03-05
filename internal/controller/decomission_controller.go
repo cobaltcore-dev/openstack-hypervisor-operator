@@ -102,14 +102,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	// Remove the label for the hypervisor to shutdown the agents
-	changed, err := unsetNodeLabels(ctx, r.Client, node, labelHypervisor)
-	if err != nil || changed { // reconcile again or retry
-		return ctrl.Result{}, err
-	}
-
 	host, err := normalizeName(node)
-
 	if err != nil {
 		return ctrl.Result{}, err
 	}
