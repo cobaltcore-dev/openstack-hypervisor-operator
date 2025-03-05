@@ -25,7 +25,9 @@ rules:
   resources:
   - deployments
   verbs:
-  - get
+  - ;get
+  - create
+  - delete
   - list
   - patch
   - update
@@ -71,6 +73,8 @@ rules:
   resources:
   - poddisruptionbudgets
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch
