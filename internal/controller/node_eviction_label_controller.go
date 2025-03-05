@@ -36,8 +36,7 @@ import (
 const (
 	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
 	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
-	HOST_LABEL            = "kubernetes.metal.cloud.sap/host" // metal3
-	NAME_LABEL            = "kubernetes.metal.cloud.sap/name" // metal
+	labelMetalName        = "kubernetes.metal.cloud.sap/name"
 	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
 )
 

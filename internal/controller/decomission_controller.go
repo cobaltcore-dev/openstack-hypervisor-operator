@@ -19,7 +19,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -33,6 +32,7 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 )
 
@@ -102,37 +102,42 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	host, err := normalizeName(node)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+	hypervisorID, found := node.Labels[labelHypervisorID]
+	if !found {
+		hostname := node.Labels[corev1.LabelHostname]
+		allPages, err := hypervisors.List(r.serviceClient, hypervisors.ListOpts{HypervisorHostnamePattern: &hostname}).AllPages(ctx)
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			return r.removeFinalizer(ctx, node)
+		}
 
-	// Getting deleted, so we better clean-up
-	computeHostQuery := services.ListOpts{Binary: "nova-compute", Host: host}
-	hostPages, err := services.List(r.serviceClient, computeHostQuery).AllPages(ctx)
-
-	var anyError error
-	if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		serviceList, err := services.ExtractServices(hostPages)
+		hypervisorList, err := hypervisors.ExtractHypervisors(allPages)
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) || len(hypervisorList) == 0 {
+			return r.removeFinalizer(ctx, node)
+		}
 		if err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("cannot query hypervisor")
 		}
 
-		for _, service := range serviceList {
-			// Deleting and evicted, so better delete the service
-			err = services.Delete(ctx, r.serviceClient, service.ID).ExtractErr()
-			if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-				anyError = err
-			}
-		}
-
-		if anyError != nil {
-			return ctrl.Result{}, err
-		}
+		hypervisorID = hypervisorList[0].ID
 	}
 
-	// Host empty, service deleted, we are good to go
-	return r.removeFinalizer(ctx, node)
+	hypervisor, err := hypervisors.Get(ctx, r.serviceClient, hypervisorID).Extract()
+	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		// We are (hopefully) done
+		return r.removeFinalizer(ctx, node)
+	}
+
+	if hypervisor.RunningVMs > 0 {
+		return ctrl.Result{}, fmt.Errorf("cannot shutdown service, VMs still running %v", hypervisor.RunningVMs)
+	}
+
+	// Deleting and evicted, so better delete the service
+	err = services.Delete(ctx, r.serviceClient, hypervisor.Service.ID).ExtractErr()
+	if err == nil || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return r.removeFinalizer(ctx, node)
+	}
+
+	return ctrl.Result{}, err
 }
 
 func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
@@ -144,19 +149,6 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 	return ctrl.Result{}, nil
 }
 
-// normalizeName returns the host name of the node.
-func normalizeName(node *corev1.Node) (string, error) {
-	if name, found := node.Labels[NAME_LABEL]; found {
-		return name, nil
-	}
-
-	if host, found := node.Labels[HOST_LABEL]; found {
-		return host, nil
-	}
-
-	return "", errors.New("could not find node name")
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
@@ -166,9 +158,7 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	if err != nil {
-		return fmt.Errorf("could not create label selector due to %w", err)
-	}
+	r.serviceClient.Microversion = "2.93"
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
