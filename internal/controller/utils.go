@@ -36,11 +36,14 @@ func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
 		}
 	}
 
+	falseValue := false
 	obj.OwnerReferences = append(obj.OwnerReferences, metav1.OwnerReference{
-		APIVersion: owner.APIVersion,
-		Kind:       owner.Kind,
-		Name:       owner.Name,
-		UID:        owner.UID,
+		APIVersion:         owner.APIVersion,
+		Kind:               owner.Kind,
+		Name:               owner.Name,
+		UID:                owner.UID,
+		BlockOwnerDeletion: &falseValue,
+		Controller:         &falseValue,
 	})
 
 	return true
