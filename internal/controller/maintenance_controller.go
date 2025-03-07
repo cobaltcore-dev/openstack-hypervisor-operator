@@ -109,7 +109,6 @@ func (r *MaintenanceController) ensureBlockingPodDisruptionBudget(ctx context.Co
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, podDisruptionBudget, func() error {
-		addNodeOwnerReference(&podDisruptionBudget.ObjectMeta, node)
 		minAvail := intstr.FromInt32(minAvailable)
 		podDisruptionBudget.Labels = map[string]string{
 			labelMetalName: node.Labels[labelMetalName],
@@ -162,7 +161,6 @@ func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, no
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
-		addNodeOwnerReference(&deployment.ObjectMeta, node)
 		labels := labelsForNode(node)
 		deployment.Name = name
 		deployment.Labels = labels
