@@ -20,6 +20,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,10 +35,12 @@ import (
 )
 
 const (
-	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
-	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
-	labelMetalName        = "kubernetes.metal.cloud.sap/name"
-	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
+	labelEvictionRequired   = "cloud.sap/hypervisor-eviction-required"
+	labelEvictionApproved   = "cloud.sap/hypervisor-eviction-succeeded"
+	labelMetalName          = "kubernetes.metal.cloud.sap/name"
+	labelHypervisor         = "nova.openstack.cloud.sap/virt-driver"
+	DisabledSuffix          = "-disabled"
+	labelMl2MechanismDriver = "neutron.openstack.cloud.sap/ml2-mechanism-driver"
 )
 
 type NodeEvictionLabelReconciler struct {
@@ -72,6 +76,15 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	var err error
 	if !found {
+		newNode := node.DeepCopy()
+		permitAgentsLabels(newNode.Labels)
+		delete(newNode.Labels, labelEvictionApproved)
+		if !maps.Equal(newNode.Labels, node.Labels) {
+			err = r.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+			if err != nil {
+				return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+			}
+		}
 		err = r.Delete(ctx, eviction)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
@@ -107,10 +120,42 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if value != "" {
-		_, err = setNodeLabels(ctx, r, node, map[string]string{labelEvictionApproved: value})
+		newNode := node.DeepCopy()
+		if value == "true" {
+			evictAgentsLabels(newNode.Labels)
+		}
+		newNode.Labels[labelEvictionApproved] = value
+
+		if !maps.Equal(newNode.Labels, node.Labels) {
+			err = r.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+		}
 	}
 
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+}
+
+func evictAgentsLabels(labels map[string]string) {
+	hypervisorType, found := labels[labelHypervisor]
+	if found && !strings.HasSuffix(hypervisorType, DisabledSuffix) {
+		labels[labelHypervisor] = hypervisorType + DisabledSuffix
+	}
+	ml2MechanismDriver, found := labels[labelMl2MechanismDriver]
+	if found && !strings.HasSuffix(ml2MechanismDriver, DisabledSuffix) {
+		labels[labelMl2MechanismDriver] = ml2MechanismDriver + DisabledSuffix
+	}
+}
+
+func permitAgentsLabels(labels map[string]string) {
+	hypervisorType, found := labels[labelHypervisor]
+	if found && strings.HasSuffix(hypervisorType, DisabledSuffix) {
+		labels[labelHypervisor] = strings.TrimSuffix(hypervisorType, DisabledSuffix)
+	}
+	ml2MechanismDriver, found := labels[labelMl2MechanismDriver]
+	if found && strings.HasSuffix(ml2MechanismDriver, DisabledSuffix) {
+		labels[labelMl2MechanismDriver] = strings.TrimSuffix(ml2MechanismDriver, DisabledSuffix)
+	}
+
+	return
 }
 
 // SetupWithManager sets up the controller with the Manager.
