@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -65,37 +64,36 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	value, found := node.Labels[labelEvictionRequired]
 	name := fmt.Sprintf("maintenance-required-%v", hostname)
-	eviction := kvmv1.Eviction{
+	eviction := &kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-		},
-		Spec: kvmv1.EvictionSpec{
-			Hypervisor: hostname,
-			Reason: fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired,
-				value),
 		},
 	}
 
 	var err error
 	if !found {
-		err = r.Delete(ctx, &eviction)
+		err = r.Delete(ctx, eviction)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
 	// check for existing eviction, else create it
-	if err = r.Get(ctx, k8sclient.ObjectKeyFromObject(&eviction), &eviction); err != nil {
-		if k8serrors.IsNotFound(err) {
-			// attach ownerReference to the eviction, so we get notified about its changes
-			if err = controllerutil.SetControllerReference(node, &eviction, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			log.Info("Creating new eviction", "name", name)
-			if err = r.Create(ctx, &eviction); err != nil {
-				return ctrl.Result{}, err
-			}
+	if err = r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
+		if !k8serrors.IsNotFound(err) {
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
+		addNodeOwnerReference(&eviction.ObjectMeta, node)
+		log.Info("Creating new eviction", "name", name)
+		eviction.Labels = map[string]string{
+			labelMetalName: node.Labels[labelMetalName],
+		}
+		eviction.Spec = kvmv1.EvictionSpec{
+			Hypervisor: hostname,
+			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, value),
+		}
+
+		if err = r.Create(ctx, eviction); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// check if the eviction is already succeeded
