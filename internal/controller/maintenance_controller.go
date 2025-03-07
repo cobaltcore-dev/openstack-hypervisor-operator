@@ -67,8 +67,11 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, labelLifecycleOptIn)
-	if !found {
+	if !hasAnyLabel(node.Labels, labelLifecycleOptIn) {
+		return ctrl.Result{}, nil
+	}
+
+	if !hasAnyLabel(node.Labels, labelMetalName) {
 		return ctrl.Result{}, nil
 	}
 
@@ -89,7 +92,7 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureBlockingDeployment(ctx, node); err != nil {
+	if err := r.ensureBlockingDeployment(ctx, node, minAvailable); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -108,10 +111,13 @@ func (r *MaintenanceController) ensureBlockingPodDisruptionBudget(ctx context.Co
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, podDisruptionBudget, func() error {
 		addNodeOwnerReference(&podDisruptionBudget.ObjectMeta, node)
 		minAvail := intstr.FromInt32(minAvailable)
+		podDisruptionBudget.Labels = map[string]string{
+			labelMetalName: node.Labels[labelMetalName],
+		}
 		podDisruptionBudget.Spec = policyv1.PodDisruptionBudgetSpec{
 			MinAvailable: &minAvail,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labelsForName(name),
+				MatchLabels: labelsForNode(node),
 			},
 		}
 		return controllerutil.SetControllerReference(node, podDisruptionBudget, r.Scheme)
@@ -139,13 +145,14 @@ func nameForNode(node *corev1.Node) string {
 	return fmt.Sprintf("block-%v", node.Name)
 }
 
-func labelsForName(name string) map[string]string {
+func labelsForNode(node *corev1.Node) map[string]string {
 	return map[string]string{
-		labelDeployment: name,
+		labelDeployment: nameForNode(node),
+		labelMetalName:  node.Labels[labelMetalName],
 	}
 }
 
-func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, node *corev1.Node) error {
+func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, node *corev1.Node, scale int32) error {
 	name := nameForNode(node)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -156,10 +163,11 @@ func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, no
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		addNodeOwnerReference(&deployment.ObjectMeta, node)
-		labels := labelsForName(name)
+		labels := labelsForNode(node)
 		deployment.Name = name
 		deployment.Labels = labels
 		deployment.Spec = appsv1.DeploymentSpec{
+			Replicas: &scale,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
