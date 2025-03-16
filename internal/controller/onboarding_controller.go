@@ -259,9 +259,11 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
-	err = addToAggregate(ctx, r.serviceClient, aggs, host, testAggregateName, "")
-	if err != nil {
-		return fmt.Errorf("failed to agg to test aggregate %w", err)
+	if _, found := node.Labels[corev1.LabelTopologyZone]; found {
+		err = addToAggregate(ctx, r.serviceClient, aggs, host, testAggregateName, "")
+		if err != nil {
+			return fmt.Errorf("failed to agg to test aggregate %w", err)
+		}
 	}
 
 	serviceId, found := node.Labels[labelServiceID]
