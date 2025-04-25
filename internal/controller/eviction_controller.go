@@ -206,6 +206,24 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 
 	log = log.WithValues("server_status", vm.Status)
 
+	// First, check the transient statuses
+	switch vm.Status {
+	case "MIGRATING", "RESIZE":
+		// wait for the migration to finish
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	case "ERROR":
+		// Needs manual intervention (or another operator fixes it)
+		// put it at the end of the list (beginning of array)
+		copy((*instances)[1:], (*instances)[:len(*instances)-1])
+		(*instances)[0] = uuid
+		log.Info("error", "faultMessage", vm.Fault.Message)
+		if err := r.Status().Update(ctx, eviction); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return reconcile.Result{}, fmt.Errorf("error migrating instance %v", uuid)
+	}
+
 	currentHypervisor, _, _ := strings.Cut(vm.HypervisorHostname, ".")
 
 	if currentHypervisor != eviction.Spec.Hypervisor {
@@ -226,23 +244,6 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		// All done
 		*instances = (*instances)[:len(*instances)-1]
 		return reconcile.Result{}, r.Status().Update(ctx, eviction)
-	}
-
-	switch vm.Status {
-	case "MIGRATING", "RESIZE":
-		// wait for the migration to finish
-		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
-	case "ERROR":
-		// Needs manual intervention (or another operator fixes it)
-		// put it at the end of the list (beginning of array)
-		copy((*instances)[1:], (*instances)[:len(*instances)-1])
-		(*instances)[0] = uuid
-		log.Info("error", "faultMessage", vm.Fault.Message)
-		if err := r.Status().Update(ctx, eviction); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		return reconcile.Result{}, fmt.Errorf("error migrating instance %v", uuid)
 	}
 
 	if vm.Status == "ACTIVE" || vm.PowerState == 1 {
