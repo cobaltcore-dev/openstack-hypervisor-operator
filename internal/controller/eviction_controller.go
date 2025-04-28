@@ -29,6 +29,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,9 +46,10 @@ import (
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	serviceClient *gophercloud.ServiceClient
-	rand          *rand.Rand
+	Scheme           *runtime.Scheme
+	computeClient    *gophercloud.ServiceClient
+	instanceHAClient *gophercloud.ServiceClient
+	rand             *rand.Rand
 }
 
 const (
@@ -105,6 +107,11 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 		return r.evictNext(ctx, eviction)
 	}
 
+	err := r.setServerMaintenance(ctx, eviction, true)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
 		Status:  metav1.ConditionTrue,
@@ -118,11 +125,34 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
+func (r *EvictionReconciler) setServerMaintenance(ctx context.Context, eviction *kvmv1.Eviction, maintenance bool) error {
+	for _, owner := range eviction.GetOwnerReferences() {
+		if owner.Kind == "Node" && owner.APIVersion == "v1" {
+			node := &corev1.Node{}
+			err := r.Client.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
+			// Not found means no labels, so the rest will work as well
+			if client.IgnoreNotFound(err) != nil {
+				return err
+			}
+
+			segmentID, segmentIDFound := node.Labels[labelSegmentID]
+			hostID, hostIDFound := node.Labels[labelMasakariHostID]
+
+			if !segmentIDFound || !hostIDFound {
+				continue
+			}
+
+			return openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, hostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &maintenance}).Err
+		}
+	}
+	return nil
+}
+
 func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
 
 	// Does the hypervisor even exist? Is it enabled/disabled?
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, false)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, false)
 	if err != nil {
 		// Abort eviction
 		err = fmt.Errorf("failed to get hypervisor %w", err)
@@ -160,7 +190,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	}
 
 	// Fetch all virtual machines on the hypervisor
-	hypervisor, err = openstack.GetHypervisorByName(ctx, r.serviceClient, hypervisorName, true)
+	hypervisor, err = openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, true)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -192,7 +222,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	uuid := (*instances)[len(*instances)-1]
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
 
-	res := servers.Get(ctx, r.serviceClient, uuid)
+	res := servers.Get(ctx, r.computeClient, uuid)
 	vm, err := res.Extract()
 
 	if err != nil {
@@ -230,7 +260,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		log.Info("migrated")
 		// So, it is already off this one, do we need to verify it?
 		if vm.Status == "VERIFY_RESIZE" {
-			if err := servers.ConfirmResize(ctx, r.serviceClient, vm.ID).ExtractErr(); err != nil {
+			if err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr(); err != nil {
 				if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 					log.Info("Instance is gone")
 					// Fall-back to beginning, which will clean it out
@@ -293,7 +323,12 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
 	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
-		err := r.enableHypervisorService(ctx, eviction)
+		err := r.setServerMaintenance(ctx, eviction, false)
+		if err != nil {
+			return err
+		}
+
+		err = r.enableHypervisorService(ctx, eviction)
 		if err != nil {
 			if _, ok := err.(*openstack.NoHypervisorError); ok {
 				log := logger.FromContext(ctx)
@@ -311,7 +346,7 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, eviction *kvmv1.Eviction) error {
-	hypervisor, err := openstack.GetHypervisorByName(ctx, r.serviceClient, eviction.Spec.Hypervisor, false)
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, eviction.Spec.Hypervisor, false)
 	if err != nil {
 		err2 := fmt.Errorf("failed to get hypervisor due to %w", err)
 		// Abort eviction
@@ -326,7 +361,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 	log := logger.FromContext(ctx)
 	enableService := services.UpdateOpts{Status: services.ServiceEnabled}
 	log.Info("Enabling hypervisor", "id", hypervisor.Service.ID)
-	_, err = services.Update(ctx, r.serviceClient, hypervisor.Service.ID, enableService).Extract()
+	_, err = services.Update(ctx, r.computeClient, hypervisor.Service.ID, enableService).Extract()
 	return err
 }
 
@@ -350,7 +385,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 	disableService := services.UpdateOpts{Status: services.ServiceDisabled,
 		DisabledReason: r.evictionReason(eviction)}
 
-	_, err := services.Update(ctx, r.serviceClient, hypervisor.Service.ID, disableService).Extract()
+	_, err := services.Update(ctx, r.computeClient, hypervisor.Service.ID, disableService).Extract()
 	if err != nil {
 		return r.addErrorCondition(ctx, eviction, err), err
 	}
@@ -369,7 +404,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 		BlockMigration: swag.Bool(false),
 	}
 
-	res := servers.LiveMigrate(ctx, r.serviceClient, uuid, liveMigrateOpts)
+	res := servers.LiveMigrate(ctx, r.computeClient, uuid, liveMigrateOpts)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
 		r.addErrorCondition(ctx, eviction, err)
@@ -383,7 +418,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {
 	log := logger.FromContext(ctx)
 
-	res := servers.Migrate(ctx, r.serviceClient, uuid)
+	res := servers.Migrate(ctx, r.computeClient, uuid)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
 		r.addErrorCondition(ctx, eviction, err)
@@ -426,10 +461,15 @@ func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kv
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
 		return err
 	}
-	r.serviceClient.Microversion = "2.90" // Xena (or later)
+	r.computeClient.Microversion = "2.90" // Xena (or later)
+
+	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+		return err
+	}
+
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	return ctrl.NewControllerManagedBy(mgr).

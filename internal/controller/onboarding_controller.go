@@ -47,17 +47,21 @@ const (
 	defaultWaitTime        = 1 * time.Minute
 	labelHypervisorID      = "nova.openstack.cloud.sap/hypervisor-id"
 	labelServiceID         = "nova.openstack.cloud.sap/service-id"
+	labelSegmentID         = "masakari.openstack.cloud.sap/segment-id"
+	labelMasakariHostID    = "masakari.openstack.cloud.sap/host-id"
 	labelOnboardingState   = "cobaltcore.cloud.sap/onboarding-state"
+	labelSegmentName       = "kubernetes.metal.cloud.sap/bb"
 	onboardingValueInitial = "initial"
 	testAggregateName      = "tenant_filter_tests"
 )
 
 type OnboardingController struct {
 	k8sclient.Client
-	Scheme        *runtime.Scheme
-	serviceClient *gophercloud.ServiceClient
-	namespace     string
-	issuerName    string
+	Scheme           *runtime.Scheme
+	computeClient    *gophercloud.ServiceClient
+	instanceHAClient *gophercloud.ServiceClient
+	namespace        string
+	issuerName       string
 }
 
 func getSecretAndCertName(name string) (string, string) {
@@ -206,9 +210,19 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	result, err := r.ensureOpenstackLabels(ctx, node)
-	if !result.IsZero() || err != nil {
+	result, changed, err := r.ensureNovaLabels(ctx, node)
+	if !result.IsZero() || changed || err != nil {
 		return result, k8sclient.IgnoreNotFound(err)
+	}
+
+	segmentName, segmentNameFound := node.Labels[labelSegmentName]
+	if !segmentNameFound {
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+	}
+
+	changed, err = r.ensureMasakariLabels(ctx, node, segmentName)
+	if changed || err != nil {
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
 	err = r.initialOnboarding(ctx, node, host)
@@ -248,13 +262,13 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
-	aggs, err := aggregatesByName(ctx, r.serviceClient)
+	aggs, err := aggregatesByName(ctx, r.computeClient)
 
 	if err != nil {
 		return fmt.Errorf("cannot list aggregates %w", err)
 	}
 
-	err = addToAggregate(ctx, r.serviceClient, aggs, host, zone, zone)
+	err = addToAggregate(ctx, r.computeClient, aggs, host, zone, zone)
 	if err != nil {
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
@@ -271,7 +285,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 	if !found || serviceId == "" {
 		return fmt.Errorf("empty service-id for label %v on node", labelServiceID)
 	}
-	result := services.Update(ctx, r.serviceClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
+	result := services.Update(ctx, r.computeClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
 	if result.Err != nil {
 		return result.Err
 	}
@@ -312,38 +326,38 @@ func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClien
 	return nil
 }
 
-func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
+func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {
 	_, hypervisorIdSet := node.Labels[labelHypervisorID]
 	_, serviceIdSet := node.Labels[labelServiceID]
 
 	// We bail here out, because the openstack api is not the best to poll
 	if hypervisorIdSet && serviceIdSet {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, false, nil
 	}
 
 	hypervisorAddress := getHypervisorAddress(node)
 	if hypervisorAddress == "" {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
 	}
 
 	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 1)[0]
 
 	hypervisorQuery := hypervisors.ListOpts{HypervisorHostnamePattern: &shortHypervisorAddress}
-	hypervisorPages, err := hypervisors.List(r.serviceClient, hypervisorQuery).AllPages(ctx)
+	hypervisorPages, err := hypervisors.List(r.computeClient, hypervisorQuery).AllPages(ctx)
 
 	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
 	} else if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, false, err
 	}
 
 	hs, err := hypervisors.ExtractHypervisors(hypervisorPages)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, false, err
 	}
 
 	if len(hs) < 1 {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
 	}
 
 	var found = false
@@ -358,7 +372,7 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 	}
 
 	if !found {
-		return ctrl.Result{}, fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
+		return ctrl.Result{}, false, fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
 	}
 
 	changed, err := setNodeLabels(ctx, r, node, map[string]string{
@@ -367,10 +381,101 @@ func (r *OnboardingController) ensureOpenstackLabels(ctx context.Context, node *
 	})
 
 	if err != nil || changed {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, changed, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, false, nil
+}
+
+func (r *OnboardingController) ensureMasakariLabels(ctx context.Context, node *corev1.Node, segmentName string) (bool, error) {
+	segmentID, segmentIDFound := node.Labels[labelSegmentID]
+	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
+
+	// We do not handle changing IDs, as it would require polling the maskari API
+	if segmentIDFound && segmentHostIDFound {
+		return false, nil
+	}
+
+	if !segmentIDFound {
+		segmentPage, err := openstack.ListSegments(r.instanceHAClient).AllPages(ctx)
+		if err != nil {
+			return false, err
+		}
+
+		segments, err := openstack.ExtractSegments(segmentPage)
+		if err != nil {
+			return false, err
+		}
+
+		for _, segment := range segments {
+			if segment.Name == segmentName {
+				segmentID = segment.UUID
+				break
+			}
+		}
+	}
+
+	if segmentID == "" {
+		opts := openstack.CreateSegmentOpts{Name: segmentName, RecoveryMethod: "auto", ServiceType: "COMPUTE"}
+		result := openstack.CreateSegment(ctx, r.instanceHAClient, opts)
+		if result.Err != nil {
+			return false, result.Err
+		}
+		segment, err := result.Extract()
+		if err != nil {
+			return false, err
+		}
+		segmentID = segment.UUID
+	}
+
+	if !segmentHostIDFound {
+		segmentHostPage, err := openstack.ListSegmentHosts(ctx, r.instanceHAClient, segmentID).AllPages(ctx)
+		if err != nil {
+			return false, err
+		}
+
+		segmentHosts, err := openstack.ExtractSegmentHosts(segmentHostPage)
+		if err != nil {
+			return false, err
+		}
+
+		host := node.Labels[labelMetalName]
+		for _, segmentHost := range segmentHosts {
+			if segmentHost.Name == host {
+				segmentHostID = segmentHost.UUID
+				break
+			}
+		}
+
+		if segmentHostID == "" {
+			opts := openstack.CreateSegmentHostOpts{Type: "COMPUTE", Name: host}
+			result := openstack.CreateSegmentHost(ctx, r.instanceHAClient, segmentID, opts)
+			if result.Err != nil {
+				return false, result.Err
+			}
+
+			segmentHost, err := result.Extract()
+			if err != nil {
+				return false, err
+			}
+
+			if segmentHost == nil {
+				return false, fmt.Errorf("failed to extract host from response")
+			}
+
+			segmentHostID = segmentHost.UUID
+		}
+	}
+
+	falseValue := false
+	openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, segmentHostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &falseValue, Reserved: &falseValue})
+
+	changed, err := setNodeLabels(ctx, r, node, map[string]string{
+		labelSegmentID:      segmentID,
+		labelMasakariHostID: segmentHostID,
+	})
+
+	return changed, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -381,10 +486,14 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager, namespace, iss
 	r.issuerName = issuerName
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
 		return err
 	}
-	r.serviceClient.Microversion = "2.88"
+	r.computeClient.Microversion = "2.88"
+
+	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+		return err
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("onboarding").

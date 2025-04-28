@@ -154,8 +154,6 @@ func permitAgentsLabels(labels map[string]string) {
 	if found && strings.HasSuffix(ml2MechanismDriver, DisabledSuffix) {
 		labels[labelMl2MechanismDriver] = strings.TrimSuffix(ml2MechanismDriver, DisabledSuffix)
 	}
-
-	return
 }
 
 // SetupWithManager sets up the controller with the Manager.

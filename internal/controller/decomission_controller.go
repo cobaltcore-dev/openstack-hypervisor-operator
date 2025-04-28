@@ -43,8 +43,9 @@ const (
 
 type NodeDecommissionReconciler struct {
 	k8sclient.Client
-	Scheme        *runtime.Scheme
-	serviceClient *gophercloud.ServiceClient
+	Scheme           *runtime.Scheme
+	computeClient    *gophercloud.ServiceClient
+	instanceHAClient *gophercloud.ServiceClient
 }
 
 // The counter-side in gardener is here:
@@ -94,18 +95,43 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Someone is just deleting the node, without going through termination
 	if !isTerminating(node) {
+		log.Info("removing finalizer since not terminating")
 		// So we just get out of the way for now
 		return r.removeFinalizer(ctx, node)
 	}
 
+	log.Info("removing host from failover")
+	if err := r.removeFromFailoverSegment(ctx, node); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("shutting down host from failover")
 	return r.shutdownService(ctx, node)
+}
+
+func (r *NodeDecommissionReconciler) removeFromFailoverSegment(ctx context.Context, node *corev1.Node) error {
+	segmentID, segmentIDFound := node.Labels[labelSegmentID]
+	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
+
+	// Nothing we can do about it
+	if !segmentIDFound && !segmentHostIDFound {
+		return nil
+	}
+
+	err := openstack.DeleteSegmentHost(ctx, r.instanceHAClient, segmentID, segmentHostID)
+
+	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return nil
+	}
+
+	return err
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
 	hypervisorID, found := node.Labels[labelHypervisorID]
 	if !found {
 		hostname := node.Labels[corev1.LabelHostname]
-		allPages, err := hypervisors.List(r.serviceClient, hypervisors.ListOpts{HypervisorHostnamePattern: &hostname}).AllPages(ctx)
+		allPages, err := hypervisors.List(r.computeClient, hypervisors.ListOpts{HypervisorHostnamePattern: &hostname}).AllPages(ctx)
 		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 			return r.removeFinalizer(ctx, node)
 		}
@@ -121,7 +147,7 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 		hypervisorID = hypervisorList[0].ID
 	}
 
-	hypervisor, err := hypervisors.Get(ctx, r.serviceClient, hypervisorID).Extract()
+	hypervisor, err := hypervisors.Get(ctx, r.computeClient, hypervisorID).Extract()
 	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		// We are (hopefully) done
 		return r.removeFinalizer(ctx, node)
@@ -132,7 +158,7 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 	}
 
 	// Deleting and evicted, so better delete the service
-	err = services.Delete(ctx, r.serviceClient, hypervisor.Service.ID).ExtractErr()
+	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
 	if err == nil || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		return r.removeFinalizer(ctx, node)
 	}
@@ -154,11 +180,15 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(context.Background())
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
 		return err
 	}
 
-	r.serviceClient.Microversion = "2.93"
+	r.computeClient.Microversion = "2.93"
+
+	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+		return err
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
