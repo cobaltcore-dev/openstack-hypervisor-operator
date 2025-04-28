@@ -10,7 +10,7 @@ require (
 	github.com/gophercloud/gophercloud/v2 v2.5.0
 	github.com/gophercloud/utils/v2 v2.0.0-20250212084022-725b94822eeb
 	github.com/onsi/ginkgo/v2 v2.23.4
-	github.com/onsi/gomega v1.36.3
+	github.com/onsi/gomega v1.37.0
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
 	k8s.io/client-go v0.32.2
