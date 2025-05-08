@@ -40,6 +40,7 @@ func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.Ser
 		clientOpts.AuthInfo = &clientconfig.AuthInfo{Password: strings.TrimSuffix(string(out), "\n")}
 	}
 
+	clientOpts.AuthInfo.AllowReauth = true
 	provider, err := clientconfig.AuthenticatedClient(ctx, &clientOpts)
 	if err != nil {
 		return nil, err
