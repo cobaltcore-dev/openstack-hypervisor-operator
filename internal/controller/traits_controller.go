@@ -114,10 +114,11 @@ func (r *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "placement"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(ctx, "placement"); err != nil {
 		return err
 	}
 	r.serviceClient.Microversion = "1.39" // yoga, or later

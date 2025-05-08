@@ -177,16 +177,17 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 
 	r.computeClient.Microversion = "2.93"
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
 		return err
 	}
 

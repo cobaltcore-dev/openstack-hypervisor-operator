@@ -158,7 +158,8 @@ func permitAgentsLabels(labels map[string]string) {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeEvictionLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeEvictionLabel").

@@ -194,11 +194,12 @@ func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, no
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MaintenanceController) SetupWithManager(mgr ctrl.Manager, namespace string) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 	r.namespace = namespace
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 

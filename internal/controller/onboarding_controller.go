@@ -480,18 +480,19 @@ func (r *OnboardingController) ensureMasakariLabels(ctx context.Context, node *c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
 
 	r.namespace = namespace
 	r.issuerName = issuerName
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.88"
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
 		return err
 	}
 

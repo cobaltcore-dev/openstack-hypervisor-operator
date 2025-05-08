@@ -459,14 +459,16 @@ func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kv
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	_ = logger.FromContext(context.Background())
+	ctx := context.Background()
+	_ = logger.FromContext(ctx)
+
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(context.Background(), "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(context.Background(), "instance-ha"); err != nil {
+	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
 		return err
 	}
 
