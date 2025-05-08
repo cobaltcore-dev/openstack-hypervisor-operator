@@ -174,6 +174,7 @@ func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, no
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					HostNetwork: true, // As the agents are also running int that mode
 					NodeSelector: map[string]string{
 						corev1.LabelHostname: node.Labels[corev1.LabelHostname],
 					},
