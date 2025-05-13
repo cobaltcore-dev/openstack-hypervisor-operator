@@ -38,7 +38,6 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 )
@@ -233,24 +232,6 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceClient) (map[string]*aggregates.Aggregate, error) {
-	pages, err := aggregates.List(serviceClient).AllPages(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggs, err := aggregates.ExtractAggregates(pages)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggregateMap := make(map[string]*aggregates.Aggregate, len(aggs))
-	for _, aggregate := range aggs {
-		aggregateMap[aggregate.Name] = &aggregate
-	}
-	return aggregateMap, nil
-}
-
 func (r *OnboardingController) initialOnboarding(ctx context.Context, node *corev1.Node, host string) error {
 	_, found := node.Labels[labelOnboardingState]
 	if found {
@@ -295,35 +276,6 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 	})
 
 	return err
-}
-
-func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name, zone string) (err error) {
-	aggregate, found := aggs[name]
-	if !found {
-		aggregate, err = aggregates.Create(ctx, serviceClient,
-			aggregates.CreateOpts{
-				Name:             name,
-				AvailabilityZone: zone,
-			}).Extract()
-		if err != nil {
-			return fmt.Errorf("failed to create aggregate %v due to %w", name, err)
-		}
-	}
-
-	found = false
-	for _, aggHost := range aggregate.Hosts {
-		if aggHost == host {
-			found = true
-		}
-	}
-
-	if !found {
-		err := aggregates.AddHost(ctx, serviceClient, aggregate.ID, aggregates.AddHostOpts{Host: host}).Err
-		if err != nil {
-			return fmt.Errorf("failed to add host %v to aggregate %v due to %w", host, name, err)
-		}
-	}
-	return nil
 }
 
 func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {

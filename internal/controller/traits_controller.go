@@ -130,26 +130,13 @@ func (r *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func extractTraits(node *corev1.Node, key string) (values map[string]bool) {
-	value, found := node.Annotations[key]
-	if !found {
-		values = make(map[string]bool, 0)
-		return
-	}
-
-	unparsed := strings.Split(value, ",")
-	values = make(map[string]bool, len(unparsed))
-	for _, item := range unparsed {
-		if item == "" {
-			continue
-		}
+	return extractAnnotationListInternal(node, key, func(item string) string {
 		item = strings.ToUpper(item)
 		if !strings.HasPrefix(item, customPrefix) {
 			item = customPrefix + item
 		}
-
-		values[item] = true
-	}
-	return
+		return item
+	})
 }
 
 // returns all elements in b not in a
