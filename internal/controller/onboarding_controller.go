@@ -246,7 +246,11 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	switch node.Labels[labelOnboardingState] {
 	case onboardingValueTesting:
-		result, err = r.smokeTest(ctx, node, host)
+		if node.Labels[labelLifecycleMode] == "skip-tests" {
+			result, err = r.completeOnboarding(ctx, host, node)
+		} else {
+			result, err = r.smokeTest(ctx, node, host)
+		}
 		return result, k8sclient.IgnoreNotFound(err)
 	case "":
 		err = r.initialOnboarding(ctx, node, host)
@@ -324,24 +328,27 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 			return ctrl.Result{}, fmt.Errorf("failed to terminate instance %w", err)
 		}
 
-		aggs, err := aggregatesByName(ctx, r.computeClient)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
-		}
-
-		err = removeFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
-		}
-
-		_, err = setNodeLabels(ctx, r, node, map[string]string{
-			labelOnboardingState: onboardingValueCompleted,
-		})
-
-		return ctrl.Result{}, err
+		return r.completeOnboarding(ctx, host, node)
 	default:
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
+}
+
+func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node) (ctrl.Result, error) {
+	aggs, err := aggregatesByName(ctx, r.computeClient)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
+	}
+
+	err = removeFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
+	}
+
+	_, err = setNodeLabels(ctx, r, node, map[string]string{
+		labelOnboardingState: onboardingValueCompleted,
+	})
+	return ctrl.Result{}, nil
 }
 
 func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {
@@ -640,7 +647,6 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager, namespace, iss
 	testAuth := &clientconfig.AuthInfo{
 		ProjectName:       testProjectName,
 		ProjectDomainName: testDomainName,
-		UserDomainName:    testDomainName,
 	}
 
 	if r.testComputeClient, err = openstack.GetServiceClientAuth(ctx, "compute", testAuth); err != nil {

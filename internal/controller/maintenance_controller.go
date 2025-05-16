@@ -67,7 +67,7 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !hasAnyLabel(node.Labels, labelLifecycleOptIn) {
+	if !hasAnyLabel(node.Labels, labelLifecycleMode) {
 		return ctrl.Result{}, nil
 	}
 

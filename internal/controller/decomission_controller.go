@@ -38,7 +38,7 @@ import (
 
 const (
 	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
-	labelLifecycleOptIn       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	labelLifecycleMode        = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
 )
 
 type NodeDecommissionReconciler struct {
@@ -64,7 +64,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, labelLifecycleOptIn)
+	found := hasAnyLabel(node.Labels, labelLifecycleMode)
 
 	if !found {
 		// Get out of the way
