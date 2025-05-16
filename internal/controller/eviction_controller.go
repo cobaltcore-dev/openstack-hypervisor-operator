@@ -126,6 +126,10 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 }
 
 func (r *EvictionReconciler) setServerMaintenance(ctx context.Context, eviction *kvmv1.Eviction, maintenance bool) error {
+	if r.instanceHAClient == nil {
+		return nil
+	}
+
 	for _, owner := range eviction.GetOwnerReferences() {
 		if owner.Kind == "Node" && owner.APIVersion == "v1" {
 			node := &corev1.Node{}
@@ -460,7 +464,7 @@ func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kv
 // SetupWithManager sets up the controller with the Manager.
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
+	log := logger.FromContext(ctx)
 
 	var err error
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
@@ -468,8 +472,9 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
-		return err
+	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
+	if err != nil {
+		log.Error(err, "failed to find masakari")
 	}
 
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))

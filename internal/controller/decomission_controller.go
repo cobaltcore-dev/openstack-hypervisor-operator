@@ -110,6 +110,9 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 func (r *NodeDecommissionReconciler) removeFromFailoverSegment(ctx context.Context, node *corev1.Node) error {
+	if r.instanceHAClient == nil {
+		return nil
+	}
 	segmentID, segmentIDFound := node.Labels[labelSegmentID]
 	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
 
@@ -178,7 +181,7 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
+	log := logger.FromContext(ctx)
 
 	var err error
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
@@ -187,8 +190,9 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	r.computeClient.Microversion = "2.93"
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
-		return err
+	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
+	if err != nil {
+		log.Error(err, "failed to find masakari")
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

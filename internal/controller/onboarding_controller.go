@@ -38,29 +38,45 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
+	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 )
 
 const (
-	defaultWaitTime        = 1 * time.Minute
-	labelHypervisorID      = "nova.openstack.cloud.sap/hypervisor-id"
-	labelServiceID         = "nova.openstack.cloud.sap/service-id"
-	labelSegmentID         = "masakari.openstack.cloud.sap/segment-id"
-	labelMasakariHostID    = "masakari.openstack.cloud.sap/host-id"
-	labelOnboardingState   = "cobaltcore.cloud.sap/onboarding-state"
-	labelSegmentName       = "kubernetes.metal.cloud.sap/bb"
-	onboardingValueInitial = "initial"
-	testAggregateName      = "tenant_filter_tests"
+	defaultWaitTime          = 1 * time.Minute
+	labelHypervisorID        = "nova.openstack.cloud.sap/hypervisor-id"
+	labelServiceID           = "nova.openstack.cloud.sap/service-id"
+	labelSegmentID           = "masakari.openstack.cloud.sap/segment-id"
+	labelMasakariHostID      = "masakari.openstack.cloud.sap/host-id"
+	labelOnboardingState     = "cobaltcore.cloud.sap/onboarding-state"
+	labelSegmentName         = "kubernetes.metal.cloud.sap/bb"
+	onboardingValueInitial   = "initial"
+	onboardingValueTesting   = "testing"
+	onboardingValueCompleted = "completed"
+	testAggregateName        = "tenant_filter_tests"
+	testProjectName          = "test"
+	testDomainName           = "cc3test"
+	testFlavorName           = "c_k_c2_m2_v2"
+	testImageName            = "cirros-d240801-kvm"
+	testPrefixName           = "ohooc-"
+	testVolumeType           = "nfs"
 )
 
 type OnboardingController struct {
 	k8sclient.Client
-	Scheme           *runtime.Scheme
-	computeClient    *gophercloud.ServiceClient
-	instanceHAClient *gophercloud.ServiceClient
-	namespace        string
-	issuerName       string
+	Scheme            *runtime.Scheme
+	computeClient     *gophercloud.ServiceClient
+	instanceHAClient  *gophercloud.ServiceClient
+	namespace         string
+	issuerName        string
+	testComputeClient *gophercloud.ServiceClient
+	testImageClient   *gophercloud.ServiceClient
+	testNetworkClient *gophercloud.ServiceClient
 }
 
 func getSecretAndCertName(name string) (string, string) {
@@ -214,30 +230,34 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return result, k8sclient.IgnoreNotFound(err)
 	}
 
-	segmentName, segmentNameFound := node.Labels[labelSegmentName]
-	if !segmentNameFound {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+	if r.instanceHAClient != nil {
+		segmentName, segmentNameFound := node.Labels[labelSegmentName]
+		if !segmentNameFound {
+			log.Info("Waiting for segment")
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		}
+
+		log.Info("Ensure Masakari")
+		changed, err = r.ensureMasakariLabels(ctx, node, segmentName)
+		if changed || err != nil {
+			return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+		}
 	}
 
-	changed, err = r.ensureMasakariLabels(ctx, node, segmentName)
-	if changed || err != nil {
-		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-	}
-
-	err = r.initialOnboarding(ctx, node, host)
-	if err != nil {
+	switch node.Labels[labelOnboardingState] {
+	case onboardingValueTesting:
+		result, err = r.smokeTest(ctx, node, host)
 		return result, k8sclient.IgnoreNotFound(err)
+	case "":
+		err = r.initialOnboarding(ctx, node, host)
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+	default:
+		// No idea how we ended up here.
+		return ctrl.Result{}, nil
 	}
-
-	return ctrl.Result{}, nil
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, node *corev1.Node, host string) error {
-	_, found := node.Labels[labelOnboardingState]
-	if found {
-		return nil
-	}
-
 	zone, found := node.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
@@ -254,13 +274,12 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
-	// NOTE: (20250415) disabling test aggregate adding until work on this feature continues
-	// if _, found := node.Labels[corev1.LabelTopologyZone]; found {
-	// 	err = addToAggregate(ctx, r.serviceClient, aggs, host, testAggregateName, "")
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to agg to test aggregate %w", err)
-	// 	}
-	// }
+	if _, found := node.Labels[corev1.LabelTopologyZone]; found {
+		err = addToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
+		if err != nil {
+			return fmt.Errorf("failed to agg to test aggregate %w", err)
+		}
+	}
 
 	serviceId, found := node.Labels[labelServiceID]
 	if !found || serviceId == "" {
@@ -272,10 +291,57 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 	}
 
 	_, err = setNodeLabels(ctx, r, node, map[string]string{
-		labelOnboardingState: onboardingValueInitial,
+		labelOnboardingState: onboardingValueTesting, // Move to testing
 	})
 
 	return err
+}
+
+func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node, host string) (ctrl.Result, error) {
+	zone := node.Labels[corev1.LabelTopologyZone]
+	server, err := r.createOrGetTestServer(ctx, zone, host)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance %w", err)
+	}
+
+	switch server.Status {
+	case "ERROR":
+		// Drop the error of delete, we will retry anyway for the server error
+		_ = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+		return ctrl.Result{}, fmt.Errorf("server ended up in error state")
+	case "ACTIVE":
+		consoleOutput, err := servers.ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).Extract()
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not get console output %w", err)
+		}
+
+		if !strings.Contains(consoleOutput, server.Name) {
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		}
+
+		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to terminate instance %w", err)
+		}
+
+		aggs, err := aggregatesByName(ctx, r.computeClient)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
+		}
+
+		err = removeFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
+		}
+
+		_, err = setNodeLabels(ctx, r, node, map[string]string{
+			labelOnboardingState: onboardingValueCompleted,
+		})
+
+		return ctrl.Result{}, err
+	default:
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+	}
 }
 
 func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {
@@ -340,6 +406,10 @@ func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev
 }
 
 func (r *OnboardingController) ensureMasakariLabels(ctx context.Context, node *corev1.Node, segmentName string) (bool, error) {
+	if r.instanceHAClient == nil {
+		return false, nil
+	}
+
 	segmentID, segmentIDFound := node.Labels[labelSegmentID]
 	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
 
@@ -430,10 +500,128 @@ func (r *OnboardingController) ensureMasakariLabels(ctx context.Context, node *c
 	return changed, err
 }
 
+func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string) (*servers.Server, error) {
+	serverName := fmt.Sprintf("%v-%v", testPrefixName, computeHost)
+
+	serverPages, err := servers.List(r.testComputeClient, servers.ListOpts{
+		Name: serverName,
+	}).AllPages(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	serverList, err := servers.ExtractServers(serverPages)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(serverList) > 0 {
+		return &serverList[0], nil
+	}
+
+	flavorPages, err := flavors.ListDetail(r.testComputeClient, nil).AllPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	flavors, err := flavors.ExtractFlavors(flavorPages)
+	if err != nil {
+		return nil, err
+	}
+
+	var flavorRef string
+	for _, flavor := range flavors {
+		if flavor.Name == testFlavorName {
+			flavorRef = flavor.ID
+			break
+		}
+	}
+
+	if flavorRef == "" {
+		return nil, fmt.Errorf("couldn't find flavor")
+	}
+
+	var imageRef string
+
+	imagePages, err := images.List(r.testImageClient, images.ListOpts{Name: testImageName}).AllPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	imagesList, err := images.ExtractImages(imagePages)
+	for _, image := range imagesList {
+		if image.Name == testImageName {
+			imageRef = image.ID
+			break
+		}
+	}
+
+	if imageRef == "" {
+		return nil, fmt.Errorf("couldn't find image")
+	}
+
+	falseVal := false
+	networkPages, err := networks.List(r.testNetworkClient, networks.ListOpts{Shared: &falseVal}).AllPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	networks, err := networks.ExtractNetworks(networkPages)
+	if err != nil {
+		return nil, err
+	}
+
+	var networkRef string
+	for _, network := range networks {
+		networkRef = network.ID
+		break
+	}
+
+	if networkRef == "" {
+		return nil, fmt.Errorf("couldn't find network")
+	}
+
+	log := logger.FromContext(ctx)
+	log.Info("creating server", "name", serverName)
+	server, err := servers.Create(ctx, r.testComputeClient, servers.CreateOpts{
+		Name:             serverName,
+		AvailabilityZone: fmt.Sprintf("%v:%v", zone, computeHost),
+		FlavorRef:        flavorRef,
+		BlockDevice: []servers.BlockDevice{
+			servers.BlockDevice{
+				UUID:                imageRef,
+				BootIndex:           0,
+				SourceType:          "image",
+				VolumeSize:          64,
+				DiskBus:             "virtio",
+				DeleteOnTermination: true,
+				DestinationType:     "volume",
+				VolumeType:          testVolumeType,
+			},
+		},
+		Networks: []servers.Network{
+			servers.Network{
+				UUID: networkRef,
+			},
+		},
+	}, nil).Extract()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if server == nil {
+		return nil, fmt.Errorf("server is nil")
+	}
+	// Apparently the response doesn't contain the value
+	server.Name = serverName
+	return server, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
+	log := logger.FromContext(ctx)
 
 	r.namespace = namespace
 	r.issuerName = issuerName
@@ -442,11 +630,33 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager, namespace, iss
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
-	r.computeClient.Microversion = "2.88"
+	r.computeClient.Microversion = "2.95"
 
-	if r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha"); err != nil {
+	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
+	if err != nil {
+		log.Error(err, "failed to find masakari")
+	}
+
+	testAuth := &clientconfig.AuthInfo{
+		ProjectName:       testProjectName,
+		ProjectDomainName: testDomainName,
+		UserDomainName:    testDomainName,
+	}
+
+	if r.testComputeClient, err = openstack.GetServiceClientAuth(ctx, "compute", testAuth); err != nil {
 		return err
 	}
+	r.testComputeClient.Microversion = "2.95"
+
+	if r.testImageClient, err = openstack.GetServiceClientAuth(ctx, "image", testAuth); err != nil {
+		return err
+	}
+	r.testImageClient.ResourceBase = fmt.Sprintf("%vv2/", r.testImageClient.Endpoint)
+
+	if r.testNetworkClient, err = openstack.GetServiceClientAuth(ctx, "network", testAuth); err != nil {
+		return err
+	}
+	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("onboarding").
