@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -47,6 +48,9 @@ const (
 	labelManagedBy                  = "app.kubernetes.io/managed-by"
 	labelValueMaintenanceController = "cobaltcore.cloud.sap/maintenance-controller"
 	labelDeployment                 = "cobaltcore-maintenance-controller"
+	maintenancePodsNamespace        = "kube-system"
+	labelCriticalComponent          = "node.gardener.cloud/critical-component"
+	labelCriticalComponentsNotReady = "node.gardener.cloud/critical-components-not-ready"
 )
 
 // The counter-side in gardener is here:
@@ -83,8 +87,8 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	var minAvailable int32 = 1
-	value, found := node.Labels[labelEvictionApproved]
-	if found && value == "true" {
+	evictionValue := node.Labels[labelEvictionApproved]
+	if evictionValue == "true" {
 		minAvailable = 0
 	}
 
@@ -92,7 +96,9 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureBlockingDeployment(ctx, node, minAvailable); err != nil {
+	onboardingCompleted := node.Labels[labelOnboardingState] == onboardingValueCompleted
+
+	if err := r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -104,7 +110,7 @@ func (r *MaintenanceController) ensureBlockingPodDisruptionBudget(ctx context.Co
 	podDisruptionBudget := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: r.namespace,
+			Namespace: maintenancePodsNamespace,
 		},
 	}
 
@@ -141,7 +147,7 @@ func isTerminating(node *corev1.Node) bool {
 }
 
 func nameForNode(node *corev1.Node) string {
-	return fmt.Sprintf("block-%v", node.Name)
+	return fmt.Sprintf("maint-%v", node.Name)
 }
 
 func labelsForNode(node *corev1.Node) map[string]string {
@@ -151,38 +157,71 @@ func labelsForNode(node *corev1.Node) map[string]string {
 	}
 }
 
-func (r *MaintenanceController) ensureBlockingDeployment(ctx context.Context, node *corev1.Node, scale int32) error {
+func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, node *corev1.Node, scale int32, ready bool) error {
 	name := nameForNode(node)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: r.namespace,
+			Namespace: maintenancePodsNamespace,
 		},
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		labels := labelsForNode(node)
-		deployment.Name = name
 		deployment.Labels = labels
+
+		podLabels := maps.Clone(labels)
+		podLabels[labelCriticalComponent] = "true"
+
+		var command []string
+		if ready {
+			command = []string{"/bin/true"}
+		} else {
+			command = []string{"/bin/false"}
+		}
+
+		var one int64 = 1
+
 		deployment.Spec = appsv1.DeploymentSpec{
 			Replicas: &scale,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RecreateDeploymentStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels: podLabels,
 				},
 				Spec: corev1.PodSpec{
-					HostNetwork: true, // As the agents are also running int that mode
+					HostNetwork: true, // to make it run as early as possible
 					NodeSelector: map[string]string{
 						corev1.LabelHostname: node.Labels[corev1.LabelHostname],
+					},
+					TerminationGracePeriodSeconds: &one, // busybox sleep doesn't handle TERM so well as pid 1
+					Tolerations: []corev1.Toleration{
+						{
+							Key:      labelCriticalComponentsNotReady,
+							Effect:   corev1.TaintEffectNoSchedule,
+							Operator: corev1.TolerationOpEqual,
+						},
 					},
 					Containers: []corev1.Container{
 						{
 							Name:    "sleep",
 							Image:   "keppel.global.cloud.sap/ccloud-dockerhub-mirror/library/busybox:latest",
 							Command: []string{"sleep", "inf"},
+							// We need apparently retry to get the timing of the container being up correct
+							// The startup probe makes sure that we only need to poll this for the (hopefully)
+							// non-standard case of the host not being integrated yet
+							StartupProbe: &corev1.Probe{
+								ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: command}},
+								InitialDelaySeconds: 0,
+								PeriodSeconds:       1,
+								SuccessThreshold:    1,
+								FailureThreshold:    1,
+							},
 						},
 					},
 				},
