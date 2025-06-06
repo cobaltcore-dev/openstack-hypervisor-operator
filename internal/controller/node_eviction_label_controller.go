@@ -32,6 +32,7 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -66,7 +67,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	value, found := node.Labels[labelEvictionRequired]
+	maintenanceValue, found := node.Labels[labelEvictionRequired]
 	name := fmt.Sprintf("maintenance-required-%v", hostname)
 	eviction := &kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
@@ -89,10 +90,36 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	// check for existing eviction, else create it
+	var value string
+	if _, onboarding := node.Labels[labelOnboardingState]; !onboarding {
+		value = "true"
+	} else {
+		// check for existing eviction, else create it
+		value, err = r.reconcileEviction(ctx, err, eviction, node, log, name, hostname, maintenanceValue)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if value != "" {
+		newNode := node.DeepCopy()
+		if value == "true" {
+			evictAgentsLabels(newNode.Labels)
+		}
+		newNode.Labels[labelEvictionApproved] = maintenanceValue
+
+		if !maps.Equal(newNode.Labels, node.Labels) {
+			err = r.Patch(ctx, newNode, k8sclient.MergeFrom(node))
+		}
+	}
+
+	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+}
+
+func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, err error, eviction *kvmv1.Eviction, node *corev1.Node, log logr.Logger, name string, hostname string, maintenanceValue string) (string, error) {
 	if err = r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
 		if !k8serrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return "", err
 		}
 		addNodeOwnerReference(&eviction.ObjectMeta, node)
 		log.Info("Creating new eviction", "name", name)
@@ -101,37 +128,23 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		eviction.Spec = kvmv1.EvictionSpec{
 			Hypervisor: hostname,
-			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, value),
+			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, maintenanceValue),
 		}
 
 		if err = r.Create(ctx, eviction); err != nil {
-			return ctrl.Result{}, err
+			return "", err
 		}
 	}
 
 	// check if the eviction is already succeeded
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		value = "true"
+		return "true", nil
 	case "Failed":
-		value = "false"
+		return "false", nil
 	default:
-		value = ""
+		return "", nil
 	}
-
-	if value != "" {
-		newNode := node.DeepCopy()
-		if value == "true" {
-			evictAgentsLabels(newNode.Labels)
-		}
-		newNode.Labels[labelEvictionApproved] = value
-
-		if !maps.Equal(newNode.Labels, node.Labels) {
-			err = r.Patch(ctx, newNode, k8sclient.MergeFrom(node))
-		}
-	}
-
-	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 }
 
 func evictAgentsLabels(labels map[string]string) {

@@ -125,31 +125,40 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
+func (r *EvictionReconciler) getOwnerNode(ctx context.Context, eviction *kvmv1.Eviction) (*corev1.Node, error) {
+	for _, owner := range eviction.GetOwnerReferences() {
+		if owner.Kind == "Node" && owner.APIVersion == "v1" {
+			node := &corev1.Node{}
+			err := r.Client.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
+			err = client.IgnoreNotFound(err)
+			// Not found means no labels, so the rest will work as well
+			if err != nil || node != nil {
+				return node, err
+			}
+		}
+	}
+
+	return nil, nil
+}
+
 func (r *EvictionReconciler) setServerMaintenance(ctx context.Context, eviction *kvmv1.Eviction, maintenance bool) error {
 	if r.instanceHAClient == nil {
 		return nil
 	}
 
-	for _, owner := range eviction.GetOwnerReferences() {
-		if owner.Kind == "Node" && owner.APIVersion == "v1" {
-			node := &corev1.Node{}
-			err := r.Client.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
-			// Not found means no labels, so the rest will work as well
-			if client.IgnoreNotFound(err) != nil {
-				return err
-			}
-
-			segmentID, segmentIDFound := node.Labels[labelSegmentID]
-			hostID, hostIDFound := node.Labels[labelMasakariHostID]
-
-			if !segmentIDFound || !hostIDFound {
-				continue
-			}
-
-			return openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, hostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &maintenance}).Err
-		}
+	node, err := r.getOwnerNode(ctx, eviction)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	segmentID, segmentIDFound := node.Labels[labelSegmentID]
+	hostID, hostIDFound := node.Labels[labelMasakariHostID]
+
+	if !segmentIDFound || !hostIDFound {
+		return nil
+	}
+
+	return openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, hostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &maintenance}).Err
 }
 
 func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
@@ -158,10 +167,28 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	// Does the hypervisor even exist? Is it enabled/disabled?
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, false)
 	if err != nil {
-		// Abort eviction
-		err = fmt.Errorf("failed to get hypervisor %w", err)
-		r.addErrorCondition(ctx, eviction, err)
-		return ctrl.Result{}, err
+		expectHypervisor := false
+		node, errOwner := r.getOwnerNode(ctx, eviction)
+		if errOwner != nil {
+			return ctrl.Result{}, errOwner
+		}
+		if node != nil {
+			_, expectHypervisor = node.Labels[labelOnboardingState]
+		}
+
+		if expectHypervisor {
+			// Abort eviction
+			err = fmt.Errorf("failed to get hypervisor %w", err)
+			r.addErrorCondition(ctx, eviction, err)
+			return ctrl.Result{}, err
+		} else {
+			// That is (likely) an eviction for a node that never registered
+			// so we are good to go
+			eviction.Status.OutstandingRamMb = 0
+			eviction.Status.EvictionState = Succeeded
+			logger.FromContext(ctx).Info("succeeded due to expected case of no hypervisor")
+			return ctrl.Result{}, r.Status().Update(ctx, eviction)
+		}
 	}
 
 	log := logger.FromContext(ctx)
