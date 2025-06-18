@@ -51,6 +51,7 @@ const (
 	maintenancePodsNamespace        = "kube-system"
 	labelCriticalComponent          = "node.gardener.cloud/critical-component"
 	labelCriticalComponentsNotReady = "node.gardener.cloud/critical-components-not-ready"
+	valueReasonTerminating          = "terminating"
 )
 
 // The counter-side in gardener is here:
@@ -80,15 +81,16 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if isTerminating(node) {
-		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{labelEvictionRequired: "true"})
+		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{labelEvictionRequired: valueReasonTerminating})
 		if changed || err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
+	// We do not care about the particular value, as long as it isn't an error
 	var minAvailable int32 = 1
-	evictionValue := node.Labels[labelEvictionApproved]
-	if evictionValue == "true" {
+	evictionValue, found := node.Labels[labelEvictionApproved]
+	if found && evictionValue != "false" {
 		minAvailable = 0
 	}
 
