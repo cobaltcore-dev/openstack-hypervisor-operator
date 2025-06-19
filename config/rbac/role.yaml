@@ -37,6 +37,7 @@ rules:
   resources:
   - certificates
   verbs:
+  - create
   - get
   - list
   - patch
