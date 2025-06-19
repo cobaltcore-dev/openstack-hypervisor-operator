@@ -187,8 +187,16 @@ func main() {
 	if err = (&controller.OnboardingController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Onboarding")
+		os.Exit(1)
+	}
+
+	if err = (&controller.NodeCertificateController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+		setupLog.Error(err, "unable to create controller", "certificate", "NodeCertificate")
 		os.Exit(1)
 	}
 
