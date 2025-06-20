@@ -46,8 +46,6 @@ const (
 	defaultWaitTime          = 1 * time.Minute
 	labelHypervisorID        = "nova.openstack.cloud.sap/hypervisor-id"
 	labelServiceID           = "nova.openstack.cloud.sap/service-id"
-	labelSegmentID           = "masakari.openstack.cloud.sap/segment-id"
-	labelMasakariHostID      = "masakari.openstack.cloud.sap/host-id"
 	labelOnboardingState     = "cobaltcore.cloud.sap/onboarding-state"
 	labelSegmentName         = "kubernetes.metal.cloud.sap/bb"
 	onboardingValueInitial   = "initial"
@@ -66,7 +64,6 @@ type OnboardingController struct {
 	k8sclient.Client
 	Scheme            *runtime.Scheme
 	computeClient     *gophercloud.ServiceClient
-	instanceHAClient  *gophercloud.ServiceClient
 	namespace         string
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
@@ -112,20 +109,6 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	result, changed, err := r.ensureNovaLabels(ctx, node)
 	if !result.IsZero() || changed || err != nil {
 		return result, k8sclient.IgnoreNotFound(err)
-	}
-
-	if r.instanceHAClient != nil {
-		segmentName, segmentNameFound := node.Labels[labelSegmentName]
-		if !segmentNameFound {
-			log.Info("Waiting for segment")
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
-		}
-
-		log.Info("Ensure Masakari")
-		changed, err = r.ensureMasakariLabels(ctx, node, segmentName)
-		if changed || err != nil {
-			return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-		}
 	}
 
 	switch node.Labels[labelOnboardingState] {
@@ -296,101 +279,6 @@ func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev
 	return ctrl.Result{}, false, nil
 }
 
-func (r *OnboardingController) ensureMasakariLabels(ctx context.Context, node *corev1.Node, segmentName string) (bool, error) {
-	if r.instanceHAClient == nil {
-		return false, nil
-	}
-
-	segmentID, segmentIDFound := node.Labels[labelSegmentID]
-	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
-
-	// We do not handle changing IDs, as it would require polling the maskari API
-	if segmentIDFound && segmentHostIDFound {
-		return false, nil
-	}
-
-	if !segmentIDFound {
-		segmentPage, err := openstack.ListSegments(r.instanceHAClient).AllPages(ctx)
-		if err != nil {
-			return false, err
-		}
-
-		segments, err := openstack.ExtractSegments(segmentPage)
-		if err != nil {
-			return false, err
-		}
-
-		for _, segment := range segments {
-			if segment.Name == segmentName {
-				segmentID = segment.UUID
-				break
-			}
-		}
-	}
-
-	if segmentID == "" {
-		opts := openstack.CreateSegmentOpts{Name: segmentName, RecoveryMethod: "auto", ServiceType: "COMPUTE"}
-		result := openstack.CreateSegment(ctx, r.instanceHAClient, opts)
-		if result.Err != nil {
-			return false, result.Err
-		}
-		segment, err := result.Extract()
-		if err != nil {
-			return false, err
-		}
-		segmentID = segment.UUID
-	}
-
-	if !segmentHostIDFound {
-		segmentHostPage, err := openstack.ListSegmentHosts(ctx, r.instanceHAClient, segmentID).AllPages(ctx)
-		if err != nil {
-			return false, err
-		}
-
-		segmentHosts, err := openstack.ExtractSegmentHosts(segmentHostPage)
-		if err != nil {
-			return false, err
-		}
-
-		host := node.Labels[labelMetalName]
-		for _, segmentHost := range segmentHosts {
-			if segmentHost.Name == host {
-				segmentHostID = segmentHost.UUID
-				break
-			}
-		}
-
-		if segmentHostID == "" {
-			opts := openstack.CreateSegmentHostOpts{Type: "COMPUTE", Name: host}
-			result := openstack.CreateSegmentHost(ctx, r.instanceHAClient, segmentID, opts)
-			if result.Err != nil {
-				return false, result.Err
-			}
-
-			segmentHost, err := result.Extract()
-			if err != nil {
-				return false, err
-			}
-
-			if segmentHost == nil {
-				return false, fmt.Errorf("failed to extract host from response")
-			}
-
-			segmentHostID = segmentHost.UUID
-		}
-	}
-
-	falseValue := false
-	openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, segmentHostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &falseValue, Reserved: &falseValue})
-
-	changed, err := setNodeLabels(ctx, r, node, map[string]string{
-		labelSegmentID:      segmentID,
-		labelMasakariHostID: segmentHostID,
-	})
-
-	return changed, err
-}
-
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string) (*servers.Server, error) {
 	serverName := fmt.Sprintf("%v-%v", testPrefixName, computeHost)
 
@@ -512,18 +400,12 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	log := logger.FromContext(ctx)
 
 	var err error
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.95"
-
-	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
-	if err != nil {
-		log.Error(err, "failed to find masakari")
-	}
 
 	testAuth := &clientconfig.AuthInfo{
 		ProjectName:       testProjectName,

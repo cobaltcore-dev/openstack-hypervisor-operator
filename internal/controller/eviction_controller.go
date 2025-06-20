@@ -107,11 +107,6 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 		return r.evictNext(ctx, eviction)
 	}
 
-	err := r.setServerMaintenance(ctx, eviction, true)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    Reconciling,
 		Status:  metav1.ConditionTrue,
@@ -139,26 +134,6 @@ func (r *EvictionReconciler) getOwnerNode(ctx context.Context, eviction *kvmv1.E
 	}
 
 	return nil, nil
-}
-
-func (r *EvictionReconciler) setServerMaintenance(ctx context.Context, eviction *kvmv1.Eviction, maintenance bool) error {
-	if r.instanceHAClient == nil {
-		return nil
-	}
-
-	node, err := r.getOwnerNode(ctx, eviction)
-	if err != nil {
-		return err
-	}
-
-	segmentID, segmentIDFound := node.Labels[labelSegmentID]
-	hostID, hostIDFound := node.Labels[labelMasakariHostID]
-
-	if !segmentIDFound || !hostIDFound {
-		return nil
-	}
-
-	return openstack.UpdateSegmentHost(ctx, r.instanceHAClient, segmentID, hostID, openstack.UpdateSegmentHostOpts{OnMaintenance: &maintenance}).Err
 }
 
 func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
@@ -354,12 +329,7 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
 	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
-		err := r.setServerMaintenance(ctx, eviction, false)
-		if err != nil {
-			return err
-		}
-
-		err = r.enableHypervisorService(ctx, eviction)
+		err := r.enableHypervisorService(ctx, eviction)
 		if err != nil {
 			if _, ok := err.(*openstack.NoHypervisorError); ok {
 				log := logger.FromContext(ctx)

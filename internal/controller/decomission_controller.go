@@ -100,34 +100,8 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.removeFinalizer(ctx, node)
 	}
 
-	log.Info("removing host from failover")
-	if err := r.removeFromFailoverSegment(ctx, node); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	log.Info("shutting down host from failover")
 	return r.shutdownService(ctx, node)
-}
-
-func (r *NodeDecommissionReconciler) removeFromFailoverSegment(ctx context.Context, node *corev1.Node) error {
-	if r.instanceHAClient == nil {
-		return nil
-	}
-	segmentID, segmentIDFound := node.Labels[labelSegmentID]
-	segmentHostID, segmentHostIDFound := node.Labels[labelMasakariHostID]
-
-	// Nothing we can do about it
-	if !segmentIDFound && !segmentHostIDFound {
-		return nil
-	}
-
-	err := openstack.DeleteSegmentHost(ctx, r.instanceHAClient, segmentID, segmentHostID)
-
-	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return nil
-	}
-
-	return err
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
@@ -181,7 +155,6 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	log := logger.FromContext(ctx)
 
 	var err error
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
@@ -189,11 +162,6 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	r.computeClient.Microversion = "2.93"
-
-	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
-	if err != nil {
-		log.Error(err, "failed to find masakari")
-	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
