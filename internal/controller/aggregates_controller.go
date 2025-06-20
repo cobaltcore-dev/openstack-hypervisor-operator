@@ -60,11 +60,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	computeHost, found := node.Labels[labelMetalName]
-	if !found {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
-	}
-
+	computeHost := node.Name
 	toApply := extractAnnotationList(node, annotationAggregates)
 	applied := extractAnnotationList(node, annotationAggregatesApplied)
 

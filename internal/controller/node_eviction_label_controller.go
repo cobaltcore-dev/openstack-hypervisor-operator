@@ -38,7 +38,6 @@ import (
 const (
 	labelEvictionRequired   = "cloud.sap/hypervisor-eviction-required"
 	labelEvictionApproved   = "cloud.sap/hypervisor-eviction-succeeded"
-	labelMetalName          = "kubernetes.metal.cloud.sap/name"
 	labelHypervisor         = "nova.openstack.cloud.sap/virt-driver"
 	DisabledSuffix          = "-disabled"
 	labelMl2MechanismDriver = "neutron.openstack.cloud.sap/ml2-mechanism-driver"
@@ -123,9 +122,6 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, err
 		}
 		addNodeOwnerReference(&eviction.ObjectMeta, node)
 		log.Info("Creating new eviction", "name", name)
-		eviction.Labels = map[string]string{
-			labelMetalName: node.Labels[labelMetalName],
-		}
 		eviction.Spec = kvmv1.EvictionSpec{
 			Hypervisor: hostname,
 			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, maintenanceValue),

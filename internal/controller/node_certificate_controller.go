@@ -174,12 +174,7 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	host, found := node.Labels[labelMetalName]
-	if !found {
-		return ctrl.Result{}, nil // That is expected, the label will be set eventually
-	}
-
-	if err := r.ensureCertificate(ctx, node, host); err != nil {
+	if err := r.ensureCertificate(ctx, node, node.Name); err != nil {
 		return ctrl.Result{}, fmt.Errorf("could create certificate %w", err)
 	}
 

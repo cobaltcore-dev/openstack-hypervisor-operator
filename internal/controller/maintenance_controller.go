@@ -76,10 +76,6 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	if !hasAnyLabel(node.Labels, labelMetalName) {
-		return ctrl.Result{}, nil
-	}
-
 	if isTerminating(node) {
 		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{labelEvictionRequired: valueReasonTerminating})
 		if changed || err != nil {
@@ -118,13 +114,12 @@ func (r *MaintenanceController) ensureBlockingPodDisruptionBudget(ctx context.Co
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, podDisruptionBudget, func() error {
 		minAvail := intstr.FromInt32(minAvailable)
-		podDisruptionBudget.Labels = map[string]string{
-			labelMetalName: node.Labels[labelMetalName],
-		}
+		nodeLabels := labelsForNode(node)
+		podDisruptionBudget.Labels = nodeLabels
 		podDisruptionBudget.Spec = policyv1.PodDisruptionBudgetSpec{
 			MinAvailable: &minAvail,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labelsForNode(node),
+				MatchLabels: nodeLabels,
 			},
 		}
 		return controllerutil.SetControllerReference(node, podDisruptionBudget, r.Scheme)
@@ -155,7 +150,6 @@ func nameForNode(node *corev1.Node) string {
 func labelsForNode(node *corev1.Node) map[string]string {
 	return map[string]string{
 		labelDeployment: nameForNode(node),
-		labelMetalName:  node.Labels[labelMetalName],
 	}
 }
 

@@ -101,11 +101,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	host, found := node.Labels[labelMetalName]
-	if !found {
-		return ctrl.Result{}, nil // That is expected, the label will be set eventually
-	}
-
+	computeHost := node.Name
 	result, changed, err := r.ensureNovaLabels(ctx, node)
 	if !result.IsZero() || changed || err != nil {
 		return result, k8sclient.IgnoreNotFound(err)
@@ -114,13 +110,13 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	switch node.Labels[labelOnboardingState] {
 	case onboardingValueTesting:
 		if node.Labels[labelLifecycleMode] == "skip-tests" {
-			result, err = r.completeOnboarding(ctx, host, node)
+			result, err = r.completeOnboarding(ctx, computeHost, node)
 		} else {
-			result, err = r.smokeTest(ctx, node, host)
+			result, err = r.smokeTest(ctx, node, computeHost)
 		}
 		return result, k8sclient.IgnoreNotFound(err)
 	case "":
-		err = r.initialOnboarding(ctx, node, host)
+		err = r.initialOnboarding(ctx, node, computeHost)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	default:
 		// No idea how we ended up here.
