@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -174,7 +175,11 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.ensureCertificate(ctx, node, node.Name); err != nil {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return r.ensureCertificate(ctx, node, node.Name)
+	})
+
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could create certificate %w", err)
 	}
 
