@@ -32,7 +32,6 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/go-logr/logr"
 )
 
 const (
@@ -53,6 +52,7 @@ type NodeEvictionLabelReconciler struct {
 
 func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
+	ctx = logger.IntoContext(ctx, log)
 
 	node := &corev1.Node{}
 	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
@@ -94,7 +94,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		value = "true"
 	} else {
 		// check for existing eviction, else create it
-		value, err = r.reconcileEviction(ctx, err, eviction, node, log, name, hostname, maintenanceValue)
+		value, err = r.reconcileEviction(ctx, eviction, node, hostname, maintenanceValue)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -115,13 +115,14 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 }
 
-func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, err error, eviction *kvmv1.Eviction, node *corev1.Node, log logr.Logger, name string, hostname string, maintenanceValue string) (string, error) {
-	if err = r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
+func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, eviction *kvmv1.Eviction, node *corev1.Node, hostname string, maintenanceValue string) (string, error) {
+	log := logger.FromContext(ctx)
+	if err := r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
 		if !k8serrors.IsNotFound(err) {
 			return "", err
 		}
 		addNodeOwnerReference(&eviction.ObjectMeta, node)
-		log.Info("Creating new eviction", "name", name)
+		log.Info("Creating new eviction", "name", eviction.Name)
 		eviction.Spec = kvmv1.EvictionSpec{
 			Hypervisor: hostname,
 			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, maintenanceValue),
