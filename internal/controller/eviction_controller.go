@@ -142,7 +142,7 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	// Does the hypervisor even exist? Is it enabled/disabled?
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, false)
 	if err != nil {
-		expectHypervisor := false
+		expectHypervisor := true
 		node, errOwner := r.getOwnerNode(ctx, eviction)
 		if errOwner != nil {
 			return ctrl.Result{}, errOwner
