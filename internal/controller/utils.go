@@ -27,6 +27,10 @@ import (
 )
 
 func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
+	if owner.APIVersion == "" { // Workaround for test
+		owner.APIVersion = "v1"
+		owner.Kind = "Node"
+	}
 	for _, item := range obj.OwnerReferences {
 		if item.APIVersion == owner.APIVersion &&
 			item.Kind == owner.Kind &&
