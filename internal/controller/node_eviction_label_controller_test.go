@@ -32,18 +32,18 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-var _ = Describe("Node Controller", func() {
+var _ = Describe("Node Eviction Label Controller", func() {
 	var nodeReconciler *NodeEvictionLabelReconciler
 
 	Context("When reconciling a node", func() {
 		const nodeName = "node-test"
+		req := ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: nodeName},
+		}
 
 		ctx := context.Background()
 
 		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
-			}
 			for range steps {
 				res, err = nodeReconciler.Reconcile(ctx, req)
 				if err != nil {
@@ -66,8 +66,11 @@ var _ = Describe("Node Controller", func() {
 			By("creating the core resource for the Kind Node")
 			resource := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   nodeName,
-					Labels: map[string]string{corev1.LabelHostname: "test", labelEvictionRequired: "true"},
+					Name: nodeName,
+					Labels: map[string]string{
+						corev1.LabelHostname:  "test",
+						labelEvictionRequired: "true",
+						labelOnboardingState:  "completed"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -76,7 +79,7 @@ var _ = Describe("Node Controller", func() {
 		AfterEach(func() {
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
-			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
 		})
 
 		It("should successfully reconcile the resource", func() {
@@ -84,7 +87,7 @@ var _ = Describe("Node Controller", func() {
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			_, err := reconcileNodeLoop(1)
+			_, err := reconcileNodeLoop(5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
