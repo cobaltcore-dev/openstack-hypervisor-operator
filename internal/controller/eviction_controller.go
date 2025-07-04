@@ -462,18 +462,12 @@ func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kv
 // SetupWithManager sets up the controller with the Manager.
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	log := logger.FromContext(ctx)
 
 	var err error
 	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
-
-	r.instanceHAClient, err = openstack.GetServiceClient(ctx, "instance-ha")
-	if err != nil {
-		log.Error(err, "failed to find masakari")
-	}
 
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 

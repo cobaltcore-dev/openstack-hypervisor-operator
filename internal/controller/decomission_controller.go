@@ -100,7 +100,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.removeFinalizer(ctx, node)
 	}
 
-	log.Info("shutting down host from failover")
+	log.Info("removing host from nova")
 	return r.shutdownService(ctx, node)
 }
 
