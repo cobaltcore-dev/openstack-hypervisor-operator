@@ -26,6 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -166,7 +167,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 
 func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node, host string) (ctrl.Result, error) {
 	zone := node.Labels[corev1.LabelTopologyZone]
-	server, err := r.createOrGetTestServer(ctx, zone, host)
+	server, err := r.createOrGetTestServer(ctx, zone, host, node.UID)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance %w", err)
 	}
@@ -275,8 +276,8 @@ func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev
 	return ctrl.Result{}, false, nil
 }
 
-func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string) (*servers.Server, error) {
-	serverName := fmt.Sprintf("%v-%v", testPrefixName, computeHost)
+func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {
+	serverName := fmt.Sprintf("%v-%v-%v", testPrefixName, computeHost, nodeUid)
 
 	serverPages, err := servers.List(r.testComputeClient, servers.ListOpts{
 		Name: serverName,
