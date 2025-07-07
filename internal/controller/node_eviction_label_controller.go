@@ -99,6 +99,11 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if value != "" {
+		err = disableInstanceHA(node)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		newNode := node.DeepCopy()
 		if value == "true" { //nolint:goconst
 			evictAgentsLabels(newNode.Labels)
@@ -128,8 +133,12 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, maintenanceValue),
 		}
 
+		if err = enableInstanceHAMissingOkay(node); err != nil {
+			return "", fmt.Errorf("failed to enable instance ha before eviction due to %w", err)
+		}
+
 		if err = r.Create(ctx, eviction); err != nil {
-			return "", err
+			return "", fmt.Errorf("failed to create eviction due to %w", err)
 		}
 	}
 

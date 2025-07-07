@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,13 +30,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/jarcoal/httpmock"
 )
 
 var _ = Describe("Node Eviction Label Controller", func() {
 	var nodeReconciler *NodeEvictionLabelReconciler
 
 	Context("When reconciling a node", func() {
-		const nodeName = "node-test"
+		const nodeName = "test-node"
+		const hostName = "test-hostname"
+		const region = "region"
+		const zone = "zone"
 		req := ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: nodeName},
 		}
@@ -53,6 +58,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		}
 
 		BeforeEach(func() {
+			httpmock.Activate()
 			nodeReconciler = &NodeEvictionLabelReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -67,9 +73,11 @@ var _ = Describe("Node Eviction Label Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: nodeName,
 					Labels: map[string]string{
-						corev1.LabelHostname:  "test",
-						labelEvictionRequired: "true",
-						labelOnboardingState:  "completed"},
+						corev1.LabelHostname:       hostName,
+						corev1.LabelTopologyRegion: region,
+						corev1.LabelTopologyZone:   zone,
+						labelEvictionRequired:      "true",
+						labelOnboardingState:       "completed"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -79,16 +87,20 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+			httpmock.DeactivateAndReset()
 		})
 
 		It("should successfully reconcile the resource", func() {
+			url := InstanceHaUrl(region, zone, hostName)
+			httpmock.RegisterResponder("POST", url, httpmock.NewStringResponder(200, ``))
+
 			By("Reconciling the created resource")
 			_, err := reconcileNodeLoop(5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "maintenance-required-test",
+				Name:      fmt.Sprintf("maintenance-required-%v", hostName),
 				Namespace: "monsoon3",
 			}, &kvmv1.Eviction{})
 			Expect(err).NotTo(HaveOccurred())
