@@ -64,20 +64,6 @@ func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node,
 	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
 }
 
-// unsetNodeLabels removes the labels from the node.
-func unsetNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels ...string) (bool, error) {
-	newNode := node.DeepCopy()
-	for _, label := range labels {
-		delete(newNode.Labels, label)
-	}
-
-	if maps.Equal(node.Labels, newNode.Labels) {
-		return false, nil
-	}
-
-	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
-}
-
 func hasAnyLabel(labels map[string]string, list ...string) bool {
 	for _, label := range list {
 		if _, found := labels[label]; found {
