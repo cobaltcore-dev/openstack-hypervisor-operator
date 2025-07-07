@@ -33,22 +33,15 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/gophercloud/gophercloud/v2"
 )
 
 const ()
 
 type NodeCertificateController struct {
 	k8sclient.Client
-	Scheme            *runtime.Scheme
-	computeClient     *gophercloud.ServiceClient
-	instanceHAClient  *gophercloud.ServiceClient
-	namespace         string
-	issuerName        string
-	testComputeClient *gophercloud.ServiceClient
-	testImageClient   *gophercloud.ServiceClient
-	testNetworkClient *gophercloud.ServiceClient
+	Scheme     *runtime.Scheme
+	namespace  string
+	issuerName string
 }
 
 func getSecretAndCertName(name string) (string, string) {

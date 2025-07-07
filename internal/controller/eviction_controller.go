@@ -46,10 +46,9 @@ import (
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
-	computeClient    *gophercloud.ServiceClient
-	instanceHAClient *gophercloud.ServiceClient
-	rand             *rand.Rand
+	Scheme        *runtime.Scheme
+	computeClient *gophercloud.ServiceClient
+	rand          *rand.Rand
 }
 
 const (

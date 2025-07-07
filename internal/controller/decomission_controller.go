@@ -43,9 +43,8 @@ const (
 
 type NodeDecommissionReconciler struct {
 	k8sclient.Client
-	Scheme           *runtime.Scheme
-	computeClient    *gophercloud.ServiceClient
-	instanceHAClient *gophercloud.ServiceClient
+	Scheme        *runtime.Scheme
+	computeClient *gophercloud.ServiceClient
 }
 
 // The counter-side in gardener is here:

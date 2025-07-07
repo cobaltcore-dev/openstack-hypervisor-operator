@@ -65,7 +65,6 @@ type OnboardingController struct {
 	k8sclient.Client
 	Scheme            *runtime.Scheme
 	computeClient     *gophercloud.ServiceClient
-	namespace         string
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
 	testNetworkClient *gophercloud.ServiceClient
