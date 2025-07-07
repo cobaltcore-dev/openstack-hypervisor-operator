@@ -148,6 +148,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 	if !found || serviceId == "" {
 		return fmt.Errorf("empty service-id for label %v on node", labelServiceID)
 	}
+
 	result := services.Update(ctx, r.computeClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
 	if result.Err != nil {
 		return result.Err
@@ -194,6 +195,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 }
 
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node) (ctrl.Result, error) {
+	log := logger.FromContext(ctx)
 	aggs, err := aggregatesByName(ctx, r.computeClient)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
@@ -202,6 +204,13 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	err = removeFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
+	}
+	log.Info("removed from test-aggregate", "name", testAggregateName)
+
+	err = enableInstanceHA(node)
+	log.Info("enabled instance-ha")
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	_, err = setNodeLabels(ctx, r, node, map[string]string{
