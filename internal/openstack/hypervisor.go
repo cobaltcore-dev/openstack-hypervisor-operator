@@ -87,7 +87,7 @@ func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hyp
 		return nil, err
 	}
 
-	// due some(tm) bug, gohperclouds hypervisors.ExtractPage is failing
+	// due some(tm) bug, gopherclouds hypervisors.ExtractPage is failing
 	h := &HyperVisorsDetails{}
 	if err = (pages.(hypervisors.HypervisorPage)).ExtractInto(h); err != nil {
 		return nil, err
