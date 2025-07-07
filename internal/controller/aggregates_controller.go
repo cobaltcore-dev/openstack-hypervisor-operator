@@ -70,6 +70,9 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	aggs, err := aggregatesByName(ctx, r.computeClient)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	toRemove := difference(toApply, applied)
 	toAdd := difference(applied, toApply)
