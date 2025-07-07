@@ -79,7 +79,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(toAdd) > 0 {
 		log.Info("Adding", "aggregates", toAdd)
-		for item, _ := range toAdd {
+		for item := range toAdd {
 			err = addToAggregate(ctx, r.computeClient, aggs, computeHost, item, "")
 			if err != nil {
 				return ctrl.Result{}, err
