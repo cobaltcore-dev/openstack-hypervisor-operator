@@ -91,7 +91,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	var value string
 	if _, onboarding := node.Labels[labelOnboardingState]; !onboarding {
-		value = "true"
+		value = "true" //nolint:goconst
 	} else {
 		// check for existing eviction, else create it
 		value, err = r.reconcileEviction(ctx, eviction, node, hostname, maintenanceValue)
@@ -102,7 +102,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	if value != "" {
 		newNode := node.DeepCopy()
-		if value == "true" {
+		if value == "true" { //nolint:goconst
 			evictAgentsLabels(newNode.Labels)
 		}
 		newNode.Labels[labelEvictionApproved] = maintenanceValue
@@ -136,7 +136,7 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 	// check if the eviction is already succeeded
 	switch eviction.Status.EvictionState {
 	case "Succeeded":
-		return "true", nil
+		return "true", nil //nolint:goconst
 	case "Failed":
 		return "false", nil
 	default:

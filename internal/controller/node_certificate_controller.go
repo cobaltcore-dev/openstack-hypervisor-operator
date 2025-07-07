@@ -35,8 +35,6 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-const ()
-
 type NodeCertificateController struct {
 	k8sclient.Client
 	Scheme     *runtime.Scheme

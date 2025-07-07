@@ -324,6 +324,10 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	imagesList, err := images.ExtractImages(imagePages)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, image := range imagesList {
 		if image.Name == testImageName {
 			imageRef = image.ID
@@ -362,23 +366,19 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		Name:             serverName,
 		AvailabilityZone: fmt.Sprintf("%v:%v", zone, computeHost),
 		FlavorRef:        flavorRef,
-		BlockDevice: []servers.BlockDevice{
-			servers.BlockDevice{
-				UUID:                imageRef,
-				BootIndex:           0,
-				SourceType:          "image",
-				VolumeSize:          64,
-				DiskBus:             "virtio",
-				DeleteOnTermination: true,
-				DestinationType:     "volume",
-				VolumeType:          testVolumeType,
-			},
-		},
-		Networks: []servers.Network{
-			servers.Network{
-				UUID: networkRef,
-			},
-		},
+		BlockDevice: []servers.BlockDevice{{
+			UUID:                imageRef,
+			BootIndex:           0,
+			SourceType:          "image",
+			VolumeSize:          64,
+			DiskBus:             "virtio",
+			DeleteOnTermination: true,
+			DestinationType:     "volume",
+			VolumeType:          testVolumeType,
+		}},
+		Networks: []servers.Network{{
+			UUID: networkRef,
+		}},
 	}, nil).Extract()
 
 	if err != nil {

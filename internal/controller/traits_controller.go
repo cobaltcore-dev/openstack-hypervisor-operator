@@ -91,7 +91,7 @@ func (r *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	for item, _ := range toAdd {
+	for item := range toAdd {
 		targetTraitsSet[item] = true
 	}
 
@@ -107,7 +107,7 @@ func (r *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, result.Err
 	}
 
-	_, err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAppliedCustomTraits: node.Annotations[annotationCustomTraits]})
+	err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAppliedCustomTraits: node.Annotations[annotationCustomTraits]})
 
 	return ctrl.Result{}, err
 }
@@ -142,7 +142,7 @@ func extractTraits(node *corev1.Node, key string) (values map[string]bool) {
 // returns all elements in b not in a
 func difference(a, b map[string]bool) (diff map[string]bool) {
 	diff = make(map[string]bool, 0)
-	for item, _ := range b {
+	for item := range b {
 		_, found := a[item]
 		if !found {
 			diff[item] = true

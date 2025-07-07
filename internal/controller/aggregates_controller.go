@@ -89,7 +89,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(toRemove) > 0 {
 		log.Info("Removing", "aggregates", toRemove)
-		for item, _ := range toRemove {
+		for item := range toRemove {
 			err = removeFromAggregate(ctx, r.computeClient, aggs, computeHost, item)
 			if err != nil {
 				return ctrl.Result{}, err
@@ -97,7 +97,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	_, err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAggregatesApplied: node.Annotations[annotationAggregates]})
+	err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAggregatesApplied: node.Annotations[annotationAggregates]})
 
 	return ctrl.Result{}, err
 }

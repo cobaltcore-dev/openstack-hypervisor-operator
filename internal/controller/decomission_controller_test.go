@@ -65,7 +65,7 @@ var _ = Describe("Decommission Controller", func() {
 			resource := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   nodeName,
-					Labels: map[string]string{labelEvictionRequired: "true"},
+					Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
