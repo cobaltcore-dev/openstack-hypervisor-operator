@@ -123,7 +123,7 @@ func (r *EvictionReconciler) getOwnerNode(ctx context.Context, eviction *kvmv1.E
 	for _, owner := range eviction.GetOwnerReferences() {
 		if owner.Kind == "Node" && owner.APIVersion == "v1" {
 			node := &corev1.Node{}
-			err := r.Client.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
+			err := r.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
 			err = client.IgnoreNotFound(err)
 			// Not found means no labels, so the rest will work as well
 			if err != nil || node != nil {
