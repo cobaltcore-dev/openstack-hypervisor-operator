@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
+func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) {
 	if owner.APIVersion == "" { // Workaround for test
 		owner.APIVersion = "v1"
 		owner.Kind = "Node"
@@ -36,7 +36,7 @@ func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
 			item.Kind == owner.Kind &&
 			item.Name == owner.Name &&
 			item.UID == owner.UID {
-			return false
+			return
 		}
 	}
 
@@ -49,8 +49,6 @@ func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) bool {
 		BlockOwnerDeletion: &falseValue,
 		Controller:         &falseValue,
 	})
-
-	return true
 }
 
 // setNodeLabels sets the labels on the node.
