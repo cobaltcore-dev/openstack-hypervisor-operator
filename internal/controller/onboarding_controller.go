@@ -211,7 +211,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	_, err = setNodeLabels(ctx, r, node, map[string]string{
 		labelOnboardingState: onboardingValueCompleted,
 	})
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, err
 }
 
 func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {
