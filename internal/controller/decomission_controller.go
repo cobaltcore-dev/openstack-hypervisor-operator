@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,7 +64,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, labelLifecycleMode)
+	found := (labels.Set)(node.Labels).Has(labelLifecycleMode)
 
 	if !found {
 		// Get out of the way

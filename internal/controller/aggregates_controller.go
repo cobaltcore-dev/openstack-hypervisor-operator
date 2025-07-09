@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,7 +57,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !hasAnyLabel(node.Labels, labelServiceID) {
+	if !(labels.Set)(node.Labels).Has(labelServiceID) {
 		return ctrl.Result{}, nil
 	}
 

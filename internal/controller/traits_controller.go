@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,7 +59,7 @@ func (r *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !hasAnyLabel(node.Labels, labelHypervisor) {
+	if !(labels.Set)(node.Labels).Has(labelHypervisor) {
 		return ctrl.Result{}, nil
 	}
 

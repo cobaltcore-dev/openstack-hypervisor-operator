@@ -36,16 +36,6 @@ func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node,
 	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
 }
 
-func hasAnyLabel(labels map[string]string, list ...string) bool {
-	for _, label := range list {
-		if _, found := labels[label]; found {
-			return true
-		}
-	}
-
-	return false
-}
-
 // setNodeAnnotations sets annotations on the node.
 func setNodeAnnotations(ctx context.Context, writer client.Writer, node *corev1.Node, annotations map[string]string) error {
 	newNode := node.DeepCopy()

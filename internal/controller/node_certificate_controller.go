@@ -27,6 +27,7 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -162,7 +163,7 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := hasAnyLabel(node.Labels, labelHypervisor)
+	found := (labels.Set)(node.Labels).Has(labelHypervisor)
 
 	if !found {
 		return ctrl.Result{}, nil

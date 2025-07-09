@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
@@ -71,7 +72,7 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !hasAnyLabel(node.Labels, labelLifecycleMode) {
+	if !(labels.Set)(node.Labels).Has(labelLifecycleMode) {
 		return ctrl.Result{}, nil
 	}
 
