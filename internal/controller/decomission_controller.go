@@ -65,18 +65,9 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	found := (labels.Set)(node.Labels).Has(labelLifecycleMode)
-
 	if !found {
 		// Get out of the way
-		var err error
-		if controllerutil.RemoveFinalizer(node, decommissionFinalizerName) {
-			err = r.Update(ctx, node)
-			if err != nil {
-				err = fmt.Errorf("failed to remove finalizer due to %w", err)
-			}
-		}
-
-		return ctrl.Result{}, err
+		return r.removeFinalizer(ctx, node)
 	}
 
 	if controllerutil.AddFinalizer(node, decommissionFinalizerName) {
