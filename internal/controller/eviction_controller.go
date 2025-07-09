@@ -471,6 +471,5 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kvmv1.Eviction{}).
-		// WithEventFilter(predicate.GenerationChangedPredicate{}). // TODO: make this more fine granular
 		Complete(r)
 }

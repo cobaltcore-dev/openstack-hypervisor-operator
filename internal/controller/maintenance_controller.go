@@ -47,7 +47,6 @@ type MaintenanceController struct {
 
 const (
 	labelManagedBy                  = "app.kubernetes.io/managed-by"
-	labelValueMaintenanceController = "cobaltcore.cloud.sap/maintenance-controller"
 	labelDeployment                 = "cobaltcore-maintenance-controller"
 	maintenancePodsNamespace        = "kube-system"
 	labelCriticalComponent          = "node.gardener.cloud/critical-component"
@@ -59,7 +58,6 @@ const (
 // https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update;watch
-// +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;delete;;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=create;delete;get;list;patch;update;watch
 
