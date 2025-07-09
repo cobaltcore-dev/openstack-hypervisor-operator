@@ -67,7 +67,9 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 	}
 
 	update, err := controllerutil.CreateOrUpdate(ctx, r.Client, certificate, func() error {
-		addNodeOwnerReference(&certificate.ObjectMeta, node)
+		if err := controllerutil.SetOwnerReference(node, certificate, r.Scheme); err != nil {
+			return err
+		}
 
 		ipAddressSet := make(map[string]bool)
 		dnsNameSet := make(map[string]bool)

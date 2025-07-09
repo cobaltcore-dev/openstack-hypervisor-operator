@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -121,7 +122,9 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 		if !k8serrors.IsNotFound(err) {
 			return "", err
 		}
-		addNodeOwnerReference(&eviction.ObjectMeta, node)
+		if err := controllerutil.SetOwnerReference(node, eviction, r.Scheme); err != nil {
+			return "", err
+		}
 		log.Info("Creating new eviction", "name", eviction.Name)
 		eviction.Spec = kvmv1.EvictionSpec{
 			Hypervisor: hostname,

@@ -22,34 +22,8 @@ import (
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func addNodeOwnerReference(obj *metav1.ObjectMeta, owner *corev1.Node) {
-	if owner.APIVersion == "" { // Workaround for test
-		owner.APIVersion = "v1"
-		owner.Kind = "Node"
-	}
-	for _, item := range obj.OwnerReferences {
-		if item.APIVersion == owner.APIVersion &&
-			item.Kind == owner.Kind &&
-			item.Name == owner.Name &&
-			item.UID == owner.UID {
-			return
-		}
-	}
-
-	falseValue := false
-	obj.OwnerReferences = append(obj.OwnerReferences, metav1.OwnerReference{
-		APIVersion:         owner.APIVersion,
-		Kind:               owner.Kind,
-		Name:               owner.Name,
-		UID:                owner.UID,
-		BlockOwnerDeletion: &falseValue,
-		Controller:         &falseValue,
-	})
-}
 
 // setNodeLabels sets the labels on the node.
 func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) (bool, error) {
