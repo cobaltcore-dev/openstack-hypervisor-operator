@@ -59,7 +59,7 @@ const (
 	testFlavorName           = "c_k_c2_m2_v2"
 	testImageName            = "cirros-d240801-kvm"
 	testPrefixName           = "ohooc-"
-	testVolumeType           = "nfs"
+	testVolumeType           = "kvm-pilot"
 )
 
 type OnboardingController struct {
