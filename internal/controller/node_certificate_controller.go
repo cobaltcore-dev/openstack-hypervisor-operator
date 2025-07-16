@@ -111,9 +111,9 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 				Encoding:  cmapi.PKCS1,
 				Size:      4096,
 			},
-			// Values for testing, increase for production to something sensible
-			Duration:    &metav1.Duration{Duration: 8 * time.Hour},
-			RenewBefore: &metav1.Duration{Duration: 2 * time.Hour},
+			// Matching the CA/Browser Forum's maximum duration for 2029
+			Duration:    &metav1.Duration{Duration: 47 * 24 * time.Hour},
+			RenewBefore: &metav1.Duration{Duration: 37 * 24 * time.Hour},
 			IsCA:        false,
 			Usages: []cmapi.KeyUsage{
 				cmapi.UsageServerAuth,
