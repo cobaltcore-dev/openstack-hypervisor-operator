@@ -22,20 +22,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"unicode"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 )
-
-func cleanPassword(password string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsGraphic(r) {
-			return r
-		}
-		return -1
-	}, password)
-}
 
 // GetServiceClient returns an gophercloud ServiceClient for the given serviceType.
 func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.ServiceClient, error) {
@@ -48,7 +38,7 @@ func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.Ser
 			return nil, err
 		}
 		authInfo = &clientconfig.AuthInfo{
-			Password: cleanPassword(string(out))}
+			Password: strings.TrimSuffix(string(out), "\n")}
 	}
 
 	return GetServiceClientAuth(ctx, serviceType, authInfo)
@@ -57,8 +47,7 @@ func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.Ser
 // GetServiceClient returns an gophercloud ServiceClient for the given serviceType.
 func GetServiceClientAuth(ctx context.Context, serviceType string, authInfo *clientconfig.AuthInfo) (*gophercloud.ServiceClient, error) {
 	if authInfo == nil {
-		password := cleanPassword(os.Getenv("OS_PASSWORD"))
-		authInfo = &clientconfig.AuthInfo{Password: password}
+		authInfo = &clientconfig.AuthInfo{}
 	}
 	authInfo.AllowReauth = true
 
