@@ -22,14 +22,9 @@ import (
 	"flag"
 	"os"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -43,7 +38,10 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+
 	// +kubebuilder:scaffold:imports
+
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 )
 
 var (
@@ -56,6 +54,8 @@ func init() {
 
 	utilruntime.Must(kvmv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	utilruntime.Must(cmapi.AddToScheme(scheme))
 }
 
 func main() {
@@ -65,6 +65,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var certificateNamespace string
+	var certificateIssuerName string
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -75,6 +78,11 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+
+	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
+	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
+		"Name of the certificate issuer.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -145,17 +153,8 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-
-		// Cache options allow to subscribe to events from Kubernetes objects and to read
-		// those objects more efficiently by avoiding to call out to the API.
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Node{}: {
-					Label: labels.SelectorFromSet(labels.Set{controller.EVICTION_REQUIRED_LABEL: "true"}),
-				},
-			},
-		},
 	})
+
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -169,13 +168,62 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NodeReconciler{
+	if err = (&controller.NodeEvictionLabelReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
+
+	if err = (&controller.NodeDecommissionReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "NodeDecommission")
+		os.Exit(1)
+	}
+
+	if err = (&controller.OnboardingController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Onboarding")
+		os.Exit(1)
+	}
+
+	if err = (&controller.NodeCertificateController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+		setupLog.Error(err, "unable to create controller", "certificate", "NodeCertificate")
+		os.Exit(1)
+	}
+
+	if err = (&controller.MaintenanceController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr, certificateNamespace); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Maintenance")
+		os.Exit(1)
+	}
+
+	if err = (&controller.TraitsController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Traits")
+		os.Exit(1)
+	}
+
+	if err = (&controller.AggregatesController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Aggregates")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

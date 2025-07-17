@@ -157,7 +157,7 @@ var _ = Describe("Eviction Controller", func() {
 				controllerReconciler = &EvictionReconciler{
 					Client:        k8sClient,
 					Scheme:        k8sClient.Scheme(),
-					serviceClient: client.ServiceClient(),
+					computeClient: client.ServiceClient(),
 					rand:          rand.New(rand.NewSource(42)),
 				}
 			})
