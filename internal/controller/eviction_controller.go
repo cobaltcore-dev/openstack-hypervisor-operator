@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -331,7 +332,7 @@ func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv
 	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
 		err := r.enableHypervisorService(ctx, eviction)
 		if err != nil {
-			if _, ok := err.(*openstack.NoHypervisorError); ok {
+			if errors.Is(err, openstack.ErrNoHypervisor) {
 				log := logger.FromContext(ctx)
 				log.Info("Can't enable host, it is gone")
 			} else {
