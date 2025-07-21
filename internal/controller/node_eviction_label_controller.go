@@ -36,10 +36,7 @@ import (
 )
 
 const (
-	labelEvictionRequired   = "cloud.sap/hypervisor-eviction-required"
-	labelEvictionApproved   = "cloud.sap/hypervisor-eviction-succeeded"
-	labelHypervisor         = "nova.openstack.cloud.sap/virt-driver"
-	DisabledSuffix          = "-disabled"
+	disabledSuffix          = "-disabled"
 	labelMl2MechanismDriver = "neutron.openstack.cloud.sap/ml2-mechanism-driver"
 )
 
@@ -149,23 +146,23 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 
 func evictAgentsLabels(labels map[string]string) {
 	hypervisorType, found := labels[labelHypervisor]
-	if found && !strings.HasSuffix(hypervisorType, DisabledSuffix) {
-		labels[labelHypervisor] = hypervisorType + DisabledSuffix
+	if found && !strings.HasSuffix(hypervisorType, disabledSuffix) {
+		labels[labelHypervisor] = hypervisorType + disabledSuffix
 	}
 	ml2MechanismDriver, found := labels[labelMl2MechanismDriver]
-	if found && !strings.HasSuffix(ml2MechanismDriver, DisabledSuffix) {
-		labels[labelMl2MechanismDriver] = ml2MechanismDriver + DisabledSuffix
+	if found && !strings.HasSuffix(ml2MechanismDriver, disabledSuffix) {
+		labels[labelMl2MechanismDriver] = ml2MechanismDriver + disabledSuffix
 	}
 }
 
 func permitAgentsLabels(labels map[string]string) {
 	hypervisorType, found := labels[labelHypervisor]
-	if found && strings.HasSuffix(hypervisorType, DisabledSuffix) {
-		labels[labelHypervisor] = strings.TrimSuffix(hypervisorType, DisabledSuffix)
+	if found && strings.HasSuffix(hypervisorType, disabledSuffix) {
+		labels[labelHypervisor] = strings.TrimSuffix(hypervisorType, disabledSuffix)
 	}
 	ml2MechanismDriver, found := labels[labelMl2MechanismDriver]
-	if found && strings.HasSuffix(ml2MechanismDriver, DisabledSuffix) {
-		labels[labelMl2MechanismDriver] = strings.TrimSuffix(ml2MechanismDriver, DisabledSuffix)
+	if found && strings.HasSuffix(ml2MechanismDriver, disabledSuffix) {
+		labels[labelMl2MechanismDriver] = strings.TrimSuffix(ml2MechanismDriver, disabledSuffix)
 	}
 }
 

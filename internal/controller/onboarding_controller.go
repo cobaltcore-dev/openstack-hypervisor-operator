@@ -45,21 +45,16 @@ import (
 )
 
 const (
-	defaultWaitTime          = 1 * time.Minute
-	labelHypervisorID        = "nova.openstack.cloud.sap/hypervisor-id"
-	labelServiceID           = "nova.openstack.cloud.sap/service-id"
-	labelOnboardingState     = "cobaltcore.cloud.sap/onboarding-state"
-	labelSegmentName         = "kubernetes.metal.cloud.sap/bb"
-	onboardingValueInitial   = "initial"
-	onboardingValueTesting   = "testing"
-	onboardingValueCompleted = "completed"
-	testAggregateName        = "tenant_filter_tests"
-	testProjectName          = "test"
-	testDomainName           = "cc3test"
-	testFlavorName           = "c_k_c2_m2_v2"
-	testImageName            = "cirros-d240801-kvm"
-	testPrefixName           = "ohooc-"
-	testVolumeType           = "kvm-pilot"
+	defaultWaitTime        = 1 * time.Minute
+	onboardingValueInitial = "initial"
+	onboardingValueTesting = "testing"
+	testAggregateName      = "tenant_filter_tests"
+	testProjectName        = "test"
+	testDomainName         = "cc3test"
+	testFlavorName         = "c_k_c2_m2_v2"
+	testImageName          = "cirros-d240801-kvm"
+	testPrefixName         = "ohooc-"
+	testVolumeType         = "kvm-pilot"
 )
 
 type OnboardingController struct {

@@ -39,7 +39,6 @@ import (
 
 const (
 	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
-	labelLifecycleMode        = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
 )
 
 type NodeDecommissionReconciler struct {
