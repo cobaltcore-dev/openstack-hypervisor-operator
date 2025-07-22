@@ -35,6 +35,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
+	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 )
 
 const (
@@ -43,8 +44,9 @@ const (
 
 type NodeDecommissionReconciler struct {
 	k8sclient.Client
-	Scheme        *runtime.Scheme
-	computeClient *gophercloud.ServiceClient
+	Scheme          *runtime.Scheme
+	computeClient   *gophercloud.ServiceClient
+	placementClient *gophercloud.ServiceClient
 }
 
 // The counter-side in gardener is here:
@@ -126,11 +128,21 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 
 	// Deleting and evicted, so better delete the service
 	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
-	if err == nil || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return r.removeFinalizer(ctx, node)
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return ctrl.Result{}, fmt.Errorf("cannot delete service due to %w", err)
 	}
 
-	return ctrl.Result{}, err
+	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisorID).Extract()
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return ctrl.Result{}, fmt.Errorf("cannot get resource provider due to %w", err)
+	}
+
+	err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot clean up resource provider due to %w", err)
+	}
+
+	return r.removeFinalizer(ctx, node)
 }
 
 func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
@@ -152,6 +164,12 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	r.computeClient.Microversion = "2.93"
+
+	r.placementClient, err = openstack.GetServiceClient(ctx, "placement")
+	if err != nil {
+		return err
+	}
+	r.placementClient.Microversion = "1.39" // yoga, or later
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
