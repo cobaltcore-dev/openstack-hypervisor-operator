@@ -71,9 +71,11 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.removeFinalizer(ctx, node)
 	}
 
-	if controllerutil.AddFinalizer(node, decommissionFinalizerName) {
+	if !controllerutil.ContainsFinalizer(node, decommissionFinalizerName) {
 		log.Info("Added finalizer")
-		err := r.Update(ctx, node)
+		nodeBase := node.DeepCopy()
+		controllerutil.AddFinalizer(node, decommissionFinalizerName)
+		err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase, k8sclient.MergeFromWithOptimisticLock{}))
 		if err != nil {
 			err = fmt.Errorf("failed to add finalizer due to %w", err)
 		}
@@ -146,12 +148,14 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 }
 
 func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	if controllerutil.RemoveFinalizer(node, decommissionFinalizerName) {
-		if err := r.Update(ctx, node); err != nil {
-			return ctrl.Result{}, err
-		}
+	if !controllerutil.ContainsFinalizer(node, decommissionFinalizerName) {
+		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, nil
+
+	nodeBase := node.DeepCopy()
+	controllerutil.RemoveFinalizer(node, decommissionFinalizerName)
+	err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase, k8sclient.MergeFromWithOptimisticLock{}))
+	return ctrl.Result{}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
