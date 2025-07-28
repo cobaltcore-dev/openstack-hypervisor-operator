@@ -329,22 +329,24 @@ func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
 }
 
 func (r *EvictionReconciler) handleFinalizer(ctx context.Context, eviction *kvmv1.Eviction) error {
-	if controllerutil.RemoveFinalizer(eviction, evictionFinalizerName) {
-		err := r.enableHypervisorService(ctx, eviction)
-		if err != nil {
-			if errors.Is(err, openstack.ErrNoHypervisor) {
-				log := logger.FromContext(ctx)
-				log.Info("Can't enable host, it is gone")
-			} else {
-				return err
-			}
-		}
+	if !controllerutil.ContainsFinalizer(eviction, evictionFinalizerName) {
+		return nil
+	}
 
-		if err := r.Update(ctx, eviction); err != nil {
+	err := r.enableHypervisorService(ctx, eviction)
+	if err != nil {
+		if errors.Is(err, openstack.ErrNoHypervisor) {
+			log := logger.FromContext(ctx)
+			log.Info("Can't enable host, it is gone")
+		} else {
 			return err
 		}
 	}
-	return nil
+
+	evictionBase := eviction.DeepCopy()
+	controllerutil.RemoveFinalizer(eviction, evictionFinalizerName)
+	err = r.Patch(ctx, eviction, client.MergeFromWithOptions(evictionBase, client.MergeFromWithOptimisticLock{}))
+	return err
 }
 
 func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, eviction *kvmv1.Eviction) error {
@@ -376,8 +378,10 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 		return r.addProgressCondition(ctx, eviction, "Found host already disabled", "Update"), nil
 	}
 
-	if controllerutil.AddFinalizer(eviction, evictionFinalizerName) {
-		return true, r.Update(ctx, eviction)
+	if !controllerutil.ContainsFinalizer(eviction, evictionFinalizerName) {
+		evictionBase := eviction.DeepCopy()
+		controllerutil.AddFinalizer(eviction, evictionFinalizerName)
+		return true, r.Patch(ctx, eviction, client.MergeFromWithOptions(evictionBase, client.MergeFromWithOptimisticLock{}))
 	}
 
 	if hypervisor.Service.DisabledReason == evictionReason {
