@@ -30,9 +30,10 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 const (
@@ -109,7 +110,7 @@ func (r *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.40" // gophercloud only supports numeric ids

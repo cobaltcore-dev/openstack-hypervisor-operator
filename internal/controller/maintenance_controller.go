@@ -35,8 +35,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 type MaintenanceController struct {
@@ -243,7 +244,7 @@ func (r *MaintenanceController) SetupWithManager(mgr ctrl.Manager, namespace str
 	r.namespace = namespace
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
 
