@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,6 +53,9 @@ func setNodeAnnotations(ctx context.Context, writer client.Writer, node *corev1.
 }
 
 func InstanceHaUrl(region, zone, hostname string) string {
+	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
+		return haURL
+	}
 	return fmt.Sprintf("https://kvm-ha-service-%v.%v.cloud.sap/api/hypervisors/%v", zone, region, hostname)
 }
 
