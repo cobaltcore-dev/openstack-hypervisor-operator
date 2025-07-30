@@ -30,9 +30,10 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 const (
@@ -119,7 +120,7 @@ func (r *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(ctx, "placement"); err != nil {
+	if r.serviceClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {
 		return err
 	}
 	r.serviceClient.Microversion = "1.39" // yoga, or later

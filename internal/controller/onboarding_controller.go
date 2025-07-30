@@ -32,8 +32,6 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
@@ -42,6 +40,9 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 const (
@@ -403,27 +404,29 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.95"
 
+	// TODO: Make this configurable
 	testAuth := &clientconfig.AuthInfo{
 		ProjectName:       testProjectName,
 		ProjectDomainName: testDomainName,
+		UserDomainName:    testDomainName,
 	}
 
-	if r.testComputeClient, err = openstack.GetServiceClientAuth(ctx, "compute", testAuth); err != nil {
+	if r.testComputeClient, err = openstack.GetServiceClient(ctx, "compute", testAuth); err != nil {
 		return err
 	}
 	r.testComputeClient.Microversion = "2.95"
 
-	if r.testImageClient, err = openstack.GetServiceClientAuth(ctx, "image", testAuth); err != nil {
+	if r.testImageClient, err = openstack.GetServiceClient(ctx, "image", testAuth); err != nil {
 		return err
 	}
 	r.testImageClient.ResourceBase = fmt.Sprintf("%vv2/", r.testImageClient.Endpoint)
 
-	if r.testNetworkClient, err = openstack.GetServiceClientAuth(ctx, "network", testAuth); err != nil {
+	if r.testNetworkClient, err = openstack.GetServiceClient(ctx, "network", testAuth); err != nil {
 		return err
 	}
 	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)

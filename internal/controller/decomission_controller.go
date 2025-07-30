@@ -23,6 +23,11 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
+	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,11 +38,6 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
-	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
-	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 )
 
 const (
@@ -183,13 +183,13 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
 
 	r.computeClient.Microversion = "2.93"
 
-	r.placementClient, err = openstack.GetServiceClient(ctx, "placement")
+	r.placementClient, err = openstack.GetServiceClient(ctx, "placement", nil)
 	if err != nil {
 		return err
 	}

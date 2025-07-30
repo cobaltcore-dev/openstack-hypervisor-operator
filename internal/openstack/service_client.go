@@ -28,8 +28,12 @@ import (
 )
 
 // GetServiceClient returns an gophercloud ServiceClient for the given serviceType.
-func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.ServiceClient, error) {
-	var authInfo *clientconfig.AuthInfo
+func GetServiceClient(ctx context.Context, serviceType string, authInfo *clientconfig.AuthInfo) (*gophercloud.ServiceClient, error) {
+	if authInfo == nil {
+		authInfo = &clientconfig.AuthInfo{}
+	}
+	authInfo.AllowReauth = true
+
 	if osPWCmd := os.Getenv("OS_PW_CMD"); osPWCmd != "" {
 		// run external command to get password
 		cmd := exec.Command("sh", "-c", osPWCmd)
@@ -37,19 +41,8 @@ func GetServiceClient(ctx context.Context, serviceType string) (*gophercloud.Ser
 		if err != nil {
 			return nil, err
 		}
-		authInfo = &clientconfig.AuthInfo{
-			Password: strings.TrimSuffix(string(out), "\n")}
+		authInfo.Password = strings.TrimSuffix(string(out), "\n")
 	}
-
-	return GetServiceClientAuth(ctx, serviceType, authInfo)
-}
-
-// GetServiceClient returns an gophercloud ServiceClient for the given serviceType.
-func GetServiceClientAuth(ctx context.Context, serviceType string, authInfo *clientconfig.AuthInfo) (*gophercloud.ServiceClient, error) {
-	if authInfo == nil {
-		authInfo = &clientconfig.AuthInfo{}
-	}
-	authInfo.AllowReauth = true
 
 	var clientOpts clientconfig.ClientOpts
 	clientOpts.AuthInfo = authInfo
