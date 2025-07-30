@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -33,6 +34,7 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
@@ -126,6 +128,24 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 
 	if hypervisor.RunningVMs > 0 {
 		return ctrl.Result{}, fmt.Errorf("cannot shutdown service, VMs still running %v", hypervisor.RunningVMs)
+	}
+
+	// Before removing the service, first take the node out of the aggregates,
+	// so when the node comes back, it doesn't up with the old associations
+	aggs, err := aggregatesByName(ctx, r.computeClient)
+
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot list aggregates %w", err)
+	}
+
+	host := node.Name
+	for name, aggregate := range aggs {
+		if slices.Contains(aggregate.Hosts, host) {
+			err := aggregates.RemoveHost(ctx, r.computeClient, aggregate.ID, aggregates.RemoveHostOpts{Host: host}).Err
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to remove host %v from aggregate %v due to %w", host, name, err)
+			}
+		}
 	}
 
 	// Deleting and evicted, so better delete the service
