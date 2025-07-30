@@ -22,7 +22,7 @@ spec:
     - jsonPath: .spec.reason
       name: Reason
       type: string
-    - jsonPath: .status.evictionState
+    - jsonPath: .status.conditions[?(@.type=="Eviction")].reason
       name: State
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -128,14 +128,6 @@ spec:
                   - type
                   type: object
                 type: array
-              evictionState:
-                default: Pending
-                enum:
-                - Pending
-                - Running
-                - Failed
-                - Succeeded
-                type: string
               hypervisorServiceId:
                 type: string
               outstandingInstances:
@@ -146,8 +138,6 @@ spec:
                 default: 0
                 format: int64
                 type: integer
-            required:
-            - evictionState
             type: object
         type: object
     served: true

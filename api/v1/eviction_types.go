@@ -21,9 +21,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // EvictionSpec defines the desired state of Eviction
 type EvictionSpec struct {
 	// +kubebuilder:validation:Required
@@ -40,11 +37,22 @@ type EvictionSpec struct {
 	Reason string `json:"reason"`
 }
 
+const (
+	// ConditionTypeEviction is the type of condition for eviction status
+	ConditionTypeEviction = "Eviction"
+
+	// ConditionReasonRunning means the eviction is currently running
+	ConditionReasonRunning string = "Running"
+
+	// ConditionReasonFailed means the eviction has failed
+	ConditionReasonFailed string = "Failed"
+
+	// ConditionReasonSuceeded means the eviction has succeeded
+	ConditionReasonSuceeded string = "Succeeded"
+)
+
 // EvictionStatus defines the observed state of Eviction
 type EvictionStatus struct {
-	// +kubebuilder:validation:Enum=Pending;Running;Failed;Succeeded
-	// +kubebuilder:default=Pending
-	EvictionState string `json:"evictionState"`
 	// +kubebuilder:validation:Optional
 	HypervisorServiceId string `json:"hypervisorServiceId"`
 	// +kubebuilder:validation:Optional
@@ -62,7 +70,7 @@ type EvictionStatus struct {
 // +kubebuilder:resource:scope=Cluster,shortName=evi
 // +kubebuilder:printcolumn:JSONPath=".spec.hypervisor",name="Hypervisor",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.reason",name="Reason",type="string"
-// +kubebuilder:printcolumn:JSONPath=".status.evictionState",name="State",type="string"
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Eviction\")].reason",name="State",type="string"
 // +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Created",type="date"
 
 // Eviction is the Schema for the evictions API

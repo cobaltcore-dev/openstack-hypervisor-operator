@@ -54,11 +54,6 @@ type EvictionReconciler struct {
 
 const (
 	evictionFinalizerName = "eviction-controller.cloud.sap/finalizer"
-	Succeeded             = "Succeeded"
-	Running               = "Running"
-	Reconciling           = "Reconciling"
-	Reconciled            = "Reconciled"
-	Failed                = "Failed"
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -75,8 +70,11 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log := logger.FromContext(ctx).WithName("Eviction").WithValues("hypervisor", eviction.Spec.Hypervisor, "status", eviction.Status.EvictionState)
+	log := logger.FromContext(ctx).
+		WithName("Eviction").
+		WithValues("hypervisor", eviction.Spec.Hypervisor)
 	ctx = logger.IntoContext(ctx, log)
+
 	// Being deleted
 	if !eviction.DeletionTimestamp.IsZero() {
 		err := r.handleFinalizer(ctx, eviction)
@@ -84,22 +82,25 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	switch eviction.Status.EvictionState {
-	case Succeeded, Failed:
-		// Nothing left to be done
+	statusCondition := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEviction)
+	if statusCondition == nil {
+		// No condition, so we are in the initial state
+		return r.handlePending(ctx, eviction)
+	} else if statusCondition.Status == metav1.ConditionTrue {
+		// We are running, so we need to evict the next instance
+		return r.handleRunning(ctx, eviction)
+	} else if statusCondition.Status == metav1.ConditionFalse {
+		// We are done, so we can just return
 		log.Info("finished")
 		return ctrl.Result{}, nil
-	case "Pending", "":
-		// Let's see if we can take it up
-		eviction.Status.EvictionState = "Pending" // "" -> "Pending: Fixes the test
-		log.Info("setup")
-		return r.handlePending(ctx, eviction)
-	case "Running":
-		return r.handleRunning(ctx, eviction)
-	default:
-		log.Info("Unknown eviction-state", "EvictionState", eviction.Status.EvictionState)
-		return ctrl.Result{}, nil
+	} else {
+		log.
+			WithValues("reason", statusCondition.Reason).
+			WithValues("msg", statusCondition.Message).
+			Info("unknown status condition")
 	}
+
+	return ctrl.Result{}, nil
 }
 
 func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
@@ -109,14 +110,13 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    Reconciling,
-		Status:  metav1.ConditionTrue,
-		Message: Reconciled,
-		Reason:  Reconciled,
+		Type:    kvmv1.ConditionTypeEviction,
+		Status:  metav1.ConditionFalse,
+		Message: "eviction completed successfully",
+		Reason:  kvmv1.ConditionReasonSuceeded,
 	})
 
 	eviction.Status.OutstandingRamMb = 0
-	eviction.Status.EvictionState = Succeeded
 	logger.FromContext(ctx).Info("succeeded")
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
@@ -160,9 +160,15 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 		} else {
 			// That is (likely) an eviction for a node that never registered
 			// so we are good to go
+			msg := "eviction completed successfully due to expected case of no hypervisor"
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeEviction,
+				Status:  metav1.ConditionFalse,
+				Message: msg,
+				Reason:  kvmv1.ConditionReasonSuceeded,
+			})
 			eviction.Status.OutstandingRamMb = 0
-			eviction.Status.EvictionState = Succeeded
-			logger.FromContext(ctx).Info("succeeded due to expected case of no hypervisor")
+			logger.FromContext(ctx).Info(msg)
 			return ctrl.Result{}, r.Status().Update(ctx, eviction)
 		}
 	}
@@ -172,17 +178,15 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 	if currentHypervisor != hypervisorName {
 		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, hypervisorName)
 		log.Error(err, "Hypervisor name mismatch")
-		if eviction.Status.EvictionState != Failed ||
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    "Eviction",
-				Status:  metav1.ConditionFalse,
-				Message: err.Error(),
-				Reason:  Failed}) {
-			eviction.Status.EvictionState = Failed
-			log.Info("Update", "status", eviction.Status)
-			if err := r.Status().Update(ctx, eviction); err != nil {
-				return ctrl.Result{}, err
-			}
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeEviction,
+			Status:  metav1.ConditionFalse,
+			Message: err.Error(),
+			Reason:  kvmv1.ConditionReasonFailed,
+		})
+		log.Info("Update", "status", eviction.Status)
+		if err = r.Status().Update(ctx, eviction); err != nil {
+			return ctrl.Result{}, err
 		}
 
 		return ctrl.Result{}, nil
@@ -212,13 +216,12 @@ func (r *EvictionReconciler) handlePending(ctx context.Context, eviction *kvmv1.
 
 	// Update status
 	eviction.Status.HypervisorServiceId = hypervisor.ID
-	eviction.Status.EvictionState = Running
 	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    Reconciling,
+		Type:    kvmv1.ConditionTypeEviction,
 		Status:  metav1.ConditionTrue,
-		Message: Reconciling,
-		Reason:  Reconciling,
+		Message: "eviction started",
+		Reason:  kvmv1.ConditionReasonRunning,
 	})
 
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
@@ -375,7 +378,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 
 	if disabledReason != nil && disabledReason != "" && disabledReason != evictionReason {
 		// Disabled for another reason already
-		return r.addProgressCondition(ctx, eviction, "Found host already disabled", "Update"), nil
+		return r.addProgressCondition(ctx, eviction, "Found host already disabled", kvmv1.ConditionReasonRunning), nil
 	}
 
 	if !controllerutil.ContainsFinalizer(eviction, evictionFinalizerName) {
@@ -396,7 +399,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 		return r.addErrorCondition(ctx, eviction, err), err
 	}
 
-	if r.addProgressCondition(ctx, eviction, "Host disabled", "Update") {
+	if r.addProgressCondition(ctx, eviction, "Host disabled", kvmv1.ConditionReasonRunning) {
 		return true, nil
 	}
 
@@ -438,7 +441,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 // addCondition adds a condition to the Eviction status and updates the status
 func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction, status metav1.ConditionStatus, message string, reason string) bool {
 	if !meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    "Eviction",
+		Type:    kvmv1.ConditionTypeEviction,
 		Status:  status,
 		Message: message,
 		Reason:  reason,
@@ -460,7 +463,7 @@ func (r *EvictionReconciler) addProgressCondition(ctx context.Context, eviction 
 }
 
 func (r *EvictionReconciler) addErrorCondition(ctx context.Context, eviction *kvmv1.Eviction, err error) bool {
-	return r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), Failed)
+	return r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), kvmv1.ConditionReasonFailed)
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -468,7 +471,7 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute"); err != nil {
+	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
