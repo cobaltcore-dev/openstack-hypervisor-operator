@@ -25,6 +25,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -143,7 +144,11 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 	}
 
 	// check if the eviction is already succeeded
-	switch eviction.Status.EvictionState {
+	var evictionState string
+	if status := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEviction); status != nil {
+		evictionState = status.Reason
+	}
+	switch evictionState {
 	case "Succeeded":
 		return "true", nil //nolint:goconst
 	case "Failed":

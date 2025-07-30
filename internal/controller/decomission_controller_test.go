@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 
+	"github.com/gophercloud/gophercloud/v2/testhelper"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -77,7 +78,10 @@ var _ = Describe("Decommission Controller", func() {
 		})
 
 		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
+			By("ConditionType the created resource")
+			testhelper.SetupHTTP()
+			defer testhelper.TeardownHTTP()
+
 			_, err := reconcileNodeLoop(1)
 			Expect(err).NotTo(HaveOccurred())
 		})
