@@ -20,7 +20,9 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/gophercloud/gophercloud/v2/testhelper"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -30,21 +32,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/jarcoal/httpmock"
 )
 
 var _ = Describe("Node Eviction Label Controller", func() {
-	var nodeReconciler *NodeEvictionLabelReconciler
+	const (
+		nodeName = "test-node"
+		hostName = "test-hostname"
+		region   = "region"
+		zone     = "zone"
+	)
+	var (
+		nodeReconciler *NodeEvictionLabelReconciler
+		req            = ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
+	)
 
 	Context("When reconciling a node", func() {
-		const nodeName = "test-node"
-		const hostName = "test-hostname"
-		const region = "region"
-		const zone = "zone"
-		req := ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: nodeName},
-		}
-
 		ctx := context.Background()
 
 		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
@@ -58,7 +60,8 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		}
 
 		BeforeEach(func() {
-			httpmock.Activate()
+			testhelper.SetupHTTP()
+			Expect(os.Setenv("KVM_HA_SERVICE_URL", testhelper.Endpoint())).To(Succeed())
 			nodeReconciler = &NodeEvictionLabelReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -77,24 +80,23 @@ var _ = Describe("Node Eviction Label Controller", func() {
 						corev1.LabelTopologyRegion: region,
 						corev1.LabelTopologyZone:   zone,
 						labelEvictionRequired:      "true",
-						labelOnboardingState:       "completed"},
+						labelOnboardingState:       "completed",
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		})
 
 		AfterEach(func() {
+			// Cleanup the node created for the test
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-			httpmock.DeactivateAndReset()
+			testhelper.TeardownHTTP()
 		})
 
 		It("should successfully reconcile the resource", func() {
-			url := InstanceHaUrl(region, zone, hostName)
-			httpmock.RegisterResponder("POST", url, httpmock.NewStringResponder(200, ``))
-
-			By("Reconciling the created resource")
+			By("ConditionType the created resource")
 			_, err := reconcileNodeLoop(5)
 			Expect(err).NotTo(HaveOccurred())
 
