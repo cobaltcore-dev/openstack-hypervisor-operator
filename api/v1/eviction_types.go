@@ -39,7 +39,7 @@ type EvictionSpec struct {
 
 const (
 	// ConditionTypePreflight is a condition for preflight checks, e.g. OS Hypervisor validation
-	ConditionTypePreflight = "Preflight"
+	ConditionTypePreflight = "PreflightChecksSucceeded"
 
 	// ConditionTypeHypervisorReEnabled is the type of condition for hypervisor re-enabled status
 	ConditionTypeHypervisorReEnabled = "HypervisorReEnabled"
