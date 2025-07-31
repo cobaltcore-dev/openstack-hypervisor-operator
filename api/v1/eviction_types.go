@@ -38,8 +38,17 @@ type EvictionSpec struct {
 }
 
 const (
+	// ConditionTypePreflight is a condition for preflight checks, e.g. OS Hypervisor validation
+	ConditionTypePreflight = "Preflight"
+
+	// ConditionTypeHypervisorReEnabled is the type of condition for hypervisor re-enabled status
+	ConditionTypeHypervisorReEnabled = "HypervisorReEnabled"
+
+	// ConditionTypeHypervisorDisabled is the type of condition for hypervisor disabled status
+	ConditionTypeHypervisorDisabled = "HypervisorDisabled"
+
 	// ConditionTypeEviction is the type of condition for eviction status
-	ConditionTypeEviction = "Eviction"
+	ConditionTypeEviction = "Evicting"
 
 	// ConditionReasonRunning means the eviction is currently running
 	ConditionReasonRunning string = "Running"
@@ -70,7 +79,7 @@ type EvictionStatus struct {
 // +kubebuilder:resource:scope=Cluster,shortName=evi
 // +kubebuilder:printcolumn:JSONPath=".spec.hypervisor",name="Hypervisor",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.reason",name="Reason",type="string"
-// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Eviction\")].reason",name="State",type="string"
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Evicting\")].reason",name="State",type="string"
 // +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Created",type="date"
 
 // Eviction is the Schema for the evictions API
