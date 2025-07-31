@@ -186,6 +186,8 @@ func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, 
 		}
 
 		var one int64 = 1
+		zeroStr := intstr.FromInt(0)
+		oneStr := intstr.FromInt(1)
 
 		deployment.Spec = appsv1.DeploymentSpec{
 			Replicas: &scale,
@@ -193,7 +195,11 @@ func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, 
 				MatchLabels: labels,
 			},
 			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RecreateDeploymentStrategyType,
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &zeroStr,
+					MaxSurge:       &oneStr,
+				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -207,9 +213,12 @@ func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, 
 					TerminationGracePeriodSeconds: &one, // busybox sleep doesn't handle TERM so well as pid 1
 					Tolerations: []corev1.Toleration{
 						{
-							Key:      labelCriticalComponentsNotReady,
+							Effect:   corev1.TaintEffectNoExecute,
+							Operator: corev1.TolerationOpExists,
+						},
+						{
 							Effect:   corev1.TaintEffectNoSchedule,
-							Operator: corev1.TolerationOpEqual,
+							Operator: corev1.TolerationOpExists,
 						},
 					},
 					Containers: []corev1.Container{
