@@ -38,6 +38,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 )
 
 const (
@@ -101,6 +102,8 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
+	host := node.Name
+
 	hypervisorID, found := node.Labels[labelHypervisorID]
 	if !found {
 		hostname := node.Labels[corev1.LabelHostname]
@@ -126,8 +129,20 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 		return r.removeFinalizer(ctx, node)
 	}
 
-	if hypervisor.RunningVMs > 0 {
-		return ctrl.Result{}, fmt.Errorf("cannot shutdown service, VMs still running %v", hypervisor.RunningVMs)
+	// Check if there is *any* server
+	serverList, err := servers.ListSimple(r.computeClient, servers.ListOpts{AllTenants: true, Host: host, Limit: 1}).AllPages(ctx)
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return ctrl.Result{}, fmt.Errorf("cannot list servers on host due to %w", err)
+	}
+
+	isEmpty, err := serverList.IsEmpty()
+
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return ctrl.Result{}, fmt.Errorf("cannot query empty status due to %w", err)
+	}
+
+	if !isEmpty {
+		return ctrl.Result{}, fmt.Errorf("cannot shutdown service, VMs still running")
 	}
 
 	// Before removing the service, first take the node out of the aggregates,
@@ -138,7 +153,6 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 		return ctrl.Result{}, fmt.Errorf("cannot list aggregates %w", err)
 	}
 
-	host := node.Name
 	for name, aggregate := range aggs {
 		if slices.Contains(aggregate.Hosts, host) {
 			err := aggregates.RemoveHost(ctx, r.computeClient, aggregate.ID, aggregates.RemoveHostOpts{Host: host}).Err

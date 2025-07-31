@@ -20,6 +20,7 @@ package openstack
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
@@ -131,6 +132,9 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 
 	providerAllocations, err := resourceproviders.GetAllocations(ctx, client, provider.UUID).Extract()
 	if err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			return nil
+		}
 		return err
 	}
 
@@ -141,7 +145,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 		// "reverse" of what we got before
 		result := ListAllocations(ctx, client, consumerID)
 		consumerAllocations, err := result.Extract()
-		if err != nil {
+		if err != nil && gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 			return err
 		}
 
@@ -156,7 +160,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 
 	// We are done, let's clean it up
 	err = resourceproviders.Delete(ctx, client, provider.UUID).ExtractErr()
-	if err != nil {
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		return fmt.Errorf("failed to delete after cleanup due to %w", err)
 	}
 
