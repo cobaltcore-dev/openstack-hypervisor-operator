@@ -22,7 +22,7 @@ spec:
     - jsonPath: .spec.reason
       name: Reason
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Eviction")].reason
+    - jsonPath: .status.conditions[?(@.type=="Evicting")].reason
       name: State
       type: string
     - jsonPath: .metadata.creationTimestamp
