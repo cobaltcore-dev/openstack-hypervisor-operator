@@ -413,7 +413,6 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	testAuth := &clientconfig.AuthInfo{
 		ProjectName:       testProjectName,
 		ProjectDomainName: testDomainName,
-		UserDomainName:    testDomainName,
 	}
 
 	if r.testComputeClient, err = openstack.GetServiceClient(ctx, "compute", testAuth); err != nil {
