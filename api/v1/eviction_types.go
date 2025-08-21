@@ -38,6 +38,9 @@ type EvictionSpec struct {
 }
 
 const (
+	// ConditionTypeMigration is the type of condition for migration status of a server
+	ConditionTypeMigration = "MigratingInstance"
+
 	// ConditionTypePreflight is a condition for preflight checks, e.g. OS Hypervisor validation
 	ConditionTypePreflight = "PreflightChecksSucceeded"
 

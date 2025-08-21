@@ -243,6 +243,12 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 			log.Info("Instance is gone")
 			*instances = (*instances)[:len(*instances)-1]
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionFalse,
+				Message: fmt.Sprintf("Instance %s is gone", uuid),
+				Reason:  kvmv1.ConditionReasonSuceeded,
+			})
 			return ctrl.Result{}, r.Status().Update(ctx, eviction)
 		}
 		return reconcile.Result{}, err
@@ -261,6 +267,12 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		copy((*instances)[1:], (*instances)[:len(*instances)-1])
 		(*instances)[0] = uuid
 		log.Info("error", "faultMessage", vm.Fault.Message)
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeMigration,
+			Status:  metav1.ConditionFalse,
+			Message: fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message),
+			Reason:  kvmv1.ConditionReasonFailed,
+		})
 		if err := r.Status().Update(ctx, eviction); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -272,6 +284,13 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 
 	if currentHypervisor != eviction.Spec.Hypervisor {
 		log.Info("migrated")
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeMigration,
+			Status:  metav1.ConditionFalse,
+			Message: fmt.Sprintf("Migration of instance %s finished", vm.ID),
+			Reason:  kvmv1.ConditionReasonSuceeded,
+		})
+
 		// So, it is already off this one, do we need to verify it?
 		if vm.Status == "VERIFY_RESIZE" {
 			if err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr(); err != nil {
@@ -296,11 +315,17 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
 				// Fall-back to beginning, which will clean it out
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: 0}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
 
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionTrue,
+				Message: fmt.Sprintf("Live migration of instance %s triggered", vm.ID),
+				Reason:  kvmv1.ConditionReasonRunning,
+			})
 			if err2 := r.Status().Update(ctx, eviction); err != nil {
 				return ctrl.Result{}, fmt.Errorf("could not live-migrate due to %w and %w", err, err2)
 			}
@@ -312,11 +337,17 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: 0}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
 
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionTrue,
+				Message: fmt.Sprintf("Cold-migration of instance %s triggered", vm.ID),
+				Reason:  kvmv1.ConditionReasonRunning,
+			})
 			if err2 := r.Status().Update(ctx, eviction); err != nil {
 				return ctrl.Result{}, fmt.Errorf("could not cold-migrate due to %w and %w", err, err2)
 			}
