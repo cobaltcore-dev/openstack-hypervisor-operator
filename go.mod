@@ -6,6 +6,7 @@ module github.com/cobaltcore-dev/openstack-hypervisor-operator
 go 1.24.4
 
 require (
+	github.com/cobaltcore-dev/kvm-node-agent v0.0.0-20250821153446-8085302c1d22
 	github.com/go-openapi/swag v0.23.1
 	github.com/gophercloud/gophercloud/v2 v2.7.0
 	github.com/gophercloud/utils/v2 v2.0.0-20250711132455-9770683b100a
