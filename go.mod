@@ -10,7 +10,7 @@ require (
 	github.com/go-openapi/swag v0.23.1
 	github.com/gophercloud/gophercloud/v2 v2.7.0
 	github.com/gophercloud/utils/v2 v2.0.0-20250711132455-9770683b100a
-	github.com/onsi/ginkgo/v2 v2.24.0
+	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.0
 	k8s.io/api v0.33.4
 	k8s.io/apimachinery v0.33.4
