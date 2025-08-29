@@ -14,8 +14,6 @@ github.com/cert-manager/cert-manager v1.18.2 h1:H2P75ycGcTMauV3gvpkDqLdS3RSXonWF
 github.com/cert-manager/cert-manager v1.18.2/go.mod h1:icDJx4kG9BCNpGjBvrmsFd99d+lXUvWdkkcrSSQdIiw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
-github.com/cobaltcore-dev/kvm-node-agent v0.0.0-20250821153446-8085302c1d22 h1:VZsnEJH+X5pSQ3lrXri5niDL3iNEeb1FOuu6toBd/Io=
-github.com/cobaltcore-dev/kvm-node-agent v0.0.0-20250821153446-8085302c1d22/go.mod h1:sn1SVcUVxzuQPhOo3hKdK8LbF8jSopRDP4ZXIe5EfYc=
 github.com/cpuguy83/go-md2man/v2 v2.0.4/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

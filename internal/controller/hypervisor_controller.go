@@ -31,7 +31,7 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	kvmv1alpha1 "github.com/cobaltcore-dev/kvm-node-agent/api/v1alpha1"
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 type HypervisorController struct {
@@ -52,13 +52,23 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	hypervisor := &kvmv1alpha1.Hypervisor{
+	hypervisor := &kvmv1.Hypervisor{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: node.Name,
 			Labels: map[string]string{
 				corev1.LabelHostname: node.Name,
 			},
 		},
+		Spec: kvmv1.HypervisorSpec{
+			LifecycleEnabled:   true,
+			SkipTests:          true,
+			HighAvailability:   true,
+			InstallCertificate: true,
+		},
+	}
+
+	if node.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
 	}
 
 	// Ensure corresponding hypervisor exists
@@ -81,13 +91,6 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if node.DeletionTimestamp != nil {
-		// node is being deleted, cleanup hypervisor
-		if err := hv.Delete(ctx, hypervisor); k8sclient.IgnoreNotFound(err) != nil {
-			return ctrl.Result{}, fmt.Errorf("failed cleaning up hypervisor: %w", err)
-		}
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -106,7 +109,7 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}).
-		Owns(&kvmv1alpha1.Hypervisor{}).
+		Owns(&kvmv1.Hypervisor{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(hv)
 }

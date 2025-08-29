@@ -25,12 +25,14 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -56,94 +58,96 @@ type NodeDecommissionReconciler struct {
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
-
 func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx).WithName(req.Name)
+	hostname := req.Name
+	log := logger.FromContext(ctx).WithName(req.Name).WithValues("hostname", hostname)
 	ctx = logger.IntoContext(ctx, log)
 
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
+	hv := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, req.NamespacedName, hv); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := (labels.Set)(node.Labels).Has(labelLifecycleMode)
-	if !found {
+	node := &corev1.Node{}
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: hv.Name}, node); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return ctrl.Result{}, nil // Node not found, nothing to do
+		}
+		return ctrl.Result{}, err
+	}
+
+	if !hv.Spec.LifecycleEnabled {
 		// Get out of the way
 		return r.removeFinalizer(ctx, node)
 	}
 
 	if !controllerutil.ContainsFinalizer(node, decommissionFinalizerName) {
-		log.Info("Added finalizer")
-		nodeBase := node.DeepCopy()
-		controllerutil.AddFinalizer(node, decommissionFinalizerName)
-		err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase, k8sclient.MergeFromWithOptimisticLock{}))
-		if err != nil {
-			err = fmt.Errorf("failed to add finalizer due to %w", err)
-		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			patch := k8sclient.MergeFrom(node.DeepCopy())
+			controllerutil.AddFinalizer(node, decommissionFinalizerName)
+			if err := r.Patch(ctx, node, patch); err != nil {
+				return fmt.Errorf("failed to add finalizer due to %w", err)
+			}
+			log.Info("Added finalizer")
+			return nil
+		})
 	}
 
-	// Not yet deleting node, nothing more to do
+	// Not yet deleting hv, nothing more to do
 	if node.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
-	// Someone is just deleting the node, without going through termination
-	if !isTerminating(node) {
+	// Someone is just deleting the hv, without going through termination
+	// See: https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L658-L659
+	if !IsNodeConditionTrue(node.Status.Conditions, "Terminating") {
 		log.Info("removing finalizer since not terminating")
 		// So we just get out of the way for now
 		return r.removeFinalizer(ctx, node)
 	}
 
-	log.Info("removing host from nova")
-	return r.shutdownService(ctx, node)
-}
-
-func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	hypervisorID, found := node.Labels[labelHypervisorID]
-	if !found {
-		hostname := node.Labels[corev1.LabelHostname]
-		allPages, err := hypervisors.List(r.computeClient, hypervisors.ListOpts{HypervisorHostnamePattern: &hostname}).AllPages(ctx)
-		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			return r.removeFinalizer(ctx, node)
-		}
-
-		hypervisorList, err := hypervisors.ExtractHypervisors(allPages)
-		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) || len(hypervisorList) == 0 {
-			return r.removeFinalizer(ctx, node)
-		}
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("cannot query hypervisor")
-		}
-
-		hypervisorID = hypervisorList[0].ID
+	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
+		return r.setDecommissioningCondition(ctx, hv, "Node is being decommissioned, removing host from nova")
 	}
 
-	hypervisor, err := hypervisors.Get(ctx, r.computeClient, hypervisorID).Extract()
+	log.Info("removing host from nova")
+
+	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
 	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		// We are (hopefully) done
 		return r.removeFinalizer(ctx, node)
 	}
 
+	// TODO: remove since RunningVMs is only available until micro-version 2.87, and also is updated asynchronously
+	// so it might be not accurate
 	if hypervisor.RunningVMs > 0 {
-		return ctrl.Result{}, fmt.Errorf("cannot shutdown service, VMs still running %v", hypervisor.RunningVMs)
+		// Still running VMs, cannot delete the service
+		msg := fmt.Sprintf("Node is being decommissioned, but still has %d running VMs", hypervisor.RunningVMs)
+		return r.setDecommissioningCondition(ctx, hv, msg)
+	}
+
+	if hypervisor.Servers != nil && len(*hypervisor.Servers) > 0 {
+		// Still VMs assigned to the host, cannot delete the service
+		msg := fmt.Sprintf("Node is being decommissioned, but still has %d assigned VMs, "+
+			"check with `openstack server list --all-projects --host %s`", len(*hypervisor.Servers), hostname)
+		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
 	// Before removing the service, first take the node out of the aggregates,
 	// so when the node comes back, it doesn't up with the old associations
 	aggs, err := aggregatesByName(ctx, r.computeClient)
-
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("cannot list aggregates %w", err)
+		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot list aggregates due to %v", err))
 	}
 
 	host := node.Name
 	for name, aggregate := range aggs {
 		if slices.Contains(aggregate.Hosts, host) {
-			err := aggregates.RemoveHost(ctx, r.computeClient, aggregate.ID, aggregates.RemoveHostOpts{Host: host}).Err
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to remove host %v from aggregate %v due to %w", host, name, err)
+			opts := aggregates.RemoveHostOpts{Host: host}
+			if err = aggregates.RemoveHost(ctx, r.computeClient, aggregate.ID, opts).Err; err != nil {
+				msg := fmt.Sprintf("failed to remove host %v from aggregate %v due to %v", name, host, err)
+				return r.setDecommissioningCondition(ctx, hv, msg)
 			}
 		}
 	}
@@ -151,17 +155,17 @@ func (r *NodeDecommissionReconciler) shutdownService(ctx context.Context, node *
 	// Deleting and evicted, so better delete the service
 	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{}, fmt.Errorf("cannot delete service due to %w", err)
+		msg := fmt.Sprintf("cannot delete service %s due to %v", hypervisor.Service.ID, err)
+		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
-	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisorID).Extract()
+	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisor.ID).Extract()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{}, fmt.Errorf("cannot get resource provider due to %w", err)
+		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err))
 	}
 
-	err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("cannot clean up resource provider due to %w", err)
+	if err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp); err != nil {
+		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err))
 	}
 
 	return r.removeFinalizer(ctx, node)
@@ -176,6 +180,19 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 	controllerutil.RemoveFinalizer(node, decommissionFinalizerName)
 	err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase, k8sclient.MergeFromWithOptimisticLock{}))
 	return ctrl.Result{}, err
+}
+
+func (r *NodeDecommissionReconciler) setDecommissioningCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    kvmv1.ConditionTypeReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  "Decommissioning",
+		Message: message,
+	})
+	if err := r.Status().Update(ctx, hv); err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
+	}
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -197,7 +214,7 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
-		For(&corev1.Node{}).
-		Owns(&kvmv1.Eviction{}). // trigger the r.Reconcile whenever an Own-ed eviction is created/updated/deleted
+		For(&kvmv1.Hypervisor{}).
+		Owns(&corev1.Node{}).
 		Complete(r)
 }

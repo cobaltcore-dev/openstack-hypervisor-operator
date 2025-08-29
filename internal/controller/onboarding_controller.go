@@ -19,15 +19,18 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,17 +48,23 @@ import (
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
+var errRequeue = fmt.Errorf("requeue requested")
+
 const (
-	defaultWaitTime        = 1 * time.Minute
-	onboardingValueInitial = "initial"
-	onboardingValueTesting = "testing"
-	testAggregateName      = "tenant_filter_tests"
-	testProjectName        = "test"
-	testDomainName         = "cc3test"
-	testFlavorName         = "c_k_c2_m2_v2"
-	testImageName          = "cirros-d240801-kvm"
-	testPrefixName         = "ohooc-"
-	testVolumeType         = "kvm-pilot"
+	defaultWaitTime           = 1 * time.Minute
+	ConditionTypeOnboarding   = "Onboarding"
+	ConditionReasonInitial    = "initial"
+	ConditionReasonOnboarding = "onboarding"
+	ConditionReasonTesting    = "testing"
+	ConditionReasonCompleted  = "completed"
+	ConditionReasonReady      = "ready"
+	testAggregateName         = "tenant_filter_tests"
+	testProjectName           = "test"
+	testDomainName            = "cc3test"
+	testFlavorName            = "c_k_c2_m2_v2"
+	testImageName             = "cirros-d240801-kvm"
+	testPrefixName            = "ohooc-"
+	testVolumeType            = "kvm-pilot"
 )
 
 type OnboardingController struct {
@@ -81,60 +90,101 @@ func getHypervisorAddress(node *corev1.Node) string {
 	return ""
 }
 
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;patch
 func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
 	ctx = logger.IntoContext(ctx, log)
 
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
+	hv := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, req.NamespacedName, hv); err != nil {
 		// OnboardingReconciler not found errors, could be deleted
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := (labels.Set)(node.Labels).Has(labelHypervisor)
-
-	if !found {
+	if !hv.Spec.LifecycleEnabled {
 		return ctrl.Result{}, nil
 	}
 
-	computeHost := node.Name
-	result, changed, err := r.ensureNovaLabels(ctx, node)
-	if !result.IsZero() || changed || err != nil {
-		return result, k8sclient.IgnoreNotFound(err)
+	computeHost := hv.Name
+	// We bail here out, because the openstack api is not the best to poll
+	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
+		if err := r.ensureNovaProperties(ctx, hv); err != nil {
+			if errors.Is(err, errRequeue) {
+				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			}
+			return ctrl.Result{}, err
+		}
 	}
 
-	switch node.Labels[labelOnboardingState] {
-	case onboardingValueTesting:
-		if node.Labels[labelLifecycleMode] == "skip-tests" {
-			result, err = r.completeOnboarding(ctx, computeHost, node)
-		} else {
-			result, err = r.smokeTest(ctx, node, computeHost)
+	// check condition reason
+	status := meta.FindStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
+	if status == nil {
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  ConditionReasonOnboarding,
+			Message: "Onboarding in progress",
+		})
+
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeOnboarding,
+			Status:  metav1.ConditionTrue,
+			Reason:  ConditionReasonInitial,
+			Message: "Initial onboarding",
+		})
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return r.Status().Update(ctx, hv)
+		}); err != nil {
+			return ctrl.Result{}, err
 		}
-		return result, k8sclient.IgnoreNotFound(err)
-	case "":
-		err = r.initialOnboarding(ctx, node, computeHost)
-		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+	}
+
+	// TODO: cleanup node retrieval
+	node := &corev1.Node{}
+	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
+		if k8sclient.IgnoreNotFound(err) == nil {
+			// Node not found, could be deleted
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	switch status.Reason {
+	case ConditionReasonInitial:
+		return ctrl.Result{}, r.initialOnboarding(ctx, hv, computeHost)
+	case ConditionReasonTesting:
+		if hv.Spec.SkipTests {
+			return r.completeOnboarding(ctx, computeHost, node, hv)
+		} else {
+			return r.smokeTest(ctx, node, hv, computeHost)
+		}
 	default:
 		// No idea how we ended up here.
 		return ctrl.Result{}, nil
 	}
 }
 
-func (r *OnboardingController) initialOnboarding(ctx context.Context, node *corev1.Node, host string) error {
+func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, host string) error {
+	node := &corev1.Node{}
+	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
+		if k8sclient.IgnoreNotFound(err) == nil {
+			// Node not found, could be deleted
+			return nil
+		}
+		return err
+	}
+
 	zone, found := node.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
 	aggs, err := aggregatesByName(ctx, r.computeClient)
-
 	if err != nil {
 		return fmt.Errorf("cannot list aggregates %w", err)
 	}
 
-	err = addToAggregate(ctx, r.computeClient, aggs, host, zone, zone)
-	if err != nil {
+	if err = addToAggregate(ctx, r.computeClient, aggs, host, zone, zone); err != nil {
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
@@ -145,24 +195,22 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, node *core
 		}
 	}
 
-	serviceId, found := node.Labels[labelServiceID]
-	if !found || serviceId == "" {
-		return fmt.Errorf("empty service-id for label %v on node", labelServiceID)
-	}
-
-	result := services.Update(ctx, r.computeClient, serviceId, services.UpdateOpts{Status: services.ServiceEnabled})
-	if result.Err != nil {
+	if result := services.Update(ctx, r.computeClient, hv.Status.ServiceID,
+		services.UpdateOpts{Status: services.ServiceEnabled}); result.Err != nil {
 		return result.Err
 	}
 
-	_, err = setNodeLabels(ctx, r, node, map[string]string{
-		labelOnboardingState: onboardingValueTesting, // Move to testing
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeOnboarding,
+		Status:  metav1.ConditionTrue,
+		Reason:  ConditionReasonTesting,
+		Message: "Running onboarding tests",
 	})
-
-	return err
+	return r.Status().Update(ctx, hv)
 }
 
-func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node, host string) (ctrl.Result, error) {
+func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node, hv *kvmv1.Hypervisor, host string) (ctrl.Result, error) {
+	log := logger.FromContext(ctx)
 	zone := node.Labels[corev1.LabelTopologyZone]
 	server, err := r.createOrGetTestServer(ctx, zone, host, node.UID)
 	if err != nil {
@@ -171,31 +219,59 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 
 	switch server.Status {
 	case "ERROR":
-		// Drop the error of delete, we will retry anyway for the server error
-		_ = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
-		return ctrl.Result{}, fmt.Errorf("server ended up in error state")
+		if err := servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
+			log.Error(err, "failed to delete test instance", "id", server.ID)
+		}
+		// Set condition back to testing
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeOnboarding,
+			Status:  metav1.ConditionTrue,
+			Reason:  ConditionReasonTesting,
+			Message: "Server ended up in error state, retrying",
+		})
+		if err := r.Status().Update(ctx, hv); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	case "ACTIVE":
 		consoleOutput, err := servers.ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).Extract()
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("could not get console output %w", err)
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    ConditionTypeOnboarding,
+				Status:  metav1.ConditionTrue,
+				Reason:  ConditionReasonTesting,
+				Message: fmt.Sprintf("could not get console output %v", err),
+			})
+			if err := r.Status().Update(ctx, hv); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
 		if !strings.Contains(consoleOutput, server.Name) {
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
-		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to terminate instance %w", err)
+		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    ConditionTypeOnboarding,
+				Status:  metav1.ConditionTrue,
+				Reason:  ConditionReasonTesting,
+				Message: fmt.Sprintf("failed to terminate instance %v", err),
+			})
+			if err := r.Status().Update(ctx, hv); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
-		return r.completeOnboarding(ctx, host, node)
+		return r.completeOnboarding(ctx, host, node, hv)
 	default:
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 }
 
-func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node) (ctrl.Result, error) {
+func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 	aggs, err := aggregatesByName(ctx, r.computeClient)
 	if err != nil {
@@ -214,44 +290,53 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		return ctrl.Result{}, err
 	}
 
-	_, err = setNodeLabels(ctx, r, node, map[string]string{
-		labelOnboardingState: onboardingValueCompleted,
+	// Set hypervisor ready condition
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    kvmv1.ConditionTypeReady,
+		Status:  metav1.ConditionTrue,
+		Reason:  ConditionReasonReady,
+		Message: "Hypervisor is ready",
 	})
-	return ctrl.Result{}, err
+
+	// set onboarding condition completed
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeOnboarding,
+		Status:  metav1.ConditionFalse,
+		Reason:  ConditionReasonCompleted,
+		Message: "Onboarding completed",
+	})
+	return ctrl.Result{}, r.Status().Update(ctx, hv)
 }
 
-func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev1.Node) (ctrl.Result, bool, error) {
-	_, hypervisorIdSet := node.Labels[labelHypervisorID]
-	_, serviceIdSet := node.Labels[labelServiceID]
-
-	// We bail here out, because the openstack api is not the best to poll
-	if hypervisorIdSet && serviceIdSet {
-		return ctrl.Result{}, false, nil
+func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) error {
+	node := &corev1.Node{}
+	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
+		return k8sclient.IgnoreNotFound(err)
 	}
 
 	hypervisorAddress := getHypervisorAddress(node)
 	if hypervisorAddress == "" {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
+		return errRequeue
 	}
 
 	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 1)[0]
 
 	hypervisorQuery := hypervisors.ListOpts{HypervisorHostnamePattern: &shortHypervisorAddress}
 	hypervisorPages, err := hypervisors.List(r.computeClient, hypervisorQuery).AllPages(ctx)
-
-	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
-	} else if err != nil {
-		return ctrl.Result{}, false, err
+	if err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			return errRequeue
+		}
+		return err
 	}
 
 	hs, err := hypervisors.ExtractHypervisors(hypervisorPages)
 	if err != nil {
-		return ctrl.Result{}, false, err
+		return err
 	}
 
 	if len(hs) < 1 {
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, false, nil
+		return errRequeue
 	}
 
 	var found = false
@@ -266,19 +351,14 @@ func (r *OnboardingController) ensureNovaLabels(ctx context.Context, node *corev
 	}
 
 	if !found {
-		return ctrl.Result{}, false, fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
+		return fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
 	}
 
-	changed, err := setNodeLabels(ctx, r, node, map[string]string{
-		labelHypervisorID: myHypervisor.ID,
-		labelServiceID:    myHypervisor.Service.ID,
+	hv.Status.HypervisorID = myHypervisor.ID
+	hv.Status.ServiceID = myHypervisor.Service.ID
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return r.Status().Update(ctx, hv)
 	})
-
-	if err != nil || changed {
-		return ctrl.Result{}, changed, err
-	}
-
-	return ctrl.Result{}, false, nil
 }
 
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {

@@ -27,6 +27,7 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -95,4 +96,28 @@ func enableInstanceHAMissingOkay(node *corev1.Node) error {
 
 func disableInstanceHA(node *corev1.Node) error {
 	return updateInstanceHA(node, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
+}
+
+// IsNodeConditionTrue returns true when the conditionType is present and set to `corev1.ConditionTrue`
+func IsNodeConditionTrue(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) bool {
+	return IsNodeConditionPresentAndEqual(conditions, conditionType, corev1.ConditionTrue)
+}
+
+// IsNodeConditionPresentAndEqual returns true when conditionType is present and equal to status.
+func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType, status corev1.ConditionStatus) bool {
+	for _, condition := range conditions {
+		if condition.Type == conditionType {
+			return condition.Status == status
+		}
+	}
+	return false
+}
+
+func HasStatusCondition(conditions []metav1.Condition, conditionType string) bool {
+	for _, condition := range conditions {
+		if condition.Type == conditionType {
+			return true
+		}
+	}
+	return false
 }

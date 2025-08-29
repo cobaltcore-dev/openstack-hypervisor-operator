@@ -28,9 +28,9 @@ import (
 
 	"github.com/go-openapi/swag"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -129,35 +129,22 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) getOwnerNode(ctx context.Context, eviction *kvmv1.Eviction) (*corev1.Node, error) {
-	for _, owner := range eviction.GetOwnerReferences() {
-		if owner.Kind == "Node" && owner.APIVersion == "v1" {
-			node := &corev1.Node{}
-			err := r.Get(ctx, client.ObjectKey{Namespace: "", Name: owner.Name}, node)
-			err = client.IgnoreNotFound(err)
-			// Not found means no labels, so the rest will work as well
-			if err != nil || node != nil {
-				return node, err
-			}
-		}
-	}
-
-	return nil, nil
-}
-
 func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
 
 	// Does the hypervisor even exist? Is it enabled/disabled?
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, false)
 	if err != nil {
+		// TODO: Maybe this check can be removed, adds unnecessary complexity?
+		// if the hypervisor is gone, it's gone
 		expectHypervisor := true
-		node, errOwner := r.getOwnerNode(ctx, eviction)
-		if errOwner != nil {
-			return ctrl.Result{}, errOwner
+		hv := &kvmv1.Hypervisor{}
+		if err := r.Get(ctx, client.ObjectKey{Name: eviction.Spec.Hypervisor}, hv); client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
 		}
-		if node != nil {
-			_, expectHypervisor = node.Labels[labelOnboardingState]
+
+		if hv.Name != "" {
+			expectHypervisor = HasStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
 		}
 
 		if expectHypervisor {
@@ -178,7 +165,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 				Type:    kvmv1.ConditionTypeEviction,
 				Status:  metav1.ConditionFalse,
 				Message: msg,
-				Reason:  kvmv1.ConditionReasonSuceeded,
+				Reason:  kvmv1.ConditionReasonFailed,
 			})
 			eviction.Status.OutstandingRamMb = 0
 			logger.FromContext(ctx).Info(msg)
@@ -221,7 +208,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 
 	// Update status
 	eviction.Status.HypervisorServiceId = hypervisor.ID
-	eviction.Status.OutstandingRamMb = hypervisor.MemoryMbUsed
+	eviction.Status.OutstandingRamMb = int64(hypervisor.MemoryMBUsed)
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypePreflight,
 		Status:  metav1.ConditionTrue,
@@ -446,11 +433,11 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 
 // disableHypervisor disables the hypervisor service and adds a finalizer to the eviction
 // will add Condition HypervisorDisabled to the eviction status with the outcome
-func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *openstack.Hypervisor, eviction *kvmv1.Eviction) error {
+func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *hypervisors.Hypervisor, eviction *kvmv1.Eviction) error {
 	evictionReason := r.evictionReason(eviction)
 	disabledReason := hypervisor.Service.DisabledReason
 
-	if disabledReason != nil && disabledReason != "" && disabledReason != evictionReason {
+	if disabledReason != "" && disabledReason != evictionReason {
 		// Disabled for another reason already
 		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorDisabled,

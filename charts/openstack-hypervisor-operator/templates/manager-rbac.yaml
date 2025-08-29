@@ -18,12 +18,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - nodes/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - ""
-  resources:
   - nodes/status
   verbs:
   - get

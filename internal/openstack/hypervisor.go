@@ -26,46 +26,14 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 )
 
-type hypervisorServer struct {
-	Name string `json:"name"`
-	UUID string `json:"uuid"`
-}
-
-type Hypervisor struct {
-	CPUInfo            string `json:"cpu_info"`
-	CurrentWorkload    int    `json:"current_workload"`
-	DiskAvailableLeast any    `json:"disk_available_least"`
-	FreeDiskGb         int64  `json:"free_disk_gb"`
-	FreeRAMMb          int64  `json:"free_ram_mb"`
-	HostIP             string `json:"host_ip"`
-	HypervisorHostname string `json:"hypervisor_hostname"`
-	HypervisorType     string `json:"hypervisor_type"`
-	HypervisorVersion  int    `json:"hypervisor_version"`
-	ID                 string `json:"id"`
-	LocalGb            int64  `json:"local_gb"`
-	LocalGbUsed        int64  `json:"local_gb_used"`
-	MemoryMb           int64  `json:"memory_mb"`
-	MemoryMbUsed       int64  `json:"memory_mb_used"`
-	RunningVms         int    `json:"running_vms"`
-	Service            struct {
-		DisabledReason any    `json:"disabled_reason"`
-		Host           string `json:"host"`
-		ID             string `json:"id"`
-	} `json:"service"`
-	State     string              `json:"state"`
-	Status    string              `json:"status"`
-	Vcpus     int                 `json:"vcpus"`
-	VcpusUsed int                 `json:"vcpus_used"`
-	Servers   *[]hypervisorServer `json:"servers"`
-}
 type HyperVisorsDetails struct {
-	Hypervisors []Hypervisor `json:"hypervisors"`
+	Hypervisors []hypervisors.Hypervisor `json:"hypervisors"`
 }
 
 var ErrNoHypervisor = fmt.Errorf("no hypervisor found")
 var ErrMultipleHypervisors = fmt.Errorf("multiple hypervisors found")
 
-func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string, withServers bool) (*Hypervisor, error) {
+func GetHypervisorByName(ctx context.Context, sc *gophercloud.ServiceClient, hypervisorHostnamePattern string, withServers bool) (*hypervisors.Hypervisor, error) {
 	listOpts := hypervisors.ListOpts{
 		HypervisorHostnamePattern: &hypervisorHostnamePattern,
 		WithServers:               &withServers,
