@@ -93,8 +93,11 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 
 func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			labelHypervisor: "true",
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      labelHypervisor,
+				Operator: metav1.LabelSelectorOpExists,
+			},
 		},
 	})
 	if err != nil {
