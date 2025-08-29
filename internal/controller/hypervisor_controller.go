@@ -42,6 +42,7 @@ type HypervisorController struct {
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;create;delete
+
 func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
 
@@ -61,7 +62,6 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Ensure corresponding hypervisor exists
-	log.Info("Reconcile", "name", req.Name, "namespace", req.Namespace)
 	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
 		if k8serrors.IsNotFound(err) {
 			// attach ownerReference for cascading deletion
