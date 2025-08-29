@@ -1,0 +1,330 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+  name: hypervisors.kvm.cloud.sap
+spec:
+  group: kvm.cloud.sap
+  names:
+    kind: Hypervisor
+    listKind: HypervisorList
+    plural: hypervisors
+    shortNames:
+    - hv
+    singular: hypervisor
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: State
+      type: string
+    - jsonPath: .spec.lifecycleEnabled
+      name: Lifecycle
+      type: boolean
+    - jsonPath: .spec.highAvailability
+      name: High Availability
+      type: boolean
+    - jsonPath: .status.operatingSystem.prettyVersion
+      name: Version
+      type: string
+    - jsonPath: .status.numInstances
+      name: Instances
+      type: integer
+    - jsonPath: .status.operatingSystem.hardwareModel
+      name: Hardware
+      priority: 2
+      type: string
+    - jsonPath: .status.operatingSystem.kernelRelease
+      name: Kernel
+      priority: 2
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Onboarding")].reason
+      name: Onboarding
+      priority: 3
+      type: string
+    - jsonPath: .status.serviceId
+      name: Service ID
+      priority: 3
+      type: string
+    - jsonPath: .status.hypervisorId
+      name: Hypervisor ID
+      priority: 3
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Hypervisor is the Schema for the hypervisors API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HypervisorSpec defines the desired state of Hypervisor
+            properties:
+              createCertManagerCertificate:
+                default: false
+                description: |-
+                  Require to issue a certificate from cert-manager for the hypervisor, to be used for
+                  secure communication with the libvirt API.
+                type: boolean
+              customTraits:
+                default: []
+                description: CustomTraits are used to apply custom traits to the hypervisor.
+                items:
+                  type: string
+                type: array
+              evacuateOnReboot:
+                default: true
+                description: EvacuateOnReboot request an evacuation of all instances
+                  before reboot.
+                type: boolean
+              highAvailability:
+                default: true
+                description: HighAvailability is used to enable the high availability
+                  handling of the hypervisor.
+                type: boolean
+              installCertificate:
+                default: true
+                description: InstallCertificate is used to enable the installations
+                  of the certificates via kvm-node-agent.
+                type: boolean
+              lifecycleEnabled:
+                default: true
+                description: LifecycleEnabled enables the lifecycle management of
+                  the hypervisor via hypervisor-operator.
+                type: boolean
+              reboot:
+                default: false
+                description: Reboot request an reboot after successful installation
+                  of an upgrade.
+                type: boolean
+              skipTests:
+                default: false
+                description: SkipTests skips the tests during the onboarding process.
+                type: boolean
+              version:
+                description: OperatingSystemVersion represents the desired operating
+                  system version.
+                type: string
+            required:
+            - createCertManagerCertificate
+            - customTraits
+            - evacuateOnReboot
+            - highAvailability
+            - installCertificate
+            - lifecycleEnabled
+            - reboot
+            - skipTests
+            type: object
+          status:
+            description: HypervisorStatus defines the observed state of Hypervisor
+            properties:
+              capabilities:
+                description: The capabilities of the hypervisors as reported by libvirt.
+                properties:
+                  cpuArch:
+                    default: unknown
+                    description: The hosts CPU architecture (not the guests).
+                    type: string
+                  cpus:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Total host cpus available as a sum of cpus over all
+                      numa cells.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Total host memory available as a sum of memory over
+                      all numa cells.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                type: object
+              conditions:
+                description: Represents the Hypervisor node conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              hypervisorId:
+                description: HypervisorID is the unique identifier of the hypervisor
+                  in OpenStack.
+                type: string
+              instances:
+                description: Represents the Hypervisor hosted Virtual Machines
+                items:
+                  properties:
+                    active:
+                      description: Represents the instance state.
+                      type: boolean
+                    id:
+                      description: Represents the instance ID (uuidv4).
+                      type: string
+                    name:
+                      description: Represents the instance name.
+                      type: string
+                  required:
+                  - active
+                  - id
+                  - name
+                  type: object
+                type: array
+              libVirtVersion:
+                default: unknown
+                description: Represents the LibVirt version.
+                type: string
+              node:
+                description: Represents the Hypervisor node name.
+                type: string
+              numInstances:
+                default: 0
+                description: Represent the num of instances
+                type: integer
+              operatingSystem:
+                description: Represents the Operating System status.
+                properties:
+                  firmwareDate:
+                    description: FirmwareDate
+                    format: date-time
+                    type: string
+                  firmwareVendor:
+                    description: FirmwareVendor
+                    type: string
+                  firmwareVersion:
+                    description: FirmwareVersion
+                    type: string
+                  hardwareModel:
+                    description: HardwareModel
+                    type: string
+                  hardwareSerial:
+                    description: HardwareSerial
+                    type: string
+                  hardwareVendor:
+                    description: HardwareVendor
+                    type: string
+                  kernelName:
+                    description: KernelName
+                    type: string
+                  kernelRelease:
+                    description: KernelRelease
+                    type: string
+                  kernelVersion:
+                    description: KernelVersion
+                    type: string
+                  prettyVersion:
+                    description: PrettyVersion
+                    type: string
+                  version:
+                    description: Represents the Operating System version.
+                    type: string
+                type: object
+              serviceId:
+                description: ServiceID is the unique identifier of the compute service
+                  in OpenStack.
+                type: string
+              specHash:
+                type: string
+              updateStatus:
+                description: Represents the Hypervisor update status.
+                properties:
+                  inProgress:
+                    default: false
+                    description: Represents a running Operating System update.
+                    type: boolean
+                  installed:
+                    default: unknown
+                    description: Represents the Operating System installed update
+                      version.
+                    type: string
+                  retry:
+                    default: 3
+                    description: Represents the number of retries.
+                    type: integer
+                required:
+                - inProgress
+                - retry
+                type: object
+            required:
+            - libVirtVersion
+            - node
+            - numInstances
+            - updateStatus
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -22,7 +22,6 @@ import (
 	"flag"
 	"os"
 
-	kvmv1alpha1 "github.com/cobaltcore-dev/kvm-node-agent/api/v1alpha1"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -57,8 +56,6 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 
 	utilruntime.Must(cmapi.AddToScheme(scheme))
-
-	utilruntime.Must(kvmv1alpha1.AddToScheme(scheme))
 }
 
 func main() {

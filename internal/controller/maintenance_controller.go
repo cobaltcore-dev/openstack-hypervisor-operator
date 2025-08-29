@@ -25,8 +25,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
@@ -37,6 +37,7 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
@@ -73,7 +74,12 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !(labels.Set)(node.Labels).Has(labelLifecycleMode) {
+	hv := kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, &hv); k8sclient.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, err
+	}
+	if !hv.Spec.LifecycleEnabled {
+		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 
@@ -91,21 +97,17 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 		minAvailable = 0
 	}
 
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return r.ensureBlockingPodDisruptionBudget(ctx, node, minAvailable)
-	})
-
-	if err != nil {
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	onboardingCompleted := node.Labels[labelOnboardingState] == onboardingValueCompleted
+	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding)
 
-	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted)
-	})
-
-	if err != nil {
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 

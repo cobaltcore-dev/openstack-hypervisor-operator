@@ -19,12 +19,8 @@ package controller
 
 // This should contain consts shared between controllers
 const (
-	labelHypervisorID        = "nova.openstack.cloud.sap/hypervisor-id"
-	labelEvictionRequired    = "cloud.sap/hypervisor-eviction-required"
-	labelEvictionApproved    = "cloud.sap/hypervisor-eviction-succeeded"
-	labelHypervisor          = "nova.openstack.cloud.sap/virt-driver"
-	labelLifecycleMode       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
-	labelServiceID           = "nova.openstack.cloud.sap/service-id"
-	labelOnboardingState     = "cobaltcore.cloud.sap/onboarding-state"
-	onboardingValueCompleted = "completed"
+	labelHypervisorID     = "nova.openstack.cloud.sap/hypervisor-id"
+	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
+	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
+	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
 )

@@ -71,7 +71,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
 			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 
-			By("creating the core resource for the Kind Node")
+			By("creating the node resource")
 			resource := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: nodeName,
@@ -80,11 +80,24 @@ var _ = Describe("Node Eviction Label Controller", func() {
 						corev1.LabelTopologyRegion: region,
 						corev1.LabelTopologyZone:   zone,
 						labelEvictionRequired:      "true",
-						labelOnboardingState:       "completed",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			By("creating the hypervisor resource")
+			hypervisor := &kvmv1.Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						corev1.LabelHostname: nodeName,
+					},
+				},
+				Spec: kvmv1.HypervisorSpec{
+					LifecycleEnabled: true,
+				},
+			}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 		})
 
 		AfterEach(func() {

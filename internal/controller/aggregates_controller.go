@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +32,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
@@ -58,7 +58,12 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !(labels.Set)(node.Labels).Has(labelServiceID) {
+	hv := kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: node.Name}, &hv); k8sclient.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, err
+	}
+	if !hv.Spec.LifecycleEnabled {
+		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 
