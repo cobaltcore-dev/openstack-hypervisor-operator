@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,19 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
+
+const (
+	labelLifecycleMode = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+)
+
+var transferLabels = []string{
+	"kubernetes.metal.cloud.sap/name",
+	"kubernetes.metal.cloud.sap/cluster",
+	"kubernetes.metal.cloud.sap/bb",
+	corev1.LabelTopologyZone,
+	corev1.LabelTopologyRegion,
+	corev1.LabelHostname,
+}
 
 type HypervisorController struct {
 	k8sclient.Client
@@ -44,6 +58,7 @@ type HypervisorController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;create;delete
 
 func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var lifecycleEnabled, skipTest bool
 	log := logger.FromContext(ctx).WithName(req.Name)
 
 	node := &corev1.Node{}
@@ -52,19 +67,30 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
+	nodeLabels := labels.Set(node.Labels)
+	if nodeLabels.Has(labelLifecycleMode) {
+		lifecycleEnabled = true
+		skipTest = nodeLabels.Get(labelLifecycleMode) == "skip-test"
+	}
+
 	hypervisor := &kvmv1.Hypervisor{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: node.Name,
-			Labels: map[string]string{
-				corev1.LabelHostname: node.Name,
-			},
+			Name:   node.Name,
+			Labels: map[string]string{},
 		},
 		Spec: kvmv1.HypervisorSpec{
-			LifecycleEnabled:   true,
-			SkipTests:          true,
+			LifecycleEnabled:   lifecycleEnabled,
+			SkipTests:          skipTest,
 			HighAvailability:   true,
 			InstallCertificate: true,
 		},
+	}
+
+	// Transfer Labels
+	for _, label := range transferLabels {
+		if nodeLabels.Has(label) {
+			hypervisor.Labels[label] = nodeLabels.Get(label)
+		}
 	}
 
 	if node.DeletionTimestamp != nil {

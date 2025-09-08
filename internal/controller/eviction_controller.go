@@ -135,8 +135,6 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 	// Does the hypervisor even exist? Is it enabled/disabled?
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hypervisorName, false)
 	if err != nil {
-		// TODO: Maybe this check can be removed, adds unnecessary complexity?
-		// if the hypervisor is gone, it's gone
 		expectHypervisor := true
 		hv := &kvmv1.Hypervisor{}
 		if err := r.Get(ctx, client.ObjectKey{Name: eviction.Spec.Hypervisor}, hv); client.IgnoreNotFound(err) != nil {
@@ -165,7 +163,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 				Type:    kvmv1.ConditionTypeEviction,
 				Status:  metav1.ConditionFalse,
 				Message: msg,
-				Reason:  kvmv1.ConditionReasonFailed,
+				Reason:  kvmv1.ConditionReasonSuceeded,
 			})
 			eviction.Status.OutstandingRamMb = 0
 			logger.FromContext(ctx).Info(msg)
