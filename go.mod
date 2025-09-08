@@ -7,7 +7,7 @@ go 1.24.4
 
 require (
 	github.com/go-openapi/swag v0.23.1
-	github.com/gophercloud/gophercloud/v2 v2.7.0
+	github.com/gophercloud/gophercloud/v2 v2.8.0
 	github.com/gophercloud/utils/v2 v2.0.0-20250711132455-9770683b100a
 	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.2
