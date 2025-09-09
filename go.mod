@@ -6,7 +6,6 @@ module github.com/cobaltcore-dev/openstack-hypervisor-operator
 go 1.24.4
 
 require (
-	github.com/go-openapi/swag v0.23.1
 	github.com/gophercloud/gophercloud/v2 v2.7.0
 	github.com/gophercloud/utils/v2 v2.0.0-20250711132455-9770683b100a
 	github.com/onsi/ginkgo/v2 v2.25.3
@@ -18,6 +17,7 @@ require (
 )
 
 require (
+	github.com/go-openapi/swag v0.23.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

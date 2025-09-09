@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-openapi/swag"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
@@ -480,7 +479,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 	log := logger.FromContext(ctx)
 
 	liveMigrateOpts := servers.LiveMigrateOpts{
-		BlockMigration: swag.Bool(false),
+		BlockMigration: &[]bool{false}[0],
 	}
 
 	res := servers.LiveMigrate(ctx, r.computeClient, uuid, liveMigrateOpts)
