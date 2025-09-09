@@ -24,6 +24,10 @@ spec:
       name: Building Block
       priority: 2
       type: string
+    - jsonPath: .metadata.labels.worker\.garden\.sapcloud\.io/group
+      name: Group
+      priority: 2
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -35,6 +39,9 @@ spec:
       type: boolean
     - jsonPath: .spec.highAvailability
       name: High Availability
+      type: boolean
+    - jsonPath: .spec.skipTests
+      name: Skip Tests
       type: boolean
     - jsonPath: .status.operatingSystem.prettyVersion
       name: Version
@@ -256,9 +263,6 @@ spec:
                 default: unknown
                 description: Represents the LibVirt version.
                 type: string
-              node:
-                description: Represents the Hypervisor node name.
-                type: string
               numInstances:
                 default: 0
                 description: Represent the num of instances
@@ -328,10 +332,7 @@ spec:
                 - retry
                 type: object
             required:
-            - libVirtVersion
-            - node
             - numInstances
-            - updateStatus
             type: object
         type: object
     served: true

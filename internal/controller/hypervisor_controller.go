@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -61,7 +60,6 @@ type HypervisorController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
 
 func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var lifecycleEnabled, skipTest bool
 	log := logger.FromContext(ctx).WithName(req.Name)
 
 	node := &corev1.Node{}
@@ -71,71 +69,58 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	nodeLabels := labels.Set(node.Labels)
-	if nodeLabels.Has(labelLifecycleMode) {
-		lifecycleEnabled = true
-		skipTest = nodeLabels.Get(labelLifecycleMode) == "skip-test"
-	}
-
 	hypervisor := &kvmv1.Hypervisor{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   node.Name,
 			Labels: map[string]string{},
 		},
 		Spec: kvmv1.HypervisorSpec{
-			LifecycleEnabled:   lifecycleEnabled,
-			SkipTests:          skipTest,
 			HighAvailability:   true,
 			InstallCertificate: true,
 		},
 	}
 
-	// Transfer Labels
-	for _, label := range transferLabels {
-		if nodeLabels.Has(label) {
-			hypervisor.Labels[label] = nodeLabels.Get(label)
-		}
-	}
-
-	// Ensure corresponding hypervisor exists
-	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
-		if k8serrors.IsNotFound(err) {
-			// attach ownerReference for cascading deletion
-			if err = controllerutil.SetControllerReference(node, hypervisor, hv.Scheme); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
+	// Ensure corresponding hypervisor exists or update it
+	op, err := controllerutil.CreateOrPatch(ctx, hv.Client, hypervisor, func() error {
+		// Transfer Labels
+		for _, label := range transferLabels {
+			if nodeLabels.Has(label) {
+				hypervisor.Labels[label] = nodeLabels.Get(label)
 			}
-
-			log.Info("Setup hypervisor", "name", node.Name)
-			if err = hv.Create(ctx, hypervisor); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			// Requeue to update status
-			return ctrl.Result{RequeueAfter: 0}, nil
 		}
 
-		return ctrl.Result{}, err
-	}
-
-	nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
-	if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
-		// Node might be terminating, propagate condition to hypervisor
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  nodeTerminationCondition.Reason,
-			Message: nodeTerminationCondition.Message,
-		})
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeTerminating,
-			Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
-			Reason:  nodeTerminationCondition.Reason,
-			Message: nodeTerminationCondition.Message,
-		})
-
-		// update status
-		if err := hv.Status().Update(ctx, hypervisor); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update hypervisor status: %w", err)
+		if nodeLabels.Has(labelLifecycleMode) {
+			hypervisor.Spec.LifecycleEnabled = true
+			hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
 		}
+
+		if err := controllerutil.SetControllerReference(node, hypervisor, hv.Scheme); err != nil {
+			return fmt.Errorf("failed setting controller reference: %w", err)
+		}
+
+		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
+		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
+			// Node might be terminating, propagate condition to hypervisor
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  nodeTerminationCondition.Reason,
+				Message: nodeTerminationCondition.Message,
+			})
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeTerminating,
+				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
+				Reason:  nodeTerminationCondition.Reason,
+				Message: nodeTerminationCondition.Message,
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Error(err, "Hypervisor reconcile failed")
+	} else if op != controllerutil.OperationResultNone {
+		log.Info("Hypervisor successfully reconciled", "operation", op)
 	}
 
 	return ctrl.Result{}, nil
