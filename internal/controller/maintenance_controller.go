@@ -61,7 +61,7 @@ const (
 // https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update;watch
-// +kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;delete;;get;list;patch;update;watch
+// +kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=create;delete;get;list;patch;update;watch
 
 func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

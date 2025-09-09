@@ -132,11 +132,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 			Reason:  ConditionReasonInitial,
 			Message: "Initial onboarding",
 		})
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return r.Status().Update(ctx, hv)
-		}); err != nil {
-			return ctrl.Result{}, err
-		}
+		return ctrl.Result{}, r.Status().Update(ctx, hv)
 	}
 
 	// TODO: cleanup node retrieval

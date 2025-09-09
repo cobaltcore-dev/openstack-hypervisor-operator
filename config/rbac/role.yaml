@@ -25,9 +25,9 @@ rules:
   resources:
   - deployments
   verbs:
-  - ;get
   - create
   - delete
+  - get
   - list
   - patch
   - update
@@ -47,6 +47,8 @@ rules:
   - kvm.cloud.sap
   resources:
   - evictions
+  - hypervisors
+  - hypervisors/status
   verbs:
   - create
   - delete
@@ -69,16 +71,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - kvm.cloud.sap
-  resources:
-  - hypervisors
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - watch
 - apiGroups:
   - policy
   resources:

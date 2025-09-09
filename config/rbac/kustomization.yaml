@@ -24,4 +24,5 @@ resources:
 # if you do not want those helpers be installed with your Project.
 - eviction_editor_role.yaml
 - eviction_viewer_role.yaml
-
+- hypervisor_editor_role.yaml
+- hypervisor_viewer_role.yaml
