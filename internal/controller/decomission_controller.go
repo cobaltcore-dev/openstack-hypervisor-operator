@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -114,7 +115,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	log.Info("removing host from nova")
 
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
-	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+	if errors.Is(err, openstack.ErrNoHypervisor) {
 		// We are (hopefully) done
 		return r.removeFinalizer(ctx, node)
 	}
