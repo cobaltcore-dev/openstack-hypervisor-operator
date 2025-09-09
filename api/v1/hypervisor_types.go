@@ -20,7 +20,6 @@ package v1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -148,16 +147,13 @@ type CapabilitiesStatus struct {
 type HypervisorStatus struct {
 	// +kubebuilder:default:=unknown
 	// Represents the LibVirt version.
-	LibVirtVersion string `json:"libVirtVersion"`
+	LibVirtVersion string `json:"libVirtVersion,omitempty"`
 
 	// Represents the Operating System status.
 	OperatingSystem OperatingSystemStatus `json:"operatingSystem,omitempty"`
 
 	// Represents the Hypervisor update status.
-	Update HyperVisorUpdateStatus `json:"updateStatus"`
-
-	// Represents the Hypervisor node name.
-	Node types.NodeName `json:"node"`
+	Update HyperVisorUpdateStatus `json:"updateStatus,omitempty"`
 
 	// Represents the Hypervisor hosted Virtual Machines
 	Instances []Instance `json:"instances,omitempty"`
@@ -186,10 +182,12 @@ type HypervisorStatus struct {
 // +kubebuilder:resource:scope=Cluster,shortName=hv
 // +kubebuilder:printcolumn:JSONPath=.metadata.labels.topology\.kubernetes\.io/zone,name="Zone",type="string",priority=2
 // +kubebuilder:printcolumn:JSONPath=.metadata.labels.kubernetes\.metal\.cloud\.sap/bb,name="Building Block",type="string",priority=2
+// +kubebuilder:printcolumn:JSONPath=.metadata.labels.worker\.garden\.sapcloud\.io/group,name="Group",type="string",priority=2
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].status",name="Ready",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].reason",name="State",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.lifecycleEnabled",name="Lifecycle",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".spec.highAvailability",name="High Availability",type="boolean"
+// +kubebuilder:printcolumn:JSONPath=".spec.skipTests",name="Skip Tests",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.prettyVersion",name="Version",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.numInstances",name="Instances",type="integer"
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.hardwareModel",name="Hardware",type="string",priority=2
