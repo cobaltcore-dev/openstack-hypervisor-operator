@@ -101,7 +101,13 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
+	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
+		return ctrl.Result{}, nil
+	}
+
+	// check if hv is terminating
+	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
 		return ctrl.Result{}, nil
 	}
 

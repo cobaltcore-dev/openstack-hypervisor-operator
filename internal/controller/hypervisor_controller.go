@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,6 +44,7 @@ var transferLabels = []string{
 	"kubernetes.metal.cloud.sap/name",
 	"kubernetes.metal.cloud.sap/cluster",
 	"kubernetes.metal.cloud.sap/bb",
+	"worker.garden.sapcloud.io/group",
 	corev1.LabelTopologyZone,
 	corev1.LabelTopologyRegion,
 	corev1.LabelHostname,
@@ -94,10 +96,6 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	if node.DeletionTimestamp != nil {
-		return ctrl.Result{}, nil
-	}
-
 	// Ensure corresponding hypervisor exists
 	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -112,10 +110,32 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 
 			// Requeue to update status
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: 0}, nil
 		}
 
 		return ctrl.Result{}, err
+	}
+
+	nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
+	if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
+		// Node might be terminating, propagate condition to hypervisor
+		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  nodeTerminationCondition.Reason,
+			Message: nodeTerminationCondition.Message,
+		})
+		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeTerminating,
+			Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
+			Reason:  nodeTerminationCondition.Reason,
+			Message: nodeTerminationCondition.Message,
+		})
+
+		// update status
+		if err := hv.Status().Update(ctx, hypervisor); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update hypervisor status: %w", err)
+		}
 	}
 
 	return ctrl.Result{}, nil

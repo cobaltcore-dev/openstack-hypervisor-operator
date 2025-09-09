@@ -29,7 +29,8 @@ import (
 
 const (
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
-	ConditionTypeReady = "Ready"
+	ConditionTypeReady       = "Ready"
+	ConditionTypeTerminating = "Terminating"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
@@ -183,6 +184,9 @@ type HypervisorStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=hv
+// +kubebuilder:printcolumn:JSONPath=.metadata.labels.topology\.kubernetes\.io/zone,name="Zone",type="string",priority=2
+// +kubebuilder:printcolumn:JSONPath=.metadata.labels.kubernetes\.metal\.cloud\.sap/bb,name="Building Block",type="string",priority=2
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].status",name="Ready",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].reason",name="State",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.lifecycleEnabled",name="Lifecycle",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".spec.highAvailability",name="High Availability",type="boolean"
