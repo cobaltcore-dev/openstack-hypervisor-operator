@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 -->
 
-# openstack-hypervisor-operator
+# openstack-hypervisor-operator [![REUSE status](https://api.reuse.software/badge/github.com/cobaltcore-dev/openstack-hypervisor-operator)](https://api.reuse.software/info/github.com/cobaltcore-dev/openstack-hypervisor-operator) [![Checks](https://github.com/cobaltcore-dev/openstack-hypervisor-operator/actions/workflows/checks.yaml/badge.svg)](https://github.com/cobaltcore-dev/openstack-hypervisor-operator/actions/workflows/checks.yaml)
 Kubernetes operator to manage and automate the lifecycle of KVM hypervisor nodes within an OpenStack environment.
 
 ## Description
@@ -133,16 +133,7 @@ We as members, contributors, and leaders pledge to make participation in our com
 
 ## License
 
-Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors.
+© 2024/2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Please see our [LICENSE](LICENSES/Apache-2.0.txt) for copyright and license information.
+Detailed information including third-party components and their licensing/copyright information is available via the [REUSE tool](https://api.reuse.software/info/github.com/cobaltcore-dev/openstack-hypervisor-operator).
