@@ -19,12 +19,11 @@ package controller
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,13 +32,15 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 const (
-	annotationCustomTraits        = "nova.openstack.cloud.sap/custom-traits"
-	annotationAppliedCustomTraits = "nova.openstack.cloud.sap/custom-traits-applied"
-	customPrefix                  = "CUSTOM_"
+	customPrefix               = "CUSTOM_"
+	ConditionTypeTraitsUpdated = "TraitsUpdated"
+	ConditionTraitsSuccess     = "Success"
+	ConditionTraitsFailed      = "Failed"
 )
 
 type TraitsController struct {
@@ -48,108 +49,105 @@ type TraitsController struct {
 	serviceClient *gophercloud.ServiceClient
 }
 
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
 
-func (r *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx).WithName(req.Name)
-	ctx = logger.IntoContext(ctx, log)
-
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
+func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	hv := &kvmv1.Hypervisor{}
+	if err := tc.Get(ctx, req.NamespacedName, hv); err != nil {
 		// OnboardingReconciler not found errors, could be deleted
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	if !(labels.Set)(node.Labels).Has(labelHypervisor) {
+	// apply traits only when lifecycle management is enabled
+	if !hv.Spec.LifecycleEnabled {
 		return ctrl.Result{}, nil
 	}
 
-	hypervisorId, found := node.Labels[labelHypervisorID]
-	if !found {
-		return ctrl.Result{}, nil // That is expected, the label will be set eventually
+	// ensure HV is ready
+	if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
+		return ctrl.Result{}, nil
 	}
 
-	toApply := extractTraits(node, annotationCustomTraits)
-	applied := extractTraits(node, annotationAppliedCustomTraits)
+	customTraitsApplied := slices.Collect(func(yield func(string) bool) {
+		for _, trait := range hv.Status.Traits {
+			if strings.HasPrefix(trait, customPrefix) && yield(trait) {
+				return
+			}
+		}
+	})
 
-	if maps.Equal(toApply, applied) {
+	if slices.Equal(hv.Spec.CustomTraits, customTraitsApplied) {
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 
-	toRemove := difference(toApply, applied)
-	toAdd := difference(applied, toApply)
+	toAdd := Difference(customTraitsApplied, hv.Spec.CustomTraits)
+	toRemove := Difference(hv.Spec.CustomTraits, customTraitsApplied)
 
-	current, err := resourceproviders.GetTraits(ctx, r.serviceClient, hypervisorId).Extract()
+	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
-		return ctrl.Result{}, err
+		// set status condition
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeTraitsUpdated,
+			Status:  metav1.ConditionFalse,
+			Reason:  ConditionTraitsFailed,
+			Message: err.Error(),
+		})
+		return ctrl.Result{}, tc.Status().Update(ctx, hv)
 	}
 
-	targetTraitsSet := make(map[string]bool, len(current.Traits))
+	var targetTraits []string
 	for _, trait := range current.Traits {
-		_, found := toRemove[trait]
-		if !found {
-			targetTraitsSet[trait] = true
+		if !slices.Contains(toRemove, trait) {
+			targetTraits = append(targetTraits, trait)
 		}
 	}
 
-	for item := range toAdd {
-		targetTraitsSet[item] = true
-	}
-
-	targetTraits := slices.Collect(maps.Keys(targetTraitsSet))
+	targetTraits = slices.Concat(targetTraits, toAdd)
 	slices.Sort(targetTraits)
 
-	result := openstack.UpdateTraits(ctx, r.serviceClient, hypervisorId, openstack.UpdateTraitsOpts{
+	result := openstack.UpdateTraits(ctx, tc.serviceClient, hv.Status.HypervisorID, openstack.UpdateTraitsOpts{
 		ResourceProviderGeneration: current.ResourceProviderGeneration,
 		Traits:                     targetTraits,
 	})
 
 	if result.Err != nil {
-		return ctrl.Result{}, result.Err
+		// set status condition
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeTraitsUpdated,
+			Status:  metav1.ConditionFalse,
+			Reason:  ConditionTraitsFailed,
+			Message: result.Err.Error(),
+		})
+		return ctrl.Result{}, tc.Status().Update(ctx, hv)
 	}
 
-	err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAppliedCustomTraits: node.Annotations[annotationCustomTraits]})
+	// update status
+	hv.Status.Traits = targetTraits
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeTraitsUpdated,
+		Status:  metav1.ConditionTrue,
+		Reason:  ConditionTraitsSuccess,
+		Message: "Traits successfully updated",
+	})
 
-	return ctrl.Result{}, err
+	return ctrl.Result{}, tc.Status().Update(ctx, hv)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
+func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {
+	if tc.serviceClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {
 		return err
 	}
-	r.serviceClient.Microversion = "1.39" // yoga, or later
+	tc.serviceClient.Microversion = "1.39" // yoga, or later
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("traits").
-		For(&corev1.Node{}).
-		Complete(r)
-}
-
-func extractTraits(node *corev1.Node, key string) (values map[string]bool) {
-	return extractAnnotationListInternal(node, key, func(item string) string {
-		item = strings.ToUpper(item)
-		if !strings.HasPrefix(item, customPrefix) {
-			item = customPrefix + item
-		}
-		return item
-	})
-}
-
-// returns all elements in b not in a
-func difference(a, b map[string]bool) (diff map[string]bool) {
-	diff = make(map[string]bool, 0)
-	for item := range b {
-		_, found := a[item]
-		if !found {
-			diff[item] = true
-		}
-	}
-
-	return
+		For(&kvmv1.Hypervisor{}).
+		Complete(tc)
 }
