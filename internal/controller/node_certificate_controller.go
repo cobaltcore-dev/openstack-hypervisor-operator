@@ -27,13 +27,13 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 type NodeCertificateController struct {
@@ -53,13 +53,12 @@ func getSecretAndCertName(name string) (string, string) {
 func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node *corev1.Node, computeHost string) error {
 	log := logger.FromContext(ctx)
 
-	apiVersion := "cert-manager.io/v1"
 	secretName, certName := getSecretAndCertName(node.Name)
 
 	certificate := &cmapi.Certificate{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       cmapi.CertificateKind,
-			APIVersion: apiVersion,
+			APIVersion: cmapi.SchemeGroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      certName,
@@ -131,7 +130,7 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 			IssuerRef: cmmeta.ObjectReference{
 				Name:  r.issuerName,
 				Kind:  cmapi.IssuerKind,
-				Group: "cert-manager.io",
+				Group: cmapi.SchemeGroupVersion.Group,
 			},
 		}
 		return nil
@@ -163,12 +162,6 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	found := (labels.Set)(node.Labels).Has(labelHypervisor)
-
-	if !found {
-		return ctrl.Result{}, nil
-	}
-
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return r.ensureCertificate(ctx, node, node.Name)
 	})
@@ -185,8 +178,21 @@ func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace
 	r.namespace = namespace
 	r.issuerName = issuerName
 
+	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      labelHypervisor,
+				Operator: metav1.LabelSelectorOpExists,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create label selector predicate: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("certificate").
 		For(&corev1.Node{}).
+		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(r)
 }
