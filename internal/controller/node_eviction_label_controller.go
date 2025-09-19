@@ -93,8 +93,9 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.Get(ctx, k8sclient.ObjectKey{Name: node.Name}, hv); err != nil {
 		return ctrl.Result{}, err
 	}
-	if HasStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding) {
-		// not clear what this if for
+
+	if !HasStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding) {
+		// Hasn't even started to onboard that node, so nothing to evict for sure
 		value = "true" //nolint:goconst
 	} else {
 		// check for existing eviction, else create it
