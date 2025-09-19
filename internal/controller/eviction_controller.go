@@ -310,7 +310,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				Message: fmt.Sprintf("Live migration of instance %s triggered", vm.ID),
 				Reason:  kvmv1.ConditionReasonRunning,
 			})
-			if err2 := r.Status().Update(ctx, eviction); err != nil {
+			if err2 := r.Status().Update(ctx, eviction); err2 != nil {
 				return ctrl.Result{}, fmt.Errorf("could not live-migrate due to %w and %w", err, err2)
 			}
 
@@ -332,7 +332,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				Message: fmt.Sprintf("Cold-migration of instance %s triggered", vm.ID),
 				Reason:  kvmv1.ConditionReasonRunning,
 			})
-			if err2 := r.Status().Update(ctx, eviction); err != nil {
+			if err2 := r.Status().Update(ctx, eviction); err2 != nil {
 				return ctrl.Result{}, fmt.Errorf("could not cold-migrate due to %w and %w", err, err2)
 			}
 
