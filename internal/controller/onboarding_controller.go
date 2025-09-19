@@ -303,7 +303,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	// set onboarding condition completed
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    ConditionTypeOnboarding,
-		Status:  metav1.ConditionFalse,
+		Status:  metav1.ConditionTrue,
 		Reason:  ConditionReasonCompleted,
 		Message: "Onboarding completed",
 	})
