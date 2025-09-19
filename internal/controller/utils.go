@@ -42,17 +42,6 @@ func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node,
 	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
 }
 
-// setNodeAnnotations sets annotations on the node.
-func setNodeAnnotations(ctx context.Context, writer client.Writer, node *corev1.Node, annotations map[string]string) error {
-	newNode := node.DeepCopy()
-	maps.Copy(newNode.Annotations, annotations)
-	if maps.Equal(node.Annotations, newNode.Annotations) {
-		return nil
-	}
-
-	return writer.Patch(ctx, newNode, client.MergeFrom(node))
-}
-
 func InstanceHaUrl(region, zone, hostname string) string {
 	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
 		return haURL
