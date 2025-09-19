@@ -98,6 +98,12 @@ spec:
           spec:
             description: HypervisorSpec defines the desired state of Hypervisor
             properties:
+              aggregates:
+                default: []
+                description: Aggregates are used to apply aggregates to the hypervisor.
+                items:
+                  type: string
+                type: array
               createCertManagerCertificate:
                 default: false
                 description: |-
@@ -144,6 +150,7 @@ spec:
                   system version.
                 type: string
             required:
+            - aggregates
             - createCertManagerCertificate
             - customTraits
             - evacuateOnReboot
@@ -156,6 +163,11 @@ spec:
           status:
             description: HypervisorStatus defines the observed state of Hypervisor
             properties:
+              aggregates:
+                description: Aggregates are the applied aggregates of the hypervisor.
+                items:
+                  type: string
+                type: array
               capabilities:
                 description: The capabilities of the hypervisors as reported by libvirt.
                 properties:

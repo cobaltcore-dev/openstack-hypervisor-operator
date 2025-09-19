@@ -20,11 +20,10 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 	"slices"
-	"strings"
 
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,8 +37,9 @@ import (
 )
 
 const (
-	annotationAggregates        = "nova.openstack.cloud.sap/aggregates"
-	annotationAggregatesApplied = "nova.openstack.cloud.sap/aggregates-applied"
+	ConditionTypeAggregatesUpdated = "AggregatesUpdated"
+	ConditionAggregatesSuccess     = "Success"
+	ConditionAggregatesFailed      = "Failed"
 )
 
 type AggregatesController struct {
@@ -48,49 +48,54 @@ type AggregatesController struct {
 	computeClient *gophercloud.ServiceClient
 }
 
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
-func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
+
+func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
 	ctx = logger.IntoContext(ctx, log)
 
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
-		// OnboardingReconciler not found errors, could be deleted
+	hv := &kvmv1.Hypervisor{}
+	if err := ac.Get(ctx, req.NamespacedName, hv); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	hv := kvmv1.Hypervisor{}
-	if err := r.Get(ctx, k8sclient.ObjectKey{Name: node.Name}, &hv); k8sclient.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, err
-	}
+	// apply traits only when lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
+		return ctrl.Result{}, nil
+	}
+
+	if slices.Equal(hv.Spec.Aggregates, hv.Status.Aggregates) {
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 
-	computeHost := node.Name
-	toApply := extractAnnotationList(node, annotationAggregates)
-	applied := extractAnnotationList(node, annotationAggregatesApplied)
-
-	if maps.Equal(toApply, applied) {
-		// Nothing to be done
-		return ctrl.Result{}, nil
-	}
-
-	aggs, err := aggregatesByName(ctx, r.computeClient)
+	aggs, err := aggregatesByName(ctx, ac.computeClient)
 	if err != nil {
-		return ctrl.Result{}, err
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeAggregatesUpdated,
+			Status:  metav1.ConditionFalse,
+			Reason:  ConditionAggregatesFailed,
+			Message: err.Error(),
+		})
+		return ctrl.Result{}, ac.Status().Update(ctx, hv)
 	}
 
-	toRemove := Difference(slices.Sorted(maps.Keys(toApply)), slices.Sorted(maps.Keys(applied)))
-	toAdd := Difference(slices.Sorted(maps.Keys(applied)), slices.Sorted(maps.Keys(toApply)))
+	toAdd := Difference(hv.Status.Aggregates, hv.Spec.Aggregates)
+	toRemove := Difference(hv.Spec.Aggregates, hv.Status.Aggregates)
 
 	if len(toAdd) > 0 {
 		log.Info("Adding", "aggregates", toAdd)
 		for item := range slices.Values(toAdd) {
-			err = addToAggregate(ctx, r.computeClient, aggs, computeHost, item, "")
+			err = addToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, "")
 			if err != nil {
-				return ctrl.Result{}, err
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionFalse,
+					Reason:  ConditionAggregatesFailed,
+					Message: err.Error(),
+				})
+				return ctrl.Result{}, ac.Status().Update(ctx, hv)
 			}
 		}
 	}
@@ -98,33 +103,44 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 	if len(toRemove) > 0 {
 		log.Info("Removing", "aggregates", toRemove)
 		for item := range slices.Values(toRemove) {
-			err = removeFromAggregate(ctx, r.computeClient, aggs, computeHost, item)
+			err = removeFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item)
 			if err != nil {
-				return ctrl.Result{}, err
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionFalse,
+					Reason:  ConditionAggregatesFailed,
+					Message: err.Error(),
+				})
+				return ctrl.Result{}, ac.Status().Update(ctx, hv)
 			}
 		}
 	}
 
-	err = setNodeAnnotations(ctx, r.Client, node, map[string]string{annotationAggregatesApplied: node.Annotations[annotationAggregates]})
-
-	return ctrl.Result{}, err
+	hv.Status.Aggregates = hv.Spec.Aggregates
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeAggregatesUpdated,
+		Status:  metav1.ConditionTrue,
+		Reason:  ConditionAggregatesSuccess,
+		Message: "Aggregates updated successfully",
+	})
+	return ctrl.Result{}, ac.Status().Update(ctx, hv)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
+func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
 
 	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
+	if ac.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
 		return err
 	}
-	r.computeClient.Microversion = "2.40" // gophercloud only supports numeric ids
+	ac.computeClient.Microversion = "2.40" // gophercloud only supports numeric ids
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("aggregates").
-		For(&corev1.Node{}).
-		Complete(r)
+		For(&kvmv1.Hypervisor{}).
+		Complete(ac)
 }
 
 func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceClient) (map[string]*aggregates.Aggregate, error) {
@@ -205,32 +221,4 @@ func removeFromAggregate(ctx context.Context, serviceClient *gophercloud.Service
 	log.Info("removed host from aggregate", "host", host, "name", name)
 
 	return nil
-}
-
-func extractAnnotationList(node *corev1.Node, key string) (values map[string]bool) {
-	return extractAnnotationListInternal(node, key, nil)
-}
-
-type normalizerFunc func(string) string
-
-func extractAnnotationListInternal(node *corev1.Node, key string, normalizer normalizerFunc) (values map[string]bool) {
-	value, found := node.Annotations[key]
-	if !found {
-		values = make(map[string]bool, 0)
-		return
-	}
-
-	unparsed := strings.Split(value, ",")
-	values = make(map[string]bool, len(unparsed))
-	for _, item := range unparsed {
-		if item == "" {
-			continue
-		}
-		if normalizer != nil {
-			item = normalizer(item)
-		}
-
-		values[item] = true
-	}
-	return
 }
