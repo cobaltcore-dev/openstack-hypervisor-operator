@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -81,12 +82,12 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	toRemove := difference(toApply, applied)
-	toAdd := difference(applied, toApply)
+	toRemove := Difference(slices.Sorted(maps.Keys(toApply)), slices.Sorted(maps.Keys(applied)))
+	toAdd := Difference(slices.Sorted(maps.Keys(applied)), slices.Sorted(maps.Keys(toApply)))
 
 	if len(toAdd) > 0 {
 		log.Info("Adding", "aggregates", toAdd)
-		for item := range toAdd {
+		for item := range slices.Values(toAdd) {
 			err = addToAggregate(ctx, r.computeClient, aggs, computeHost, item, "")
 			if err != nil {
 				return ctrl.Result{}, err
@@ -96,7 +97,7 @@ func (r *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(toRemove) > 0 {
 		log.Info("Removing", "aggregates", toRemove)
-		for item := range toRemove {
+		for item := range slices.Values(toRemove) {
 			err = removeFromAggregate(ctx, r.computeClient, aggs, computeHost, item)
 			if err != nil {
 				return ctrl.Result{}, err

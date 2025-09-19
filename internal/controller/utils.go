@@ -131,3 +131,15 @@ func HasStatusCondition(conditions []metav1.Condition, conditionType string) boo
 	}
 	return false
 }
+
+// returns all elements in b not in a
+func Difference[S ~[]E, E comparable](s1, s2 S) S {
+	diff := make(S, 0)
+	for item := range slices.Values(s2) {
+		if !slices.Contains(s1, item) {
+			diff = append(diff, item)
+		}
+	}
+
+	return diff
+}

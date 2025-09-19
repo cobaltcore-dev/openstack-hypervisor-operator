@@ -249,6 +249,11 @@ func (in *HypervisorStatus) DeepCopyInto(out *HypervisorStatus) {
 		copy(*out, *in)
 	}
 	in.Capabilities.DeepCopyInto(&out.Capabilities)
+	if in.Traits != nil {
+		in, out := &in.Traits, &out.Traits
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

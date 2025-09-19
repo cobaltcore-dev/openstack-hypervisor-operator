@@ -312,6 +312,11 @@ spec:
                 type: string
               specHash:
                 type: string
+              traits:
+                description: Traits are the applied traits of the hypervisor.
+                items:
+                  type: string
+                type: array
               updateStatus:
                 description: Represents the Hypervisor update status.
                 properties:
