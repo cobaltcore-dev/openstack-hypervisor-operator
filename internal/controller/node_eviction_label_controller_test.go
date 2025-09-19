@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -98,9 +99,23 @@ var _ = Describe("Node Eviction Label Controller", func() {
 				},
 			}
 			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
+
+			By("updating the hypervisor status sub-resource")
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    ConditionTypeOnboarding,
+				Status:  metav1.ConditionTrue,
+				Reason:  ConditionReasonInitial,
+				Message: "Initial onboarding",
+			})
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
 		AfterEach(func() {
+			// Cleanup the hypervisor created for the test
+			hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			By("Cleanup the specific hypervisor")
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+
 			// Cleanup the node created for the test
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
