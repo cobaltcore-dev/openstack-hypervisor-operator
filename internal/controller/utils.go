@@ -42,17 +42,6 @@ func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node,
 	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
 }
 
-// setNodeAnnotations sets annotations on the node.
-func setNodeAnnotations(ctx context.Context, writer client.Writer, node *corev1.Node, annotations map[string]string) error {
-	newNode := node.DeepCopy()
-	maps.Copy(newNode.Annotations, annotations)
-	if maps.Equal(node.Annotations, newNode.Annotations) {
-		return nil
-	}
-
-	return writer.Patch(ctx, newNode, client.MergeFrom(node))
-}
-
 func InstanceHaUrl(region, zone, hostname string) string {
 	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
 		return haURL
@@ -130,4 +119,16 @@ func HasStatusCondition(conditions []metav1.Condition, conditionType string) boo
 		}
 	}
 	return false
+}
+
+// returns all elements in b not in a
+func Difference[S ~[]E, E comparable](s1, s2 S) S {
+	diff := make(S, 0)
+	for item := range slices.Values(s2) {
+		if !slices.Contains(s1, item) {
+			diff = append(diff, item)
+		}
+	}
+
+	return diff
 }
