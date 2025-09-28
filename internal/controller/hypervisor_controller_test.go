@@ -47,7 +47,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		// pregenerate the resource
 		resource = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "node-test",
+				Name:   "other-node",
 				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone"}, //nolint:goconst
 			},
 		}
@@ -57,22 +57,24 @@ var _ = Describe("Hypervisor Controller", func() {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
 		By("Cleanup the specific node")
 		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+
+		hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
+		By("Cleanup the specific hypervisor")
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
 	})
 
 	Context("When reconciling a node", func() {
-		BeforeEach(func() {
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-		})
 
 		It("should successfully reconcile the node", func(ctx SpecContext) {
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
 			By("Reconciling the created resource")
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: resource.Name},
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
 
-		It("should have created the Hypervisor resource", func(ctx SpecContext) {
+			By("should have created the Hypervisor resource")
 			// Get the Hypervisor resource
 			hypervisor := &kvmv1.Hypervisor{}
 			hypervisorName := types.NamespacedName{Name: resource.Name}
@@ -84,7 +86,7 @@ var _ = Describe("Hypervisor Controller", func() {
 	})
 
 	Context("When reconciling a terminating node", func() {
-		BeforeEach(func(ctx SpecContext) {
+		It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 			// Mark the node as terminating
 			resource.DeletionTimestamp = &metav1.Time{}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -97,17 +99,16 @@ var _ = Describe("Hypervisor Controller", func() {
 				Message: "Node is terminating",
 			})
 			Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
-		})
 
-		It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 			By("Reconciling the created resource")
-			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
+			for i := 0; i < 2; i++ {
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			}
 
-		It("should have set the terminating condition on the Hypervisor resource", func(ctx SpecContext) {
+			By("should have set the terminating condition on the Hypervisor resource")
 			// Get the Hypervisor resource
 			hypervisor := &kvmv1.Hypervisor{}
 			hypervisorName := types.NamespacedName{Name: resource.Name}

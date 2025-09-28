@@ -20,8 +20,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -36,7 +39,9 @@ import (
 )
 
 const (
-	labelLifecycleMode = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	labelLifecycleMode     = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	annotationAggregates   = "nova.openstack.cloud.sap/aggregates"
+	annotationCustomTraits = "nova.openstack.cloud.sap/custom-traits"
 )
 
 var transferLabels = []string{
@@ -80,24 +85,14 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		},
 	}
 
-	// Ensure corresponding hypervisor exists or update it
-	op, err := controllerutil.CreateOrPatch(ctx, hv.Client, hypervisor, func() error {
-		// Transfer Labels
-		for _, label := range transferLabels {
-			if nodeLabels.Has(label) {
-				hypervisor.Labels[label] = nodeLabels.Get(label)
-			}
+	// Check if hypervisor already exists
+	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
+		if !errors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to get hypervisor: %w", err)
 		}
-
-		if nodeLabels.Has(labelLifecycleMode) {
-			hypervisor.Spec.LifecycleEnabled = true
-			hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
-		}
-
-		if err := controllerutil.SetControllerReference(node, hypervisor, hv.Scheme); err != nil {
-			return fmt.Errorf("failed setting controller reference: %w", err)
-		}
-
+		// continue with creation
+	} else {
+		// update Status if needed
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
 		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
 			// Node might be terminating, propagate condition to hypervisor
@@ -113,16 +108,60 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 				Reason:  nodeTerminationCondition.Reason,
 				Message: nodeTerminationCondition.Message,
 			})
+			return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
 		}
 
-		return nil
-	})
-	if err != nil {
-		log.Error(err, "Hypervisor reconcile failed")
-	} else if op != controllerutil.OperationResultNone {
-		log.Info("Hypervisor successfully reconciled", "operation", op)
+		return ctrl.Result{}, nil
 	}
 
+	// transfer labels
+	for _, label := range transferLabels {
+		if nodeLabels.Has(label) {
+			hypervisor.Labels[label] = nodeLabels.Get(label)
+		}
+	}
+
+	// transport lifecycle label to hypervisor spec
+	if nodeLabels.Has(labelLifecycleMode) {
+		hypervisor.Spec.LifecycleEnabled = true
+		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
+	}
+
+	// transport aggregates annotation to hypervisor spec
+	if aggregates, found := node.Annotations[annotationAggregates]; found {
+		// split aggregates string
+		hypervisor.Spec.Aggregates = slices.Collect(func(yield func(string) bool) {
+			for _, agg := range strings.Split(aggregates, ",") {
+				trimmed := strings.TrimSpace(agg)
+				if trimmed != "" && yield(trimmed) {
+					return
+				}
+			}
+		})
+	}
+
+	// transport custom traits annotation to hypervisor spec
+	if customTraits, found := node.Annotations[annotationCustomTraits]; found {
+		// split custom traits string
+		hypervisor.Spec.CustomTraits = slices.Collect(func(yield func(string) bool) {
+			for _, trait := range strings.Split(customTraits, ",") {
+				trimmed := strings.TrimSpace(trait)
+				if trimmed != "" && yield(trimmed) {
+					return
+				}
+			}
+		})
+	}
+
+	if err := controllerutil.SetControllerReference(node, hypervisor, hv.Scheme); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
+	}
+
+	if err := hv.Create(ctx, hypervisor); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Created Hypervisor resource", "hypervisor", hypervisor.Name)
 	return ctrl.Result{}, nil
 }
 
