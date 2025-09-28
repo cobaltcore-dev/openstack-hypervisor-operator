@@ -29,7 +29,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +37,7 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -59,25 +59,24 @@ type NodeDecommissionReconciler struct {
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;update;patch
 func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hostname := req.Name
 	log := logger.FromContext(ctx).WithName(req.Name).WithValues("hostname", hostname)
 	ctx = logger.IntoContext(ctx, log)
 
-	hv := &kvmv1.Hypervisor{}
-	if err := r.Get(ctx, req.NamespacedName, hv); err != nil {
-		// ignore not found errors, could be deleted
+	node := &corev1.Node{}
+	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	node := &corev1.Node{}
-	if err := r.Get(ctx, k8sclient.ObjectKey{Name: hv.Name}, node); err != nil {
-		if k8serrors.IsNotFound(err) {
-			return ctrl.Result{}, nil // Node not found, nothing to do
-		}
-		return ctrl.Result{}, err
+	// Fetch HV to check if lifecycle management is enabled
+	hv := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: hostname}, hv); err != nil {
+		// ignore not found errors, could be deleted
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
-
 	if !hv.Spec.LifecycleEnabled {
 		// Get out of the way
 		return r.removeFinalizer(ctx, node)
@@ -213,9 +212,18 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.placementClient.Microversion = "1.39" // yoga, or later
 
+	// add predicate to only reconcile nodes with DeletionTimestamp set (i.e. being deleted)
+	predicateFilter := predicate.NewPredicateFuncs(func(object k8sclient.Object) bool {
+		node, ok := object.(*corev1.Node)
+		if !ok {
+			return false
+		}
+		return !node.DeletionTimestamp.IsZero() || controllerutil.ContainsFinalizer(node, decommissionFinalizerName)
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("nodeDecommission").
-		For(&kvmv1.Hypervisor{}).
-		Owns(&corev1.Node{}).
+		For(&corev1.Node{}).
+		WithEventFilter(predicateFilter).
 		Complete(r)
 }
