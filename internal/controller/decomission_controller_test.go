@@ -28,61 +28,64 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 var _ = Describe("Decommission Controller", func() {
 	var decomReconciler *NodeDecommissionReconciler
+	const nodeName = "node-test"
 
-	Context("When reconciling a node", func() {
-		const nodeName = "node-test"
-
-		ctx := context.Background()
-
-		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
-			}
-			for range steps {
-				res, err = decomReconciler.Reconcile(ctx, req)
-				if err != nil {
-					return
-				}
-			}
-			return
+	BeforeEach(func(ctx context.Context) {
+		decomReconciler = &NodeDecommissionReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
 		}
 
-		BeforeEach(func() {
-			decomReconciler = &NodeDecommissionReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+		By("creating the namespace for the reconciler")
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 
-			By("creating the namespace for the reconciler")
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+		By("creating the core resource for the Kind Node")
+		resource := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   nodeName,
+				Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			By("creating the core resource for the Kind Node")
-			resource := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   nodeName,
-					Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
-				},
-			}
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-		})
+		By("Create the hypervisor resource")
+		hypervisor := &kvmv1.Hypervisor{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+			Spec: kvmv1.HypervisorSpec{
+				LifecycleEnabled: true,
+			},
+		}
+		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+	})
 
-		AfterEach(func() {
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			By("Cleanup the specific node")
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-		})
+	AfterEach(func(ctx context.Context) {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+		By("Cleanup the specific node and hypervisor resource")
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+		hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+	})
 
-		It("should successfully reconcile the resource", func() {
+	Context("When reconciling a node", func() {
+
+		It("should successfully reconcile the resource", func(ctx context.Context) {
 			By("ConditionType the created resource")
 			testhelper.SetupHTTP()
 			defer testhelper.TeardownHTTP()
 
-			_, err := reconcileNodeLoop(1)
+			req := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			}
+			_, err := decomReconciler.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

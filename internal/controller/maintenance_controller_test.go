@@ -18,8 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -30,55 +28,43 @@ import (
 )
 
 var _ = Describe("Maintenance Controller", func() {
+	const nodeName = "node-test"
 	var maintenanceController *MaintenanceController
 
+	BeforeEach(func() {
+		maintenanceController = &MaintenanceController{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		By("creating the namespace for the reconciler")
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+
+		By("creating the core resource for the Kind Node")
+		resource := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   nodeName,
+				Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+	})
+
+	AfterEach(func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+		By("Cleanup the specific node")
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+	})
+
 	Context("When reconciling a node", func() {
-		const nodeName = "node-test"
-
-		ctx := context.Background()
-
-		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
+		It("should successfully reconcile the resource", func() {
 			req := ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: nodeName},
 			}
-			for range steps {
-				res, err = maintenanceController.Reconcile(ctx, req)
-				if err != nil {
-					return
-				}
-			}
-			return
-		}
 
-		BeforeEach(func() {
-			maintenanceController = &MaintenanceController{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			By("creating the namespace for the reconciler")
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
-			By("creating the core resource for the Kind Node")
-			resource := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   nodeName,
-					Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
-				},
-			}
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			By("Cleanup the specific node")
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-		})
-
-		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			_, err := reconcileNodeLoop(1)
+			_, err := maintenanceController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
