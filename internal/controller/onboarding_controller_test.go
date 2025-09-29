@@ -20,9 +20,10 @@ package controller
 import (
 	"context"
 
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/gophercloud/gophercloud/v2/testhelper"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,14 +33,14 @@ import (
 var _ = Describe("Onboarding Controller", func() {
 	var onboardingReconciler *OnboardingController
 
-	Context("When reconciling a node", func() {
-		const nodeName = "node-test"
+	Context("When reconciling a hypervisor", func() {
+		const hypervisorName = "some-test"
 
 		ctx := context.Background()
 
-		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
+		reconcileLoop := func(steps int) (res ctrl.Result, err error) {
 			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
+				NamespacedName: types.NamespacedName{Name: hypervisorName},
 			}
 			for range steps {
 				res, err = onboardingReconciler.Reconcile(ctx, req)
@@ -56,29 +57,31 @@ var _ = Describe("Onboarding Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			By("creating the namespace for the reconciler")
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
-			By("creating the core resource for the Kind Node")
-			resource := &corev1.Node{
+			By("creating the resource for the Kind Hypervisor")
+			resource := &kvmv1.Hypervisor{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   nodeName,
-					Labels: map[string]string{labelEvictionRequired: "true"}, //nolint:goconst
+					Name: hypervisorName,
 				},
+				Spec: kvmv1.HypervisorSpec{},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			By("Setting up the OpenStack http mock server")
+			testhelper.SetupHTTP()
 		})
 
 		AfterEach(func() {
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			By("Cleanup the specific node")
-			Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, node))).To(Succeed())
+			By("Clean up the OpenStack http mock server")
+			testhelper.TeardownHTTP()
+
+			hv := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: hypervisorName}}
+			By("Cleanup the specific hypervisor CRO")
+			Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, hv))).To(Succeed())
 		})
 
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			_, err := reconcileNodeLoop(1)
+			_, err := reconcileLoop(1)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

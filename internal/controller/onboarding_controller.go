@@ -514,7 +514,6 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("onboarding").
-		For(&corev1.Node{}).
-		Owns(&kvmv1.Eviction{}). // trigger the r.Reconcile whenever an Own-ed eviction is created/updated/deleted
+		For(&kvmv1.Hypervisor{}).
 		Complete(r)
 }
