@@ -71,8 +71,17 @@ var _ = Describe("Decommission Controller", func() {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 		By("Cleanup the specific node and hypervisor resource")
 		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-		hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+
+		// Due to the decommissioning finalizer, we need to reconcile once more to delete the node completely
+		req := ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: nodeName},
+		}
+		_, err := decomReconciler.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		nodelist := &corev1.NodeList{}
+		Expect(k8sClient.List(ctx, nodelist)).To(Succeed())
+		Expect(nodelist.Items).To(BeEmpty())
 	})
 
 	Context("When reconciling a node", func() {
