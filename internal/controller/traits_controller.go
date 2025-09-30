@@ -85,6 +85,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	toAdd := Difference(customTraitsApplied, hv.Spec.CustomTraits)
 	toRemove := Difference(hv.Spec.CustomTraits, customTraitsApplied)
 
+	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
 		// set status condition
@@ -98,29 +99,37 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	var targetTraits []string
+	slices.Sort(current.Traits)
 	for _, trait := range current.Traits {
 		if !slices.Contains(toRemove, trait) {
 			targetTraits = append(targetTraits, trait)
 		}
 	}
 
-	targetTraits = slices.Concat(targetTraits, toAdd)
+	for _, traitToAdd := range toAdd {
+		// avoid duplicates in case the trait is already present
+		if !slices.Contains(targetTraits, traitToAdd) {
+			targetTraits = append(targetTraits, traitToAdd)
+		}
+	}
 	slices.Sort(targetTraits)
 
-	result := openstack.UpdateTraits(ctx, tc.serviceClient, hv.Status.HypervisorID, openstack.UpdateTraitsOpts{
-		ResourceProviderGeneration: current.ResourceProviderGeneration,
-		Traits:                     targetTraits,
-	})
-
-	if result.Err != nil {
-		// set status condition
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeTraitsUpdated,
-			Status:  metav1.ConditionFalse,
-			Reason:  ConditionTraitsFailed,
-			Message: result.Err.Error(),
+	if !slices.Equal(current.Traits, targetTraits) {
+		result := openstack.UpdateTraits(ctx, tc.serviceClient, hv.Status.HypervisorID, openstack.UpdateTraitsOpts{
+			ResourceProviderGeneration: current.ResourceProviderGeneration,
+			Traits:                     targetTraits,
 		})
-		return ctrl.Result{}, tc.Status().Update(ctx, hv)
+
+		if result.Err != nil {
+			// set status condition
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    ConditionTypeTraitsUpdated,
+				Status:  metav1.ConditionFalse,
+				Reason:  ConditionTraitsFailed,
+				Message: result.Err.Error(),
+			})
+			return ctrl.Result{}, tc.Status().Update(ctx, hv)
+		}
 	}
 
 	// update status
