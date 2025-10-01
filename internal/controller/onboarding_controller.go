@@ -114,7 +114,9 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	computeHost := hv.Name
 	// We bail here out, because the openstack api is not the best to poll
 	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
-		if err := r.ensureNovaProperties(ctx, hv); err != nil {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return r.ensureNovaProperties(ctx, hv)
+		}); err != nil {
 			if errors.Is(err, errRequeue) {
 				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 			}
@@ -161,7 +163,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 			return r.smokeTest(ctx, node, hv, computeHost)
 		}
 	default:
-		// No idea how we ended up here.
+		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 }
@@ -221,19 +223,31 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 
 	switch server.Status {
 	case "ERROR":
-		if err := servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
-			log.Error(err, "failed to delete test instance", "id", server.ID)
+		// servers.List doesn't provide the fault field, so fetch the server again
+		id := server.ID
+		server, err = servers.Get(ctx, r.testComputeClient, id).Extract()
+		if err != nil {
+			// should not happened
+			log.Error(err, "failed to get test instance, instance vanished", "id", id)
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
+
 		// Set condition back to testing
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    ConditionTypeOnboarding,
 			Status:  metav1.ConditionTrue,
 			Reason:  ConditionReasonTesting,
-			Message: "Server ended up in error state, retrying",
+			Message: "Server ended up in error state: " + server.Fault.Message,
 		})
-		if err := r.Status().Update(ctx, hv); err != nil {
+		if err = r.Status().Update(ctx, hv); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// now delete the server and requeue
+		if err = servers.Delete(ctx, r.testComputeClient, id).ExtractErr(); err != nil {
+			log.Error(err, "failed to delete test instance", "id", id)
+		}
+
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	case "ACTIVE":
 		consoleOutput, err := servers.ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).Extract()
@@ -358,9 +372,7 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 
 	hv.Status.HypervisorID = myHypervisor.ID
 	hv.Status.ServiceID = myHypervisor.Service.ID
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return r.Status().Update(ctx, hv)
-	})
+	return r.Status().Update(ctx, hv)
 }
 
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {
