@@ -21,10 +21,12 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -64,9 +66,9 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// ensure HV is ready
-	if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
-		return ctrl.Result{}, nil
+	// ensure hypervisorID is set
+	if hv.Status.HypervisorID == "" {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	customTraitsApplied := slices.Collect(func(yield func(string) bool) {
@@ -88,14 +90,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
-		// set status condition
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeTraitsUpdated,
-			Status:  metav1.ConditionFalse,
-			Reason:  ConditionTraitsFailed,
-			Message: err.Error(),
-		})
-		return ctrl.Result{}, tc.Status().Update(ctx, hv)
+		return ctrl.Result{}, tc.UpdateStatusCondition(ctx, hv, err, "Failed to get current traits from placement")
 	}
 
 	var targetTraits []string
@@ -122,26 +117,46 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		if result.Err != nil {
 			// set status condition
-			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    ConditionTypeTraitsUpdated,
-				Status:  metav1.ConditionFalse,
-				Reason:  ConditionTraitsFailed,
-				Message: result.Err.Error(),
-			})
-			return ctrl.Result{}, tc.Status().Update(ctx, hv)
+			return ctrl.Result{}, tc.UpdateStatusCondition(ctx, hv, result.Err, "Failed to update traits in placement")
 		}
 	}
 
 	// update status
 	hv.Status.Traits = targetTraits
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeTraitsUpdated,
-		Status:  metav1.ConditionTrue,
-		Reason:  ConditionTraitsSuccess,
-		Message: "Traits successfully updated",
-	})
+	return ctrl.Result{}, tc.UpdateStatusCondition(ctx, hv, nil, "Traits successfully updated")
+}
 
-	return ctrl.Result{}, tc.Status().Update(ctx, hv)
+// UpdateStatusCondition updates the TraitsUpdated condition of the Hypervisor status and handles conflicts by retrying.
+func (tc *TraitsController) UpdateStatusCondition(ctx context.Context, orig *kvmv1.Hypervisor, err error, msg string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		hv := &kvmv1.Hypervisor{}
+		if err := tc.Get(ctx, k8sclient.ObjectKeyFromObject(orig), hv); err != nil {
+			return err
+		}
+		// set status condition
+		var reason, message string
+		var status = metav1.ConditionTrue
+		reason = ConditionTraitsSuccess
+		message = msg
+
+		if err != nil {
+			status = metav1.ConditionFalse
+			reason = ConditionTraitsFailed
+			message = err.Error()
+			if msg != "" {
+				message = msg + ": " + message
+			}
+		}
+
+		hv.Status.Traits = orig.Status.Traits
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeTraitsUpdated,
+			Status:  status,
+			Reason:  reason,
+			Message: message,
+		})
+		return tc.Status().Update(ctx, hv)
+	})
 }
 
 // SetupWithManager sets up the controller with the Manager.
