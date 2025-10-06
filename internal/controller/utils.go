@@ -79,10 +79,6 @@ func enableInstanceHA(node *corev1.Node) error {
 	return updateInstanceHA(node, `{"enabled": true}`, []int{http.StatusOK})
 }
 
-func enableInstanceHAMissingOkay(node *corev1.Node) error {
-	return updateInstanceHA(node, `{"enabled": true}`, []int{http.StatusOK, http.StatusNotFound})
-}
-
 func disableInstanceHA(node *corev1.Node) error {
 	return updateInstanceHA(node, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
 }
