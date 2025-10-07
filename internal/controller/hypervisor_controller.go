@@ -153,7 +153,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		})
 	}
 
-	if err := controllerutil.SetControllerReference(node, hypervisor, hv.Scheme); err != nil {
+	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
 	}
 
@@ -180,7 +180,6 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}).
-		Owns(&kvmv1.Hypervisor{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(hv)
 }
