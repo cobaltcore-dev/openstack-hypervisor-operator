@@ -236,7 +236,7 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect eviction condition to be false due to missing hypervisor
-					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEviction)
+					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
 					Expect(reconcileStatus.Reason).To(Equal("Failed"))
@@ -269,7 +269,7 @@ var _ = Describe("Eviction Controller", func() {
 				})
 				It("should succeed the reconciliation", func() {
 					runningCond := &metav1.Condition{
-						Type:    kvmv1.ConditionTypeEviction,
+						Type:    kvmv1.ConditionTypeEvicting,
 						Status:  metav1.ConditionTrue,
 						Reason:  kvmv1.ConditionReasonRunning,
 						Message: "Running",
@@ -278,14 +278,14 @@ var _ = Describe("Eviction Controller", func() {
 					hypervisorDisabledCond := &metav1.Condition{
 						Type:    kvmv1.ConditionTypeHypervisorDisabled,
 						Status:  metav1.ConditionTrue,
-						Reason:  kvmv1.ConditionReasonSuceeded,
+						Reason:  kvmv1.ConditionReasonSucceeded,
 						Message: "Hypervisor disabled successfully",
 					}
 
 					preflightCond := &metav1.Condition{
 						Type:    kvmv1.ConditionTypePreflight,
 						Status:  metav1.ConditionTrue,
-						Reason:  kvmv1.ConditionReasonSuceeded,
+						Reason:  kvmv1.ConditionReasonSucceeded,
 						Message: "Preflight checks passed",
 					}
 
@@ -314,9 +314,9 @@ var _ = Describe("Eviction Controller", func() {
 						// 5. expect the eviction condition to be set to succeeded
 						{
 							conditions: []*metav1.Condition{{
-								Type:    kvmv1.ConditionTypeEviction,
+								Type:    kvmv1.ConditionTypeEvicting,
 								Status:  metav1.ConditionFalse,
-								Reason:  kvmv1.ConditionReasonSuceeded,
+								Reason:  kvmv1.ConditionReasonSucceeded,
 								Message: "eviction completed successfully"}},
 							finalizers: []string{evictionFinalizerName}},
 					}
@@ -374,7 +374,7 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect eviction condition to be true
-					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEviction)
+					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
 					Expect(reconcileStatus.Reason).To(Equal(kvmv1.ConditionReasonRunning))
@@ -389,10 +389,10 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect reconciliation to be successfully finished
-					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEviction)
+					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
 					Expect(reconcileStatus).NotTo(BeNil())
 					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
-					Expect(reconcileStatus.Reason).To(Equal(kvmv1.ConditionReasonSuceeded))
+					Expect(reconcileStatus.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
 
 					Expect(resource.GetFinalizers()).To(BeEmpty())
 				})

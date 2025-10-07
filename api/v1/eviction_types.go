@@ -50,8 +50,8 @@ const (
 	// ConditionTypeHypervisorDisabled is the type of condition for hypervisor disabled status
 	ConditionTypeHypervisorDisabled = "HypervisorDisabled"
 
-	// ConditionTypeEviction is the type of condition for eviction status
-	ConditionTypeEviction = "Evicting"
+	// ConditionTypeEvicting is the type of condition for eviction status
+	ConditionTypeEvicting = "Evicting"
 
 	// ConditionReasonRunning means the eviction is currently running
 	ConditionReasonRunning string = "Running"
@@ -59,8 +59,8 @@ const (
 	// ConditionReasonFailed means the eviction has failed
 	ConditionReasonFailed string = "Failed"
 
-	// ConditionReasonSuceeded means the eviction has succeeded
-	ConditionReasonSuceeded string = "Succeeded"
+	// ConditionReasonSucceeded means the eviction has succeeded
+	ConditionReasonSucceeded string = "Succeeded"
 )
 
 // EvictionStatus defines the observed state of Eviction
