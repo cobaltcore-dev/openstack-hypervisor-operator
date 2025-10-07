@@ -147,7 +147,7 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 
 	// check if the eviction is already succeeded
 	var evictionState string
-	if status := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEviction); status != nil {
+	if status := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEvicting); status != nil {
 		evictionState = status.Reason
 	}
 	switch evictionState {

@@ -81,7 +81,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	statusCondition := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEviction)
+	statusCondition := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEvicting)
 	if statusCondition == nil {
 		// No status condition, so we need to add it
 		if r.addCondition(ctx, eviction, metav1.ConditionTrue, "Running", kvmv1.ConditionReasonRunning) {
@@ -117,10 +117,10 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeEviction,
+		Type:    kvmv1.ConditionTypeEvicting,
 		Status:  metav1.ConditionFalse,
 		Message: "eviction completed successfully",
-		Reason:  kvmv1.ConditionReasonSuceeded,
+		Reason:  kvmv1.ConditionReasonSucceeded,
 	})
 
 	eviction.Status.OutstandingRamMb = 0
@@ -148,7 +148,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 			// Abort eviction
 			err = fmt.Errorf("failed to get hypervisor %w", err)
 			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeEviction,
+				Type:    kvmv1.ConditionTypeEvicting,
 				Status:  metav1.ConditionFalse,
 				Message: err.Error(),
 				Reason:  kvmv1.ConditionReasonFailed,
@@ -159,10 +159,10 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 			// so we are good to go
 			msg := "eviction completed successfully due to expected case of no hypervisor"
 			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeEviction,
+				Type:    kvmv1.ConditionTypeEvicting,
 				Status:  metav1.ConditionFalse,
 				Message: msg,
-				Reason:  kvmv1.ConditionReasonSuceeded,
+				Reason:  kvmv1.ConditionReasonSucceeded,
 			})
 			eviction.Status.OutstandingRamMb = 0
 			logger.FromContext(ctx).Info(msg)
@@ -176,7 +176,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 		err = fmt.Errorf("hypervisor name %q does not match spec %q", currentHypervisor, hypervisorName)
 		log.Error(err, "Hypervisor name mismatch")
 		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeEviction,
+			Type:    kvmv1.ConditionTypeEvicting,
 			Status:  metav1.ConditionFalse,
 			Message: err.Error(),
 			Reason:  kvmv1.ConditionReasonFailed,
@@ -210,7 +210,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 		Type:    kvmv1.ConditionTypePreflight,
 		Status:  metav1.ConditionTrue,
 		Message: "Preflight checks passed, hypervisor is disabled and ready for eviction",
-		Reason:  kvmv1.ConditionReasonSuceeded,
+		Reason:  kvmv1.ConditionReasonSucceeded,
 	})
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
@@ -231,7 +231,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				Type:    kvmv1.ConditionTypeMigration,
 				Status:  metav1.ConditionFalse,
 				Message: fmt.Sprintf("Instance %s is gone", uuid),
-				Reason:  kvmv1.ConditionReasonSuceeded,
+				Reason:  kvmv1.ConditionReasonSucceeded,
 			})
 			return ctrl.Result{}, r.Status().Update(ctx, eviction)
 		}
@@ -272,7 +272,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			Type:    kvmv1.ConditionTypeMigration,
 			Status:  metav1.ConditionFalse,
 			Message: fmt.Sprintf("Migration of instance %s finished", vm.ID),
-			Reason:  kvmv1.ConditionReasonSuceeded,
+			Reason:  kvmv1.ConditionReasonSucceeded,
 		})
 
 		// So, it is already off this one, do we need to verify it?
@@ -381,7 +381,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 				Type:    kvmv1.ConditionTypeHypervisorReEnabled,
 				Status:  metav1.ConditionTrue,
 				Message: "Hypervisor is gone, no need to re-enable",
-				Reason:  kvmv1.ConditionReasonSuceeded,
+				Reason:  kvmv1.ConditionReasonSucceeded,
 			})
 		} else {
 			// update the condition to reflect the error, but do not fail the reconciliation
@@ -401,7 +401,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 			Status: metav1.ConditionTrue,
 			Message: fmt.Sprintf("Hypervisor already re-enabled for reason: %s",
 				hypervisor.Service.DisabledReason),
-			Reason: kvmv1.ConditionReasonSuceeded,
+			Reason: kvmv1.ConditionReasonSucceeded,
 		})
 		return r.Status().Update(ctx, eviction)
 	}
@@ -422,7 +422,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 			Type:    kvmv1.ConditionTypeHypervisorReEnabled,
 			Status:  metav1.ConditionTrue,
 			Message: "Hypervisor re-enabled successfully",
-			Reason:  kvmv1.ConditionReasonSuceeded,
+			Reason:  kvmv1.ConditionReasonSucceeded,
 		})
 	}
 	return r.Status().Update(ctx, eviction)
@@ -440,7 +440,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 			Type:    kvmv1.ConditionTypeHypervisorDisabled,
 			Status:  metav1.ConditionTrue,
 			Message: fmt.Sprintf("Hypervisor already disabled for reason %q", disabledReason),
-			Reason:  kvmv1.ConditionReasonSuceeded,
+			Reason:  kvmv1.ConditionReasonSucceeded,
 		})
 		return r.Status().Update(ctx, eviction)
 	}
@@ -470,7 +470,7 @@ func (r *EvictionReconciler) disableHypervisor(ctx context.Context, hypervisor *
 		Type:    kvmv1.ConditionTypeHypervisorDisabled,
 		Status:  metav1.ConditionTrue,
 		Message: "Hypervisor disabled successfully",
-		Reason:  kvmv1.ConditionReasonSuceeded,
+		Reason:  kvmv1.ConditionReasonSucceeded,
 	})
 	return r.Status().Update(ctx, eviction)
 }
@@ -511,7 +511,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction,
 	status metav1.ConditionStatus, message string, reason string) bool {
 	if !meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeEviction,
+		Type:    kvmv1.ConditionTypeEvicting,
 		Status:  status,
 		Message: message,
 		Reason:  reason,
