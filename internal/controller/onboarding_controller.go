@@ -289,6 +289,31 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
+
+	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
+
+	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{
+		Name: serverPrefix,
+	}).AllPages(ctx)
+
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return ctrl.Result{}, err
+	}
+
+	serverList, err := servers.ExtractServers(serverPages)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	for _, server := range serverList {
+		log.Info("deleting server", "name", server.Name)
+		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			continue
+		}
+		return ctrl.Result{}, err
+	}
+
 	aggs, err := aggregatesByName(ctx, r.computeClient)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
@@ -376,13 +401,14 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 }
 
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {
-	serverName := fmt.Sprintf("%v-%v-%v", testPrefixName, computeHost, nodeUid)
+	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, computeHost)
+	serverName := fmt.Sprintf("%v-%v", serverPrefix, nodeUid)
 
 	serverPages, err := servers.List(r.testComputeClient, servers.ListOpts{
-		Name: serverName,
+		Name: serverPrefix,
 	}).AllPages(ctx)
 
-	if err != nil {
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		return nil, err
 	}
 
@@ -391,8 +417,28 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		return nil, err
 	}
 
-	if len(serverList) > 0 {
-		return &serverList[0], nil
+	log := logger.FromContext(ctx)
+	// Cleanup all other server with the same test prefix, except for the exact match
+	// as the cleanup after onboarding may leak resources
+	var foundServer *servers.Server
+	for _, server := range serverList {
+		// The query is a substring search, we are looking for a prefix
+		if !strings.HasPrefix(server.Name, serverPrefix) {
+			continue
+		}
+		if server.Name != serverName || foundServer != nil {
+			log.Info("deleting server", "name", server.Name)
+			err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+			if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+				log.Error(err, "failed deleting instance due to", "instance", server.ID)
+			}
+		} else {
+			foundServer = &server
+		}
+	}
+
+	if foundServer != nil {
+		return foundServer, nil
 	}
 
 	flavorPages, err := flavors.ListDetail(r.testComputeClient, nil).AllPages(ctx)
@@ -460,7 +506,6 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		return nil, fmt.Errorf("couldn't find network")
 	}
 
-	log := logger.FromContext(ctx)
 	log.Info("creating server", "name", serverName)
 	server, err := servers.Create(ctx, r.testComputeClient, servers.CreateOpts{
 		Name:             serverName,
