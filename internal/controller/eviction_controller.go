@@ -485,8 +485,13 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 	res := servers.LiveMigrate(ctx, r.computeClient, uuid, liveMigrateOpts)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
-		r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), kvmv1.ConditionReasonFailed)
-		return res.Err
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeMigration,
+			Status:  metav1.ConditionFalse,
+			Message: err.Error(),
+			Reason:  kvmv1.ConditionReasonFailed,
+		})
+		return err
 	}
 
 	log.Info("Live migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
@@ -499,7 +504,12 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 	res := servers.Migrate(ctx, r.computeClient, uuid)
 	if res.Err != nil {
 		err := fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
-		r.addCondition(ctx, eviction, metav1.ConditionFalse, err.Error(), kvmv1.ConditionReasonFailed)
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeMigration,
+			Status:  metav1.ConditionFalse,
+			Message: err.Error(),
+			Reason:  kvmv1.ConditionReasonFailed,
+		})
 		return err
 	}
 
