@@ -101,7 +101,7 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
 
 			By("Reconciling the created resource")
-			for i := 0; i < 2; i++ {
+			for i := 0; i < 3; i++ {
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
 					NamespacedName: types.NamespacedName{Name: resource.Name},
 				})
