@@ -82,6 +82,28 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(hypervisor.Name).To(Equal(resource.Name))
 			Expect(hypervisor.Labels).ToNot(BeNil())
 			Expect(hypervisor.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone"))
+
+			By("Adding a aggregate annotation to the node and reconciling again")
+			// Add an aggregate annotation to the node
+			annotedResource := resource.DeepCopy()
+			if annotedResource.Annotations == nil {
+				annotedResource.Annotations = map[string]string{}
+			}
+			annotedResource.Annotations[annotationCustomTraits] = "test-trait"
+			Expect(k8sClient.Patch(ctx, annotedResource, client.Merge)).To(Succeed())
+
+			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: resource.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("should have updated the Hypervisor resource with the aggregate")
+			// Get the Hypervisor resource again
+			updatedHypervisor := &kvmv1.Hypervisor{}
+			Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
+			Expect(updatedHypervisor.Spec.CustomTraits).ToNot(BeNil())
+			Expect(updatedHypervisor.Spec.CustomTraits).To(ContainElement("test-trait"))
 		})
 	})
 
