@@ -181,6 +181,9 @@ type HypervisorStatus struct {
 	// Aggregates are the applied aggregates of the hypervisor.
 	Aggregates []string `json:"aggregates,omitempty"`
 
+	// InternalIP is the internal IP address of the hypervisor.
+	InternalIP string `json:"internalIp,omitempty"`
+
 	// Represents the Hypervisor node conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
@@ -199,6 +202,7 @@ type HypervisorStatus struct {
 // +kubebuilder:printcolumn:JSONPath=".spec.highAvailability",name="High Availability",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".spec.skipTests",name="Skip Tests",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.prettyVersion",name="Version",type="string"
+// +kubebuilder:printcolumn:JSONPath=".status.internalIp",name="IP",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.numInstances",name="Instances",type="integer"
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.hardwareModel",name="Hardware",type="string",priority=2
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.kernelRelease",name="Kernel",type="string",priority=2
