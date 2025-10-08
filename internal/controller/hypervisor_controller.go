@@ -93,23 +93,37 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// continue with creation
 	} else {
 		// update Status if needed
+		changed := false
+
+		// transfer internal IP
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP && hypervisor.Status.InternalIP != address.Address {
+				hypervisor.Status.InternalIP = address.Address
+				changed = true
+				break
+			}
+		}
+
+		// update terminating condition
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
 		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
 			// Node might be terminating, propagate condition to hypervisor
-			changed := meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			changed = meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  nodeTerminationCondition.Reason,
 				Message: nodeTerminationCondition.Message,
-			}) || meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			}) || changed
+			changed = meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeTerminating,
 				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
 				Reason:  nodeTerminationCondition.Reason,
 				Message: nodeTerminationCondition.Message,
-			})
-			if changed {
-				return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
-			}
+			}) || changed
+		}
+
+		if changed {
+			return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
 		}
 		return ctrl.Result{}, nil
 	}
