@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -111,14 +112,15 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
 			}
 		}
-		return ctrl.Result{}, nil
-	}
 
-	// transfer labels
-	for _, label := range transferLabels {
-		if nodeLabels.Has(label) {
-			hypervisor.Labels[label] = nodeLabels.Get(label)
+		// transport label/anotations changes
+		before := hypervisor.DeepCopy()
+		updateLabelsAndAnnotations(&node.ObjectMeta, hypervisor)
+		if !reflect.DeepEqual(before, hypervisor) {
+			return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFrom(before))
 		}
+
+		return ctrl.Result{}, nil
 	}
 
 	// transport lifecycle label to hypervisor spec
@@ -127,31 +129,8 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
 	}
 
-	// transport aggregates annotation to hypervisor spec
-	if aggregates, found := node.Annotations[annotationAggregates]; found {
-		// split aggregates string
-		hypervisor.Spec.Aggregates = slices.Collect(func(yield func(string) bool) {
-			for _, agg := range strings.Split(aggregates, ",") {
-				trimmed := strings.TrimSpace(agg)
-				if trimmed != "" && yield(trimmed) {
-					return
-				}
-			}
-		})
-	}
-
-	// transport custom traits annotation to hypervisor spec
-	if customTraits, found := node.Annotations[annotationCustomTraits]; found {
-		// split custom traits string
-		hypervisor.Spec.CustomTraits = slices.Collect(func(yield func(string) bool) {
-			for _, trait := range strings.Split(customTraits, ",") {
-				trimmed := strings.TrimSpace(trait)
-				if trimmed != "" && yield(trimmed) {
-					return
-				}
-			}
-		})
-	}
+	// transport relevant annotations
+	updateLabelsAndAnnotations(&node.ObjectMeta, hypervisor)
 
 	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
@@ -182,4 +161,40 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 		For(&corev1.Node{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(hv)
+}
+
+// updateLabelsAndAnnotations transports relevant annotations from the Node to the Hypervisor spec
+func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) {
+	// transport aggregates annotation to hypervisor spec
+	if aggregates, found := node.Annotations[annotationAggregates]; found {
+		// split aggregates string
+		hypervisor.Spec.Aggregates = slices.Collect(func(yield func(string) bool) {
+			for _, agg := range strings.Split(aggregates, ",") {
+				trimmed := strings.TrimSpace(agg)
+				if trimmed != "" && yield(trimmed) {
+					return
+				}
+			}
+		})
+	}
+
+	// transport custom traits annotation to hypervisor spec
+	if customTraits, found := node.Annotations[annotationCustomTraits]; found {
+		// split custom traits string
+		hypervisor.Spec.CustomTraits = slices.Collect(func(yield func(string) bool) {
+			for _, trait := range strings.Split(customTraits, ",") {
+				trimmed := strings.TrimSpace(trait)
+				if trimmed != "" && yield(trimmed) {
+					return
+				}
+			}
+		})
+	}
+
+	// transfer labels
+	for _, transferLabel := range transferLabels {
+		if label, ok := node.Labels[transferLabel]; ok {
+			hypervisor.Labels[transferLabel] = label
+		}
+	}
 }
