@@ -261,27 +261,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 
-	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
-
-	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{
-		Name: serverPrefix,
-	}).AllPages(ctx)
-
-	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{}, err
-	}
-
-	serverList, err := servers.ExtractServers(serverPages)
+	err := r.deleteTestServers(ctx, host)
 	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	for _, server := range serverList {
-		log.Info("deleting server", "name", server.Name)
-		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
-		if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			return ctrl.Result{}, err
-		}
+		return ctrl.Result{}, fmt.Errorf("failed to delete test servers due to %w", err)
 	}
 
 	aggs, err := aggregatesByName(ctx, r.computeClient)
@@ -317,6 +299,35 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		Message: "Onboarding completed",
 	})
 	return ctrl.Result{}, r.Status().Update(ctx, hv)
+}
+
+func (r *OnboardingController) deleteTestServers(ctx context.Context, host string) error {
+	log := logger.FromContext(ctx)
+	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
+
+	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{
+		Name: serverPrefix,
+	}).AllPages(ctx)
+
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return err
+	}
+
+	serverList, err := servers.ExtractServers(serverPages)
+	if err != nil {
+		return err
+	}
+
+	errs := make([]error, 0)
+	for _, server := range serverList {
+		log.Info("deleting server", "name", server.Name)
+		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+		if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) error {
