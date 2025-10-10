@@ -293,7 +293,21 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		return reconcile.Result{}, r.Status().Update(ctx, eviction)
 	}
 
-	if vm.Status == "ACTIVE" || vm.PowerState == 1 {
+	if vm.TaskState == "deleting" {
+		// We just have to wait for it to be gone. Try the next one.
+		copy((*instances)[1:], (*instances)[:len(*instances)-1])
+		(*instances)[0] = uuid
+
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeMigration,
+			Status:  metav1.ConditionFalse,
+			Message: fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID),
+			Reason:  kvmv1.ConditionReasonFailed,
+		})
+		if err2 := r.Status().Update(ctx, eviction); err2 != nil {
+			return ctrl.Result{}, fmt.Errorf("could update status due to %w", err2)
+		}
+	} else if vm.Status == "ACTIVE" || vm.PowerState == 1 {
 		log.Info("trigger live-migration")
 		if err = r.liveMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
