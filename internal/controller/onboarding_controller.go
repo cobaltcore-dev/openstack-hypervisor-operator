@@ -392,7 +392,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 			continue
 		}
 		if server.Name != serverName || foundServer != nil {
-			log.Info("deleting server", "name", server.Name)
+			log.Info("deleting outdated server", "name", server.Name)
 			err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
 			if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Error(err, "failed deleting instance due to", "instance", server.ID)
