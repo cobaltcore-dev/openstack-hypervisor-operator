@@ -6,8 +6,8 @@ module github.com/cobaltcore-dev/openstack-hypervisor-operator
 go 1.24.7
 
 require (
-	github.com/gophercloud/gophercloud/v2 v2.7.0
-	github.com/gophercloud/utils/v2 v2.0.0-20250711132455-9770683b100a
+	github.com/gophercloud/gophercloud/v2 v2.8.0
+	github.com/gophercloud/utils/v2 v2.0.0-20250930154317-576cdf6142a7
 	github.com/onsi/ginkgo/v2 v2.26.0
 	github.com/onsi/gomega v1.38.2
 	k8s.io/api v0.34.1

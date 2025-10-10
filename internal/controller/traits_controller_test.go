@@ -35,7 +35,11 @@ import (
 )
 
 var _ = Describe("TraitsController", func() {
-	var tc *TraitsController
+	var (
+		tc         *TraitsController
+		fakeServer testhelper.FakeServer
+	)
+
 	const TraitsBody = `
 {
     "resource_provider_generation": 1,
@@ -58,13 +62,13 @@ var _ = Describe("TraitsController", func() {
 
 	BeforeEach(func(ctx context.Context) {
 		By("Setting up the OpenStack http mock server")
-		testhelper.SetupHTTP()
+		fakeServer = testhelper.SetupHTTP()
 
 		By("Creating the TraitsController")
 		tc = &TraitsController{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
-			serviceClient: client.ServiceClient(),
+			serviceClient: client.ServiceClient(fakeServer),
 		}
 
 		By("Creating a Hypervisor resource")
@@ -91,13 +95,13 @@ var _ = Describe("TraitsController", func() {
 	})
 
 	AfterEach(func() {
-		By("Tearing down the OpenStack http mock server")
-		testhelper.TeardownHTTP()
-
 		By("Deleting the Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{}
 		Expect(tc.Client.Get(ctx, types.NamespacedName{Name: "hv-test", Namespace: "default"}, hypervisor)).To(Succeed())
 		Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
+
+		By("Tearing down the OpenStack http mock server")
+		fakeServer.Teardown()
 	})
 
 	// Tests
@@ -105,7 +109,7 @@ var _ = Describe("TraitsController", func() {
 	Context("Reconcile", func() {
 		BeforeEach(func() {
 			// Mock resourceproviders.GetTraits
-			testhelper.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
@@ -113,7 +117,7 @@ var _ = Describe("TraitsController", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 			// Mock resourceproviders.UpdateTraits
-			testhelper.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
 				// parse request
 				Expect(r.Method).To(Equal("PUT"))
 				Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))

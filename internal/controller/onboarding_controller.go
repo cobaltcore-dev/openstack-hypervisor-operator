@@ -206,7 +206,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		Status:     services.ServiceEnabled,
 		ForcedDown: &falseVal,
 	}
-	if result := openstack.UpdateService(ctx, r.computeClient, hv.Status.ServiceID, opts); result.Err != nil {
+	if result := services.Update(ctx, r.computeClient, hv.Status.ServiceID, opts); result.Err != nil {
 		return result.Err
 	}
 
