@@ -31,19 +31,20 @@ import (
 )
 
 var _ = Describe("Onboarding Controller", func() {
+	const (
+		hypervisorName = "some-test"
+	)
+
 	var (
 		onboardingReconciler *OnboardingController
+		namespacedName       = types.NamespacedName{Name: hypervisorName}
 	)
 
 	Context("When reconciling a hypervisor", func() {
-		const hypervisorName = "some-test"
-
 		ctx := context.Background() //nolint:govet
 
 		reconcileLoop := func(steps int) (res ctrl.Result, err error) {
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: hypervisorName},
-			}
+			req := ctrl.Request{NamespacedName: namespacedName}
 			for range steps {
 				res, err = onboardingReconciler.Reconcile(ctx, req)
 				if err != nil {
@@ -60,19 +61,18 @@ var _ = Describe("Onboarding Controller", func() {
 			}
 
 			By("creating the resource for the Kind Hypervisor")
-			resource := &kvmv1.Hypervisor{
+			hv := &kvmv1.Hypervisor{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: hypervisorName,
 				},
 				Spec: kvmv1.HypervisorSpec{},
 			}
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-		})
+			Expect(k8sClient.Create(ctx, hv)).To(Succeed())
 
-		AfterEach(func() {
-			hv := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: hypervisorName}}
-			By("Cleanup the specific hypervisor CRO")
-			Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, hv))).To(Succeed())
+			DeferCleanup(func(ctx context.Context) {
+				By("Cleanup the specific hypervisor CRO")
+				Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, hv))).To(Succeed())
+			})
 		})
 
 		It("should successfully reconcile the resource", func() {

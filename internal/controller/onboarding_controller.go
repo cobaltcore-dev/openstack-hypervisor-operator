@@ -54,6 +54,7 @@ const (
 	defaultWaitTime           = 1 * time.Minute
 	ConditionTypeOnboarding   = "Onboarding"
 	ConditionReasonAborted    = "aborted"
+	ConditionReasonError      = "error"
 	ConditionReasonInitial    = "initial"
 	ConditionReasonOnboarding = "onboarding"
 	ConditionReasonTesting    = "testing"
@@ -92,12 +93,12 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
-		return r.abortOnboarding(ctx, hv, computeHost)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost)
 	}
 
 	// check if hv is terminating
 	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
-		return r.abortOnboarding(ctx, hv, computeHost)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost)
 	}
 
 	// We bail here out, because the openstack api is not the best to poll
@@ -146,11 +147,11 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 }
 
-func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) (ctrl.Result, error) {
+func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) error {
 	status := meta.FindStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
 	// Never onboarded
 	if status == nil {
-		return ctrl.Result{}, nil
+		return nil
 	}
 
 	changed := meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
@@ -158,20 +159,32 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 		Status:  metav1.ConditionFalse,
 		Reason:  ConditionReasonOnboarding,
 		Message: "Onboarding aborted",
-	}) || meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeOnboarding,
-		Status:  metav1.ConditionTrue,
-		Reason:  ConditionReasonAborted,
-		Message: "Aborted due to LivecycleEnabled being false",
 	})
+
+	if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeOnboarding,
+		Status:  metav1.ConditionFalse,
+		Reason:  ConditionReasonAborted,
+		Message: "Aborted due to LifecycleEnabled being false",
+	}) {
+		changed = true
+	}
+
 	if !changed {
 		// Already aborted
-		return ctrl.Result{}, nil
+		return nil
 	}
 	if err := r.deleteTestServers(ctx, computeHost); err != nil {
-		return ctrl.Result{}, err
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeOnboarding,
+			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
+			Reason:  ConditionReasonAborted,
+			Message: err.Error(),
+		})
+
+		return errors.Join(err, r.Status().Update(ctx, hv))
 	}
-	return ctrl.Result{}, r.Status().Update(ctx, hv)
+	return r.Status().Update(ctx, hv)
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, host string) error {
@@ -293,7 +306,16 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 
 	err := r.deleteTestServers(ctx, host)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to delete test servers due to %w", err)
+		if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    ConditionTypeOnboarding,
+			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
+			Reason:  ConditionReasonAborted,
+			Message: err.Error(),
+		}) {
+			return ctrl.Result{}, errors.Join(err, r.Status().Update(ctx, hv))
+		}
+
+		return ctrl.Result{}, err
 	}
 
 	aggs, err := aggregatesByName(ctx, r.computeClient)
@@ -433,7 +455,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 			continue
 		}
 		if server.Name != serverName || foundServer != nil {
-			log.Info("deleting server", "name", server.Name)
+			log.Info("deleting outdated server", "name", server.Name)
 			err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
 			if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Error(err, "failed deleting instance due to", "instance", server.ID)
