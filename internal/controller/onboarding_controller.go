@@ -199,8 +199,14 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		}
 	}
 
-	if result := services.Update(ctx, r.computeClient, hv.Status.ServiceID,
-		services.UpdateOpts{Status: services.ServiceEnabled}); result.Err != nil {
+	// The service may be forced down previously due to an HA event,
+	// so we need to ensure it not only enabled, but also not forced to be down.
+	falseVal := false
+	opts := openstack.UpdateServiceOpts{
+		Status:     services.ServiceEnabled,
+		ForcedDown: &falseVal,
+	}
+	if result := openstack.UpdateService(ctx, r.computeClient, hv.Status.ServiceID, opts); result.Err != nil {
 		return result.Err
 	}
 
