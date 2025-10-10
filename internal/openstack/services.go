@@ -25,8 +25,6 @@ limitations under the License.
 package openstack
 
 import (
-	"context"
-
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 )
@@ -46,22 +44,4 @@ type UpdateServiceOpts struct {
 // ToServiceUpdateMap formats an UpdateServiceOpts structure into a request body.
 func (opts UpdateServiceOpts) ToServiceUpdateMap() (map[string]any, error) {
 	return gophercloud.BuildRequestBody(opts, "")
-}
-
-func updateServiceURL(c *gophercloud.ServiceClient, id string) string {
-	return c.ServiceURL("os-services", id)
-}
-
-// UpdateService requests that various attributes of the indicated service be changed.
-func UpdateService(ctx context.Context, client *gophercloud.ServiceClient, id string, opts UpdateServiceOpts) (r services.UpdateResult) {
-	b, err := opts.ToServiceUpdateMap()
-	if err != nil {
-		r.Err = err
-		return
-	}
-	resp, err := client.Put(ctx, updateServiceURL(client, id), b, &r.Body, &gophercloud.RequestOpts{
-		OkCodes: []int{200},
-	})
-	_, r.Header, r.Err = gophercloud.ParseResponse(resp, err)
-	return
 }

@@ -95,13 +95,14 @@ var _ = Describe("Eviction Controller", func() {
 		}
 		reconcileRequest     = reconcile.Request{NamespacedName: typeNamespacedName}
 		controllerReconciler *EvictionReconciler
+		fakeServer           testhelper.FakeServer
 	)
 
 	ctx := context.Background()
 
 	BeforeEach(func() {
 		By("Setting up the OpenStack http mock server")
-		testhelper.SetupHTTP()
+		fakeServer = testhelper.SetupHTTP()
 	})
 
 	AfterEach(func() {
@@ -121,7 +122,7 @@ var _ = Describe("Eviction Controller", func() {
 		}
 
 		By("Tearing down the OpenStack http mock server")
-		testhelper.TeardownHTTP()
+		fakeServer.Teardown()
 		controllerReconciler = nil
 		hv := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
@@ -211,14 +212,14 @@ var _ = Describe("Eviction Controller", func() {
 				controllerReconciler = &EvictionReconciler{
 					Client:        k8sClient,
 					Scheme:        k8sClient.Scheme(),
-					computeClient: client.ServiceClient(),
+					computeClient: client.ServiceClient(fakeServer),
 					rand:          rand.New(rand.NewSource(42)),
 				}
 			})
 
 			When("hypervisor is not found in openstack", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
 						Expect(fmt.Fprintf(w, `{"hypervisors": []}`)).ToNot(BeNil())
@@ -249,12 +250,12 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("enabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
 						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)).ToNot(BeNil())
 					})
-					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
 						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
@@ -346,12 +347,12 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("disabled hypervisor has no servers", func() {
 				BeforeEach(func() {
-					testhelper.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
 						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
 					})
-					testhelper.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
 						w.WriteHeader(http.StatusOK)
 						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
 					})

@@ -20,7 +20,6 @@ package controller
 import (
 	"context"
 
-	"github.com/gophercloud/gophercloud/v2/testhelper"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +31,9 @@ import (
 )
 
 var _ = Describe("Onboarding Controller", func() {
-	var onboardingReconciler *OnboardingController
+	var (
+		onboardingReconciler *OnboardingController
+	)
 
 	Context("When reconciling a hypervisor", func() {
 		const hypervisorName = "some-test"
@@ -66,15 +67,9 @@ var _ = Describe("Onboarding Controller", func() {
 				Spec: kvmv1.HypervisorSpec{},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-
-			By("Setting up the OpenStack http mock server")
-			testhelper.SetupHTTP()
 		})
 
 		AfterEach(func() {
-			By("Clean up the OpenStack http mock server")
-			testhelper.TeardownHTTP()
-
 			hv := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: hypervisorName}}
 			By("Cleanup the specific hypervisor CRO")
 			Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, hv))).To(Succeed())

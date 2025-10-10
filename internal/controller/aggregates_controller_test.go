@@ -35,7 +35,10 @@ import (
 )
 
 var _ = Describe("AggregatesController", func() {
-	var tc *AggregatesController
+	var (
+		tc         *AggregatesController
+		fakeServer testhelper.FakeServer
+	)
 	const EOF = "EOF"
 	const AggregateListBodyEmpty = `
 {
@@ -101,19 +104,19 @@ var _ = Describe("AggregatesController", func() {
 
 	BeforeEach(func(ctx context.Context) {
 		By("Setting up the OpenStack http mock server")
-		testhelper.SetupHTTP()
+		fakeServer = testhelper.SetupHTTP()
 
 		By("Creating the AggregatesController")
 		tc = &AggregatesController{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
-			computeClient: client.ServiceClient(),
+			computeClient: client.ServiceClient(fakeServer),
 		}
 	})
 
 	AfterEach(func() {
 		By("Tearing down the OpenStack http mock server")
-		testhelper.TeardownHTTP()
+		fakeServer.Teardown()
 
 		By("Deleting the Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{}
@@ -139,14 +142,14 @@ var _ = Describe("AggregatesController", func() {
 			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 
 			// Mock resourceproviders.GetAggregates
-			testhelper.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
 				_, err := fmt.Fprint(w, AggregateListBodyEmpty)
 				Expect(err).NotTo(HaveOccurred())
 			})
-			testhelper.Mux.HandleFunc("POST /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("POST /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
@@ -155,7 +158,7 @@ var _ = Describe("AggregatesController", func() {
 			})
 
 			// Mock resourceproviders.UpdateAggregates
-			testhelper.Mux.HandleFunc("POST /os-aggregates/42/action", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("POST /os-aggregates/42/action", func(w http.ResponseWriter, r *http.Request) {
 				// parse request
 				Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
 				expectedBody := `{"add_host":{"host":"hv-test"}}`
@@ -204,7 +207,7 @@ var _ = Describe("AggregatesController", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
 			// Mock resourceproviders.GetAggregates
-			testhelper.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
@@ -227,8 +230,8 @@ var _ = Describe("AggregatesController", func() {
 				_, err = fmt.Fprint(w, AggregateRemoveHostBody)
 				Expect(err).NotTo(HaveOccurred())
 			}
-			testhelper.Mux.HandleFunc("POST /os-aggregates/100001/action", expectRemoveHostFromAggregate)
-			testhelper.Mux.HandleFunc("POST /os-aggregates/99/action", expectRemoveHostFromAggregate)
+			fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", expectRemoveHostFromAggregate)
+			fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", expectRemoveHostFromAggregate)
 		})
 
 		It("should update Aggregates and set status condition when Aggregates differ", func() {

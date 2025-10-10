@@ -45,6 +45,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 	var (
 		nodeReconciler *NodeEvictionLabelReconciler
 		req            = ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
+		fakeServer     testhelper.FakeServer
 	)
 
 	Context("When reconciling a node", func() {
@@ -61,8 +62,8 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		}
 
 		BeforeEach(func() {
-			testhelper.SetupHTTP()
-			Expect(os.Setenv("KVM_HA_SERVICE_URL", testhelper.Endpoint())).To(Succeed())
+			fakeServer = testhelper.SetupHTTP()
+			Expect(os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint())).To(Succeed())
 			nodeReconciler = &NodeEvictionLabelReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -120,7 +121,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 			By("Cleanup the specific node")
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-			testhelper.TeardownHTTP()
+			fakeServer.Teardown()
 		})
 
 		It("should successfully reconcile the resource", func() {
