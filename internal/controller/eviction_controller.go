@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -106,7 +105,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
+func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
 	if !meta.IsStatusConditionTrue(eviction.Status.Conditions, kvmv1.ConditionTypePreflight) {
 		// Ensure the hypervisor is disabled and we have the preflight condition
 		return r.handlePreflight(ctx, eviction)
@@ -129,7 +128,7 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
+func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
 	hypervisorName := eviction.Spec.Hypervisor
 
 	// Does the hypervisor even exist? Is it enabled/disabled?
@@ -216,7 +215,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
-func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (reconcile.Result, error) {
+func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
 	instances := &eviction.Status.OutstandingInstances
 	uuid := (*instances)[len(*instances)-1]
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
@@ -236,7 +235,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			})
 			return ctrl.Result{}, r.Status().Update(ctx, eviction)
 		}
-		return reconcile.Result{}, err
+		return ctrl.Result{}, err
 	}
 
 	log = log.WithValues("server_status", vm.Status)
@@ -245,7 +244,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	switch vm.Status {
 	case "MIGRATING", "RESIZE":
 		// wait for the migration to finish
-		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	case "ERROR":
 		// Needs manual intervention (or another operator fixes it)
 		// put it at the end of the list (beginning of array)
@@ -262,7 +261,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			return ctrl.Result{}, err
 		}
 
-		return reconcile.Result{}, fmt.Errorf("error migrating instance %v", uuid)
+		return ctrl.Result{}, fmt.Errorf("error migrating instance %v", uuid)
 	}
 
 	currentHypervisor, _, _ := strings.Cut(vm.HypervisorHostname, ".")
@@ -282,16 +281,16 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 					log.Info("Instance is gone")
 					// Fall-back to beginning, which will clean it out
-					return reconcile.Result{Requeue: true}, nil
+					return ctrl.Result{Requeue: true}, nil
 				}
 				// Retry confirm in next reconciliation
-				return reconcile.Result{}, err
+				return ctrl.Result{}, err
 			}
 		}
 
 		// All done
 		*instances = (*instances)[:len(*instances)-1]
-		return reconcile.Result{}, r.Status().Update(ctx, eviction)
+		return ctrl.Result{}, r.Status().Update(ctx, eviction)
 	}
 
 	if vm.TaskState == "deleting" {
@@ -314,7 +313,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
 				// Fall-back to beginning, which will clean it out
-				return reconcile.Result{RequeueAfter: 0}, nil
+				return ctrl.Result{RequeueAfter: 0}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
@@ -336,7 +335,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
-				return reconcile.Result{RequeueAfter: 0}, nil
+				return ctrl.Result{RequeueAfter: 0}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid

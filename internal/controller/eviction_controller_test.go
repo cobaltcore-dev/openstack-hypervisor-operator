@@ -31,8 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlRuntimeClient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -93,7 +93,7 @@ var _ = Describe("Eviction Controller", func() {
 			Name:      resourceName,
 			Namespace: namespaceName,
 		}
-		reconcileRequest     = reconcile.Request{NamespacedName: typeNamespacedName}
+		reconcileRequest     = ctrl.Request{NamespacedName: typeNamespacedName}
 		controllerReconciler *EvictionReconciler
 		fakeServer           testhelper.FakeServer
 	)
@@ -326,7 +326,7 @@ var _ = Describe("Eviction Controller", func() {
 						By(fmt.Sprintf("Reconciliation step %d", i+1))
 						// Reconcile the resource
 						result, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
-						Expect(result).To(Equal(reconcile.Result{}))
+						Expect(result).To(Equal(ctrl.Result{}))
 						Expect(err).NotTo(HaveOccurred())
 
 						resource := &kvmv1.Eviction{}
