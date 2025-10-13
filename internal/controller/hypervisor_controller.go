@@ -47,13 +47,15 @@ const (
 )
 
 var transferLabels = []string{
-	"kubernetes.metal.cloud.sap/name",
-	"kubernetes.metal.cloud.sap/cluster",
-	"kubernetes.metal.cloud.sap/bb",
-	"worker.garden.sapcloud.io/group",
-	corev1.LabelTopologyZone,
-	corev1.LabelTopologyRegion,
 	corev1.LabelHostname,
+	"kubernetes.metal.cloud.sap/bb",
+	"kubernetes.metal.cloud.sap/cluster",
+	"kubernetes.metal.cloud.sap/name",
+	"kubernetes.metal.cloud.sap/type",
+	"worker.garden.sapcloud.io/group",
+	"worker.gardener.cloud/pool",
+	corev1.LabelTopologyRegion,
+	corev1.LabelTopologyZone,
 }
 
 type HypervisorController struct {
