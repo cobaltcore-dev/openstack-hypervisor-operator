@@ -16,6 +16,8 @@ limitations under the License.
 */
 
 // Package v1 contains API Schema definitions for the kvm v1 API group
+// +kubebuilder:ac:generate=true
+// +kubebuilder:ac:output:package=../../applyconfigurations
 // +kubebuilder:object:generate=true
 // +groupName=kvm.cloud.sap
 package v1
@@ -34,4 +36,7 @@ var (
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
+
+	// Workaround: https://github.com/kubernetes-sigs/controller-tools/issues/1193
+	SchemeGroupVersion = GroupVersion
 )
