@@ -20,6 +20,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -127,4 +128,27 @@ func Difference[S ~[]E, E comparable](s1, s2 S) S {
 	}
 
 	return diff
+}
+
+var RetryError retryError
+
+type retryError struct {
+	Err error
+}
+
+func MakeRetryError(errs ...error) error {
+	err := errors.Join(errs...)
+	if err == nil {
+		return err
+	}
+
+	return retryError{Err: err}
+}
+
+func (r retryError) Unwrap() error {
+	return r.Err
+}
+
+func (r retryError) Error() string {
+	return r.Err.Error()
 }
