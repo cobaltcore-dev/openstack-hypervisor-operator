@@ -185,7 +185,7 @@ func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyper
 		hypervisor.Spec.Aggregates = slices.Collect(func(yield func(string) bool) {
 			for _, agg := range strings.Split(aggregates, ",") {
 				trimmed := strings.TrimSpace(agg)
-				if trimmed != "" && yield(trimmed) {
+				if trimmed != "" && !yield(trimmed) {
 					return
 				}
 			}
@@ -198,7 +198,7 @@ func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyper
 		hypervisor.Spec.CustomTraits = slices.Collect(func(yield func(string) bool) {
 			for _, trait := range strings.Split(customTraits, ",") {
 				trimmed := strings.TrimSpace(trait)
-				if trimmed != "" && yield(trimmed) {
+				if trimmed != "" && !yield(trimmed) {
 					return
 				}
 			}
