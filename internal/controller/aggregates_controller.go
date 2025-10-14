@@ -40,6 +40,7 @@ const (
 	ConditionTypeAggregatesUpdated = "AggregatesUpdated"
 	ConditionAggregatesSuccess     = "Success"
 	ConditionAggregatesFailed      = "Failed"
+	AggregatesControllerName       = "aggregates"
 )
 
 type AggregatesController struct {
@@ -138,7 +139,7 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	ac.computeClient.Microversion = "2.40" // gophercloud only supports numeric ids
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("aggregates").
+		Named(AggregatesControllerName).
 		For(&kvmv1.Hypervisor{}).
 		Complete(ac)
 }

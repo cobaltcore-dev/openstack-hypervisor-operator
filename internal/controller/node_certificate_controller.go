@@ -36,6 +36,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
+const (
+	NodeCertificateControllerName = "certificate"
+)
+
 type NodeCertificateController struct {
 	k8sclient.Client
 	Scheme     *runtime.Scheme
@@ -191,7 +195,7 @@ func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("certificate").
+		Named(NodeCertificateControllerName).
 		For(&corev1.Node{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(r)

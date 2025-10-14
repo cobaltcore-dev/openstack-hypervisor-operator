@@ -40,9 +40,10 @@ import (
 )
 
 const (
-	labelLifecycleMode     = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
-	annotationAggregates   = "nova.openstack.cloud.sap/aggregates"
-	annotationCustomTraits = "nova.openstack.cloud.sap/custom-traits"
+	labelLifecycleMode       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	annotationAggregates     = "nova.openstack.cloud.sap/aggregates"
+	annotationCustomTraits   = "nova.openstack.cloud.sap/custom-traits"
+	HypervisorControllerName = "hypervisor"
 )
 
 var transferLabels = []string{
@@ -172,6 +173,7 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(HypervisorControllerName).
 		For(&corev1.Node{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(hv)
