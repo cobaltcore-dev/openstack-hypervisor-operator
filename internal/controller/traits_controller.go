@@ -73,7 +73,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	customTraitsApplied := slices.Collect(func(yield func(string) bool) {
 		for _, trait := range hv.Status.Traits {
-			if strings.HasPrefix(trait, customPrefix) && yield(trait) {
+			if strings.HasPrefix(trait, customPrefix) && !yield(trait) {
 				return
 			}
 		}
