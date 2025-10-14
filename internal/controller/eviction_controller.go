@@ -94,6 +94,9 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Info("running")
 			return ctrl.Result{}, nil
 		}
+		// We just checked if the condition is there, so this should never
+		// be reached, but let's cover our bass
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 	} else if statusCondition.Status == metav1.ConditionTrue {
 		// We are running, so we need to evict the next instance
 		return r.handleRunning(ctx, eviction)
@@ -408,19 +411,23 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 				return nil
 			}
 		} else {
+			errorMessage := fmt.Sprintf("failed to get hypervisor due to %s", err)
 			// update the condition to reflect the error, and retry the reconciliation
 			changed := meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeHypervisorReEnabled,
 				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("failed to get hypervisor due to %s", err),
+				Message: errorMessage,
 				Reason:  kvmv1.ConditionReasonFailed,
 			})
 
 			if changed {
-				return MakeRetryError(err, r.Status().Update(ctx, eviction))
-			} else {
-				return MakeRetryError(err)
+				if err2 := r.Status().Update(ctx, eviction); err2 != nil {
+					log.Error(err, "failed to store error message in condition", "message", errorMessage)
+					return err2
+				}
 			}
+
+			return retryError{}
 		}
 	}
 
@@ -444,17 +451,19 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 	_, err = services.Update(ctx, r.computeClient, hypervisor.Service.ID, enableService).Extract()
 
 	if err != nil {
+		errorMessage := fmt.Sprintf("failed to enable hypervisor due to %s", err)
 		changed := meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorReEnabled,
 			Status:  metav1.ConditionFalse,
-			Message: fmt.Sprintf("failed to enable hypervisor due to %s", err),
+			Message: errorMessage,
 			Reason:  kvmv1.ConditionReasonFailed,
 		})
 		if changed {
-			return MakeRetryError(err, r.Status().Update(ctx, eviction))
-		} else {
-			return MakeRetryError(err)
+			if err2 := r.Status().Update(ctx, eviction); err2 != nil {
+				log.Error(err, "failed to store error message in condition", "message", errorMessage)
+			}
 		}
+		return retryError{}
 	} else {
 		changed := meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorReEnabled,
