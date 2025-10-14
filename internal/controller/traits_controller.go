@@ -43,6 +43,7 @@ const (
 	ConditionTypeTraitsUpdated = "TraitsUpdated"
 	ConditionTraitsSuccess     = "Success"
 	ConditionTraitsFailed      = "Failed"
+	TraitsControllerName       = "traits"
 )
 
 type TraitsController struct {
@@ -171,7 +172,7 @@ func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	tc.serviceClient.Microversion = "1.39" // yoga, or later
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("traits").
+		Named(TraitsControllerName).
 		For(&kvmv1.Hypervisor{}).
 		Complete(tc)
 }

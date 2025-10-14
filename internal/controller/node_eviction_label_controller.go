@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	disabledSuffix          = "-disabled"
-	labelMl2MechanismDriver = "neutron.openstack.cloud.sap/ml2-mechanism-driver"
+	disabledSuffix                  = "-disabled"
+	labelMl2MechanismDriver         = "neutron.openstack.cloud.sap/ml2-mechanism-driver"
+	NodeEvictionLabelControllerName = "nodeEvictionLabel"
 )
 
 type NodeEvictionLabelReconciler struct {
@@ -188,7 +189,7 @@ func (r *NodeEvictionLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	_ = logger.FromContext(ctx)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("nodeEvictionLabel").
+		Named(NodeEvictionLabelControllerName).
 		For(&corev1.Node{}).     // trigger the r.Reconcile whenever a node is created/updated/deleted.
 		Owns(&kvmv1.Eviction{}). // trigger the r.Reconcile whenever an Own-ed eviction is created/updated/deleted
 		Complete(r)

@@ -65,6 +65,7 @@ const (
 	testImageName             = "cirros-d240801-kvm"
 	testPrefixName            = "ohooc-"
 	testVolumeType            = "kvm-pilot"
+	OnboardingControllerName  = "onboarding"
 )
 
 type OnboardingController struct {
@@ -575,7 +576,7 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("onboarding").
+		Named(OnboardingControllerName).
 		For(&kvmv1.Hypervisor{}).
 		Complete(r)
 }

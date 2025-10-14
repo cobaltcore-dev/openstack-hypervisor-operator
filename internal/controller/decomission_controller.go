@@ -44,7 +44,8 @@ import (
 )
 
 const (
-	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
+	decommissionFinalizerName  = "cobaltcore.cloud.sap/decommission-hypervisor"
+	DecommissionControllerName = "nodeDecommission"
 )
 
 type NodeDecommissionReconciler struct {
@@ -222,7 +223,7 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("nodeDecommission").
+		Named(DecommissionControllerName).
 		For(&corev1.Node{}).
 		WithEventFilter(predicateFilter).
 		Complete(r)

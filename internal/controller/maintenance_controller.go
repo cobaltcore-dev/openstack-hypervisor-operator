@@ -55,6 +55,7 @@ const (
 	labelCriticalComponent          = "node.gardener.cloud/critical-component"
 	labelCriticalComponentsNotReady = "node.gardener.cloud/critical-components-not-ready"
 	valueReasonTerminating          = "terminating"
+	MaintenanceControllerName       = "maintenance"
 )
 
 // The counter-side in gardener is here:
@@ -260,7 +261,7 @@ func (r *MaintenanceController) SetupWithManager(mgr ctrl.Manager, namespace str
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("maintenance").
+		Named(MaintenanceControllerName).
 		For(&corev1.Node{}).
 		Owns(&appsv1.Deployment{}). // trigger the r.Reconcile whenever an Own-ed deployment is created/updated/deleted
 		Owns(&policyv1.PodDisruptionBudget{}).

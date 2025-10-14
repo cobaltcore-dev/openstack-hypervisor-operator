@@ -52,7 +52,8 @@ type EvictionReconciler struct {
 }
 
 const (
-	evictionFinalizerName = "eviction-controller.cloud.sap/finalizer"
+	evictionFinalizerName  = "eviction-controller.cloud.sap/finalizer"
+	EvictionControllerName = "eviction"
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -565,6 +566,7 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(EvictionControllerName).
 		For(&kvmv1.Eviction{}).
 		Complete(r)
 }
