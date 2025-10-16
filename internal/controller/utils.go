@@ -128,3 +128,11 @@ func Difference[S ~[]E, E comparable](s1, s2 S) S {
 
 	return diff
 }
+
+var RetryError retryError
+
+type retryError struct{}
+
+func (r retryError) Error() string {
+	return "RetryError"
+}
