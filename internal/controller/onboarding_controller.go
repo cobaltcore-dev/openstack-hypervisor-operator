@@ -315,7 +315,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	for _, server := range serverList {
 		log.Info("deleting server", "name", server.Name)
 		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
-		if err != nil && gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 			return ctrl.Result{}, err
 		}
 	}
