@@ -26,35 +26,33 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	apps1ac "k8s.io/client-go/applyconfigurations/apps/v1"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	policyv1ac "k8s.io/client-go/applyconfigurations/policy/v1"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/gophercloud/gophercloud/v2"
-
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 type GardenerNodeLifecycleController struct {
 	k8sclient.Client
-	Scheme        *runtime.Scheme
-	serviceClient *gophercloud.ServiceClient
-	namespace     string
+	Scheme    *runtime.Scheme
+	namespace string
 }
 
 const (
-	labelDeployment                 = "cobaltcore-maintenance-controller"
-	maintenancePodsNamespace        = "kube-system"
-	labelCriticalComponent          = "node.gardener.cloud/critical-component"
-	labelCriticalComponentsNotReady = "node.gardener.cloud/critical-components-not-ready"
-	valueReasonTerminating          = "terminating"
-	MaintenanceControllerName       = "maintenance"
+	labelDeployment           = "cobaltcore-maintenance-controller"
+	maintenancePodsNamespace  = "kube-system"
+	labelCriticalComponent    = "node.gardener.cloud/critical-component"
+	valueReasonTerminating    = "terminating"
+	MaintenanceControllerName = "maintenance"
 )
 
 // The counter-side in gardener is here:
@@ -116,26 +114,20 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 
 func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx context.Context, node *corev1.Node, minAvailable int32) error {
 	name := nameForNode(node)
-	podDisruptionBudget := &policyv1.PodDisruptionBudget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: maintenancePodsNamespace,
-		},
+	nodeLabels := labelsForNode(node)
+	gvk, err := apiutil.GVKForObject(node, r.Scheme)
+	if err != nil {
+		return err
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, podDisruptionBudget, func() error {
-		minAvail := intstr.FromInt32(minAvailable)
-		nodeLabels := labelsForNode(node)
-		podDisruptionBudget.Labels = nodeLabels
-		podDisruptionBudget.Spec = policyv1.PodDisruptionBudgetSpec{
-			MinAvailable: &minAvail,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: nodeLabels,
-			},
-		}
-		return controllerutil.SetControllerReference(node, podDisruptionBudget, r.Scheme)
-	})
-	return err
+	podDisruptionBudget := policyv1ac.PodDisruptionBudget(name, maintenancePodsNamespace).
+		WithLabels(nodeLabels).
+		WithOwnerReferences(OwnerReference(node, &gvk)).
+		WithSpec(policyv1ac.PodDisruptionBudgetSpec().
+			WithMinAvailable(intstr.FromInt32(minAvailable)).
+			WithSelector(v1.LabelSelector().WithMatchLabels(nodeLabels)))
+
+	return r.Apply(ctx, podDisruptionBudget, k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
 func isTerminating(node *corev1.Node) bool {
@@ -166,86 +158,63 @@ func labelsForNode(node *corev1.Node) map[string]string {
 
 func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context.Context, node *corev1.Node, scale int32, ready bool) error {
 	name := nameForNode(node)
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: maintenancePodsNamespace,
-		},
+	labels := labelsForNode(node)
+
+	podLabels := maps.Clone(labels)
+	podLabels[labelCriticalComponent] = "true"
+
+	var command string
+	if ready {
+		command = "/bin/true"
+	} else {
+		command = "/bin/false"
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
-		labels := labelsForNode(node)
-		deployment.Labels = labels
+	gvk, err := apiutil.GVKForObject(node, r.Scheme)
+	if err != nil {
+		return err
+	}
 
-		podLabels := maps.Clone(labels)
-		podLabels[labelCriticalComponent] = "true"
-
-		var command []string
-		if ready {
-			command = []string{"/bin/true"}
-		} else {
-			command = []string{"/bin/false"}
-		}
-
-		var one int64 = 1
-		zeroStr := intstr.FromInt(0)
-		oneStr := intstr.FromInt(1)
-
-		deployment.Spec = appsv1.DeploymentSpec{
-			Replicas: &scale,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
-			},
-			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &zeroStr,
-					MaxSurge:       &oneStr,
-				},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: podLabels,
-				},
-				Spec: corev1.PodSpec{
-					HostNetwork: true, // to make it run as early as possible
-					NodeSelector: map[string]string{
+	deployment := apps1ac.Deployment(name, maintenancePodsNamespace).
+		WithOwnerReferences(OwnerReference(node, &gvk)).
+		WithLabels(labels).
+		WithSpec(apps1ac.DeploymentSpec().
+			WithReplicas(scale).
+			WithSelector(v1.LabelSelector().
+				WithMatchLabels(labels)).
+			WithStrategy(apps1ac.DeploymentStrategy().
+				WithRollingUpdate(apps1ac.RollingUpdateDeployment().
+					WithMaxUnavailable(intstr.FromInt(0)).
+					WithMaxSurge(intstr.FromInt(1)))).
+			WithTemplate(corev1ac.PodTemplateSpec().
+				WithLabels(podLabels).
+				WithSpec(corev1ac.PodSpec().
+					WithHostNetwork(true).
+					WithNodeSelector(map[string]string{
 						corev1.LabelHostname: node.Labels[corev1.LabelHostname],
-					},
-					TerminationGracePeriodSeconds: &one, // busybox sleep doesn't handle TERM so well as pid 1
-					Tolerations: []corev1.Toleration{
-						{
-							Effect:   corev1.TaintEffectNoExecute,
-							Operator: corev1.TolerationOpExists,
-						},
-						{
-							Effect:   corev1.TaintEffectNoSchedule,
-							Operator: corev1.TolerationOpExists,
-						},
-					},
-					Containers: []corev1.Container{
-						{
-							Name:    "sleep",
-							Image:   "keppel.global.cloud.sap/ccloud-dockerhub-mirror/library/busybox:latest",
-							Command: []string{"sleep", "inf"},
-							// We need apparently retry to get the timing of the container being up correct
-							// The startup probe makes sure that we only need to poll this for the (hopefully)
-							// non-standard case of the host not being integrated yet
-							StartupProbe: &corev1.Probe{
-								ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: command}},
-								InitialDelaySeconds: 0,
-								PeriodSeconds:       1,
-								SuccessThreshold:    1,
-								FailureThreshold:    1,
-							},
-						},
-					},
-				},
-			},
-		}
-		return controllerutil.SetControllerReference(node, deployment, r.Scheme)
-	})
-	return err
+					}).
+					WithTerminationGracePeriodSeconds(1).
+					WithTolerations(
+						corev1ac.Toleration().
+							WithEffect(corev1.TaintEffectNoExecute).
+							WithOperator(corev1.TolerationOpExists),
+						corev1ac.Toleration().
+							WithEffect(corev1.TaintEffectNoSchedule).
+							WithOperator(corev1.TolerationOpExists),
+					).
+					WithContainers(
+						corev1ac.Container().
+							WithName("sleep").
+							WithImage("keppel.global.cloud.sap/ccloud-dockerhub-mirror/library/busybox:latest").
+							WithCommand("sleep", "inf").
+							WithStartupProbe(corev1ac.Probe().
+								WithExec(corev1ac.ExecAction().WithCommand(command)).
+								WithInitialDelaySeconds(0).
+								WithPeriodSeconds(0).
+								WithFailureThreshold(1).
+								WithSuccessThreshold(1))))))
+
+	return r.Apply(ctx, deployment, k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -253,11 +222,6 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
 	r.namespace = namespace
-
-	var err error
-	if r.serviceClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
-		return err
-	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(MaintenanceControllerName).

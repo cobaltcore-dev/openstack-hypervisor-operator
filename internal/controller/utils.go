@@ -30,6 +30,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -135,6 +137,15 @@ func Difference[S ~[]E, E comparable](s1, s2 S) S {
 	}
 
 	return diff
+}
+
+// returns a OwnerReference for the given object and groupversionkind info as returned by apiutil.GVKForObject
+func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.OwnerReferenceApplyConfiguration {
+	return v1ac.OwnerReference().
+		WithAPIVersion(gvk.Group + "/" + gvk.Version).
+		WithKind(gvk.Kind).
+		WithName(obj.GetName()).
+		WithUID(obj.GetUID())
 }
 
 var ErrRetry = errors.New("ErrRetry")
