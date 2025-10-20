@@ -32,7 +32,7 @@ import (
 
 var _ = Describe("Node Certificate Controller", func() {
 	var nodeCertificateController *NodeCertificateController
-	var k8sClient client.Client
+	var fakeClient client.Client
 	const (
 		nodeName   = "random-node"
 		issuerName = "test-issuer"
@@ -50,17 +50,17 @@ var _ = Describe("Node Certificate Controller", func() {
 		// We need to use the fake client because the envtest environment does include
 		// cert-manager CRDs out of the box.
 		By("Creating the fake client")
-		k8sClient = fake.NewClientBuilder().WithScheme(scheme).Build()
+		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
 		nodeCertificateController = &NodeCertificateController{
-			Client:     k8sClient,
-			Scheme:     k8sClient.Scheme(),
+			Client:     fakeClient,
+			Scheme:     fakeClient.Scheme(),
 			issuerName: issuerName,
 			namespace:  namespace,
 		}
 
 		By("creating the namespace for the reconciler")
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+		Expect(client.IgnoreAlreadyExists(fakeClient.Create(ctx, ns))).To(Succeed())
 
 		By("creating the core resource for the Kind Node")
 		resource := &corev1.Node{
@@ -69,13 +69,13 @@ var _ = Describe("Node Certificate Controller", func() {
 				Labels: map[string]string{labelHypervisor: "test"}, //nolint:goconst
 			},
 		}
-		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		Expect(fakeClient.Create(ctx, resource)).To(Succeed())
 	})
 
 	AfterEach(func() {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 		By("Cleanup the specific node")
-		Expect(client.IgnoreAlreadyExists(k8sClient.Delete(ctx, node))).To(Succeed())
+		Expect(client.IgnoreAlreadyExists(fakeClient.Delete(ctx, node))).To(Succeed())
 
 		By("Cleaning up the test environment")
 	})
@@ -94,7 +94,7 @@ var _ = Describe("Node Certificate Controller", func() {
 			By("Checking if the certificate was created")
 			_, certName := getSecretAndCertName(nodeName)
 			certificate := &cmapi.Certificate{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, certificate)
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, certificate)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(certificate.Spec.IssuerRef.Name).To(Equal(issuerName))
 			Expect(certificate.Spec.DNSNames).To(ContainElement(nodeName))
