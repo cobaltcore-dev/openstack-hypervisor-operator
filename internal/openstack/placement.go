@@ -19,6 +19,7 @@ package openstack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -146,7 +147,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 		}
 
 		if len(consumerAllocations.Allocations) > 0 {
-			return fmt.Errorf("cannot clean up provider, cannot handle non-empty consumer allocations")
+			return errors.New("cannot clean up provider, cannot handle non-empty consumer allocations")
 		}
 
 		// The consumer actually doesn't have *any* allocations, so it is just
