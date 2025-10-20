@@ -48,7 +48,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		resource = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   "other-node",
-				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone"}, //nolint:goconst
+				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone"},
 			},
 		}
 	})

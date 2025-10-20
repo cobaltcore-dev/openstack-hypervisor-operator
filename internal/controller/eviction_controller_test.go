@@ -97,7 +97,7 @@ var _ = Describe("Eviction Controller", func() {
 		fakeServer           testhelper.FakeServer
 	)
 
-	ctx := context.Background() // nolint:govet
+	ctx := context.Background() //nolint:govet
 
 	BeforeEach(func() {
 		By("Setting up the OpenStack http mock server")

@@ -38,7 +38,7 @@ var _ = Describe("Onboarding Controller", func() {
 	Context("When reconciling a hypervisor", func() {
 		const hypervisorName = "some-test"
 
-		ctx := context.Background() // nolint:govet
+		ctx := context.Background() //nolint:govet
 
 		reconcileLoop := func(steps int) (res ctrl.Result, err error) {
 			req := ctrl.Request{

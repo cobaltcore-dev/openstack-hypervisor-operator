@@ -305,7 +305,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		return ctrl.Result{}, r.Status().Update(ctx, eviction)
 	}
 
-	if vm.TaskState == "deleting" { // nolint:gocritic
+	if vm.TaskState == "deleting" { //nolint:gocritic
 		// We just have to wait for it to be gone. Try the next one.
 		copy((*instances)[1:], (*instances)[:len(*instances)-1])
 		(*instances)[0] = uuid
