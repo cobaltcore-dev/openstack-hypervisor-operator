@@ -126,7 +126,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 }
 
-func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, eviction *kvmv1.Eviction, node *corev1.Node, hostname string, maintenanceValue string) (string, error) {
+func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, eviction *kvmv1.Eviction, node *corev1.Node, hostname, maintenanceValue string) (string, error) {
 	log := logger.FromContext(ctx)
 	if err := r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
 		if !k8serrors.IsNotFound(err) {
@@ -190,7 +190,7 @@ func (r *NodeEvictionLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(NodeEvictionLabelControllerName).
-		For(&corev1.Node{}).     // trigger the r.Reconcile whenever a node is created/updated/deleted.
+		For(&corev1.Node{}). // trigger the r.Reconcile whenever a node is created/updated/deleted.
 		Owns(&kvmv1.Eviction{}). // trigger the r.Reconcile whenever an Own-ed eviction is created/updated/deleted
 		Complete(r)
 }
