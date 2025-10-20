@@ -47,9 +47,9 @@ type NodeCertificateController struct {
 	issuerName string
 }
 
-func getSecretAndCertName(name string) (string, string) {
-	certName := fmt.Sprintf("libvirt-%s", name)
-	secretName := fmt.Sprintf("tls-%s", certName)
+func getSecretAndCertName(name string) (secretName, certName string) {
+	certName = fmt.Sprintf("libvirt-%s", name)
+	secretName = fmt.Sprintf("tls-%s", certName)
 	return secretName, certName
 }
 
