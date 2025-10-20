@@ -479,7 +479,6 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 			return nil
 		}
 	}
-
 }
 
 // disableHypervisor disables the hypervisor service and adds a finalizer to the eviction
@@ -574,6 +573,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 // addCondition adds a condition to the Eviction status and updates the status
 func (r *EvictionReconciler) addCondition(ctx context.Context, eviction *kvmv1.Eviction,
 	status metav1.ConditionStatus, message string, reason string) bool {
+
 	if !meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeEvicting,
 		Status:  status,
