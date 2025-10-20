@@ -68,7 +68,7 @@ func updateInstanceHA(node *corev1.Node, data string, acceptedCodes []int) error
 
 	url := InstanceHaUrl(region, zone, hostname)
 	// G107: Potential HTTP request made with variable url
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data))) // nolint:gosec
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:gosec,bodyclose
 	if err != nil {
 		return fmt.Errorf("failed to send request to ha service due to %w", err)
 	}

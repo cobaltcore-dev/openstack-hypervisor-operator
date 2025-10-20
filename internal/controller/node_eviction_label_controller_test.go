@@ -49,7 +49,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 	)
 
 	Context("When reconciling a node", func() {
-		ctx := context.Background() // nolint:govet
+		ctx := context.Background() //nolint:govet
 
 		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
 			for range steps {

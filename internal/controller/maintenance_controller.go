@@ -179,7 +179,7 @@ func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, 
 		deployment.Labels = labels
 
 		podLabels := maps.Clone(labels)
-		podLabels[labelCriticalComponent] = "true" //nolint:goconst
+		podLabels[labelCriticalComponent] = "true"
 
 		var command []string
 		if ready {
