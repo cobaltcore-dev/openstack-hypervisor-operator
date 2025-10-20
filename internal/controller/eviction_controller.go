@@ -436,11 +436,10 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 
 	if hypervisor.Service.DisabledReason != r.evictionReason(eviction) {
 		changed := meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:   kvmv1.ConditionTypeHypervisorReEnabled,
-			Status: metav1.ConditionTrue,
-			Message: fmt.Sprintf("Hypervisor already re-enabled for reason: %s",
-				hypervisor.Service.DisabledReason),
-			Reason: kvmv1.ConditionReasonSucceeded,
+			Type:    kvmv1.ConditionTypeHypervisorReEnabled,
+			Status:  metav1.ConditionTrue,
+			Message: "Hypervisor already re-enabled for reason:" + hypervisor.Service.DisabledReason,
+			Reason:  kvmv1.ConditionReasonSucceeded,
 		})
 		if changed {
 			return r.Status().Update(ctx, eviction)
