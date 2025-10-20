@@ -48,8 +48,8 @@ type NodeCertificateController struct {
 }
 
 func getSecretAndCertName(name string) (secretName, certName string) {
-	certName = fmt.Sprintf("libvirt-%s", name)
-	secretName = fmt.Sprintf("tls-%s", certName)
+	certName = "libvirt-" + name
+	secretName = "tls-" + certName
 	return secretName, certName
 }
 
