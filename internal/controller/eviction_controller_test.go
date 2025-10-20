@@ -225,7 +225,7 @@ var _ = Describe("Eviction Controller", func() {
 				})
 
 				It("should fail reconciliation", func() {
-					for i := 0; i < 3; i++ {
+					for range 3 {
 						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -363,7 +363,7 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 				})
 				It("should succeed the reconciliation", func() {
-					for i := 0; i < 3; i++ {
+					for range 3 {
 						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
