@@ -451,13 +451,13 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	if err != nil {
 		return nil, err
 	}
-	flavors, err := flavors.ExtractFlavors(flavorPages)
+	extractedFlavors, err := flavors.ExtractFlavors(flavorPages)
 	if err != nil {
 		return nil, err
 	}
 
 	var flavorRef string
-	for _, flavor := range flavors {
+	for _, flavor := range extractedFlavors {
 		if flavor.Name == testFlavorName {
 			flavorRef = flavor.ID
 			break
@@ -497,13 +497,13 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		return nil, err
 	}
 
-	networks, err := networks.ExtractNetworks(networkPages)
+	extractedNetworks, err := networks.ExtractNetworks(networkPages)
 	if err != nil {
 		return nil, err
 	}
 
 	var networkRef string
-	for _, network := range networks {
+	for _, network := range extractedNetworks {
 		networkRef = network.ID
 		break
 	}
