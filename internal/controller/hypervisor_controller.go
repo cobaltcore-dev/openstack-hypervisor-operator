@@ -187,7 +187,7 @@ func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyper
 	if aggregates, found := node.Annotations[annotationAggregates]; found {
 		// split aggregates string
 		hypervisor.Spec.Aggregates = slices.Collect(func(yield func(string) bool) {
-			for _, agg := range strings.Split(aggregates, ",") {
+			for agg := range strings.SplitSeq(aggregates, ",") {
 				trimmed := strings.TrimSpace(agg)
 				if trimmed != "" && !yield(trimmed) {
 					return
@@ -200,7 +200,7 @@ func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyper
 	if customTraits, found := node.Annotations[annotationCustomTraits]; found {
 		// split custom traits string
 		hypervisor.Spec.CustomTraits = slices.Collect(func(yield func(string) bool) {
-			for _, trait := range strings.Split(customTraits, ",") {
+			for trait := range strings.SplitSeq(customTraits, ",") {
 				trimmed := strings.TrimSpace(trait)
 				if trimmed != "" && !yield(trimmed) {
 					return

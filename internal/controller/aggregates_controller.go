@@ -177,11 +177,9 @@ func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClien
 		aggs[name] = aggregate
 	}
 
-	for _, aggHost := range aggregate.Hosts {
-		if aggHost == host {
-			log.Info("Found host in aggregate", "host", host, "name", name)
-			return nil
-		}
+	if slices.Contains(aggregate.Hosts, host) {
+		log.Info("Found host in aggregate", "host", host, "name", name)
+		return nil
 	}
 
 	result, err := aggregates.AddHost(ctx, serviceClient, aggregate.ID, aggregates.AddHostOpts{Host: host}).Extract()
