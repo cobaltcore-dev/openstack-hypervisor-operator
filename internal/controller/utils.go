@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -71,6 +72,9 @@ func updateInstanceHA(node *corev1.Node, data string, acceptedCodes []int) error
 	if err != nil {
 		return fmt.Errorf("failed to send request to ha service due to %w", err)
 	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 	if !slices.Contains(acceptedCodes, resp.StatusCode) {
 		return fmt.Errorf("ha service answered with unexpected response %v for %v from %v", resp.StatusCode, data, url)
 	}
