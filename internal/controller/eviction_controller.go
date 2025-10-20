@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -47,7 +46,6 @@ type EvictionReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	computeClient *gophercloud.ServiceClient
-	rand          *rand.Rand
 }
 
 const (
@@ -604,8 +602,6 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
-
-	r.rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(EvictionControllerName).
