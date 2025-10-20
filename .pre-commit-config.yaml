@@ -9,10 +9,6 @@ repos:
       - id: end-of-file-fixer
         exclude: ^charts/.*
       - id: check-added-large-files
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.1.6
-    hooks:
-      - id: golangci-lint
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
@@ -20,28 +16,24 @@ repos:
       - id: go-imports
         exclude: .*/(.+_mock\.go|.+deepcopy\.go)$
       - id: go-mod-tidy
-  - repo: https://github.com/fsfe/reuse-tool
-    rev: v5.0.2
-    hooks:
-      - id: reuse
   - repo: https://github.com/gruntwork-io/pre-commit
-    rev: v0.1.29
+    rev: v0.1.30
     hooks:
       - id: helmlint
   - repo: local
     hooks:
       - id: go-unit
         name: go unit tests
-        entry: make test
+        entry: sh -c "gmake check || make check"
         language: system
         pass_filenames: false
       - id: helmify
         name: helmify
-        entry: make helm
+        entry: sh -c "gmake helmify || make helmify"
         language: system
         pass_filenames: false
       - id: go-build
         name: go build
-        entry: make build
+        entry: sh -c "gmake build-all || make build-all"
         language: system
         pass_filenames: false

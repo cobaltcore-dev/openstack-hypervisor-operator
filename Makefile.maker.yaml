@@ -1,0 +1,66 @@
+# Configuration file for <https://github.com/sapcc/go-makefile-maker>
+
+binaries:
+  - name:        manager
+    fromPackage: ./cmd
+    installTo:   bin/
+
+controllerGen:
+  enabled: true
+  crdOutputPath: config/crd/bases
+  objectHeaderFile: hack/boilerplate.go.txt
+  rbacRoleName: manager-role
+
+coverageTest:
+  only: '/internal'
+
+dockerfile:
+  enabled: true
+  runAsRoot: false
+
+golang:
+  autoupdateableDeps: ^github.com/(?:sapcc|sap-cloud-infrastructure|cobaltcore-dev)/
+  setGoModVersion: true
+
+golangciLint:
+  createConfig: true
+
+githubWorkflow:
+  ci:
+    enabled: true
+  global:
+    defaultBranch: main # only defined here so that the "Run go-makefile-maker" Action knows it
+  securityChecks:
+    enabled: true
+    queries: security-extended
+
+metadata:
+  url: https://github.com/cobaltcore-dev/openstack-hypervisor-operator
+
+renovate:
+  enabled: true
+  assignees:
+    - notandy
+    - fwiesel
+    - mchristianl
+    - toanju
+
+reuse:
+  annotations:
+    - paths:
+        - PROJECT
+        - config/**
+        - charts/**
+        - build/**
+        - applyconfigurations/**
+      SPDX-FileCopyrightText: 'SAP SE or an SAP affiliate company and cobaltcore-dev contributors'
+      SPDX-License-Identifier: Apache-2.0
+
+verbatim: |
+  .PHONY: install-crds
+  install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+      kubectl kustomize config/crd | kubectl apply -f -
+
+  .PHONY: helmify
+  helmify:
+      kubectl kustomize config/default | helmify -crd-dir charts/openstack-hypervisor-operator
