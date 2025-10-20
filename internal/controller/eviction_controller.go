@@ -80,7 +80,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !eviction.DeletionTimestamp.IsZero() {
 		err := r.handleFinalizer(ctx, eviction)
 		if err != nil {
-			if errors.Is(err, ErrorRetry) {
+			if errors.Is(err, ErrRetry) {
 				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 			}
 			return ctrl.Result{}, err
@@ -99,14 +99,17 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// We just checked if the condition is there, so this should never
 		// be reached, but let's cover our bass
 		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
-	} else if statusCondition.Status == metav1.ConditionTrue {
+	}
+
+	switch statusCondition.Status {
+	case metav1.ConditionTrue:
 		// We are running, so we need to evict the next instance
 		return r.handleRunning(ctx, eviction)
-	} else if statusCondition.Status == metav1.ConditionFalse {
+	case metav1.ConditionFalse:
 		// We are done, so we can just return
 		log.Info("finished")
 		return ctrl.Result{}, nil
-	} else {
+	default:
 		log.
 			WithValues("reason", statusCondition.Reason).
 			WithValues("msg", statusCondition.Message).
@@ -304,7 +307,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		return ctrl.Result{}, r.Status().Update(ctx, eviction)
 	}
 
-	if vm.TaskState == "deleting" {
+	if vm.TaskState == "deleting" { // nolint:gocritic
 		// We just have to wait for it to be gone. Try the next one.
 		copy((*instances)[1:], (*instances)[:len(*instances)-1])
 		(*instances)[0] = uuid
@@ -429,7 +432,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 				}
 			}
 
-			return ErrorRetry
+			return ErrRetry
 		}
 	}
 
@@ -465,7 +468,7 @@ func (r *EvictionReconciler) enableHypervisorService(ctx context.Context, evicti
 				log.Error(err, "failed to store error message in condition", "message", errorMessage)
 			}
 		}
-		return ErrorRetry
+		return ErrRetry
 	} else {
 		changed := meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorReEnabled,

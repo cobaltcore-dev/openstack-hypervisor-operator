@@ -63,7 +63,7 @@ func UpdateTraits(ctx context.Context, client *gophercloud.ServiceClient, resour
 		r.Err = err
 		return
 	}
-	resp, err := client.Put(ctx, getResourceProviderTraitsURL(client, resourceProviderID), b, &r.Body, &gophercloud.RequestOpts{
+	resp, err := client.Put(ctx, getResourceProviderTraitsURL(client, resourceProviderID), b, &r.Body, &gophercloud.RequestOpts{ // nolint:bodyclose
 		OkCodes: []int{200},
 	})
 	_, r.Header, r.Err = gophercloud.ParseResponse(resp, err)
@@ -97,7 +97,7 @@ func (r ListAllocationsResult) Extract() (*ConsumerAllocations, error) {
 
 // List Allocations for a certain consumer
 func ListAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
-	resp, err := client.Get(ctx, getAllocationsURL(client, consumerID), nil, &gophercloud.RequestOpts{
+	resp, err := client.Get(ctx, getAllocationsURL(client, consumerID), nil, &gophercloud.RequestOpts{ // nolint:bodyclose
 		OkCodes: []int{200},
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func ListAllocations(ctx context.Context, client *gophercloud.ServiceClient, con
 
 // Delete all Allocations for a certain consumer
 func DeleteConsumerAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
-	resp, err := client.Delete(ctx, getAllocationsURL(client, consumerID), &gophercloud.RequestOpts{
+	resp, err := client.Delete(ctx, getAllocationsURL(client, consumerID), &gophercloud.RequestOpts{ // nolint:bodyclose
 		OkCodes: []int{204, 404},
 	})
 	if err != nil {

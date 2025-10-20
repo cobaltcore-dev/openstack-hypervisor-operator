@@ -130,4 +130,4 @@ func Difference[S ~[]E, E comparable](s1, s2 S) S {
 	return diff
 }
 
-var ErrorRetry = errors.New("ErrorRetry")
+var ErrRetry = errors.New("ErrRetry")
