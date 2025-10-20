@@ -53,6 +53,8 @@ type EvictionReconciler struct {
 const (
 	evictionFinalizerName  = "eviction-controller.cloud.sap/finalizer"
 	EvictionControllerName = "eviction"
+	shortRetryTime         = 1 * time.Second
+	defaultPollTime        = 10 * time.Second
 )
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -253,7 +255,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	switch vm.Status {
 	case "MIGRATING", "RESIZE":
 		// wait for the migration to finish
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: defaultPollTime}, nil
 	case "ERROR":
 		// Needs manual intervention (or another operator fixes it)
 		// put it at the end of the list (beginning of array)
@@ -290,7 +292,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 					log.Info("Instance is gone")
 					// Fall-back to beginning, which will clean it out
-					return ctrl.Result{Requeue: true}, nil
+					return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 				}
 				// Retry confirm in next reconciliation
 				return ctrl.Result{}, err
@@ -322,7 +324,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
 				// Fall-back to beginning, which will clean it out
-				return ctrl.Result{RequeueAfter: 0}, nil
+				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
@@ -344,7 +346,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
 			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Info("Instance is gone")
-				return ctrl.Result{RequeueAfter: 0}, nil
+				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
 			copy((*instances)[1:], (*instances)[:len(*instances)-1])
 			(*instances)[0] = uuid
@@ -366,7 +368,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	// Triggered a migration, give it a generous time to start, so we do not
 	// see the old state because the migration didn't start
 	log.Info("poll")
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	return ctrl.Result{RequeueAfter: defaultPollTime}, err
 }
 
 func (r *EvictionReconciler) evictionReason(eviction *kvmv1.Eviction) string {
