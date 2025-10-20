@@ -20,7 +20,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -213,7 +212,6 @@ var _ = Describe("Eviction Controller", func() {
 					Client:        k8sClient,
 					Scheme:        k8sClient.Scheme(),
 					computeClient: client.ServiceClient(fakeServer),
-					rand:          rand.New(rand.NewSource(42)),
 				}
 			})
 
