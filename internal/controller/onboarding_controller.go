@@ -48,7 +48,7 @@ import (
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
-var errRequeue = fmt.Errorf("requeue requested")
+var errRequeue = errors.New("requeue requested")
 
 const (
 	defaultWaitTime           = 1 * time.Minute
@@ -465,7 +465,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	if flavorRef == "" {
-		return nil, fmt.Errorf("couldn't find flavor")
+		return nil, errors.New("couldn't find flavor")
 	}
 
 	var imageRef string
@@ -488,7 +488,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	if imageRef == "" {
-		return nil, fmt.Errorf("couldn't find image")
+		return nil, errors.New("couldn't find image")
 	}
 
 	falseVal := false
@@ -509,7 +509,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	if networkRef == "" {
-		return nil, fmt.Errorf("couldn't find network")
+		return nil, errors.New("couldn't find network")
 	}
 
 	log.Info("creating server", "name", serverName)
@@ -537,7 +537,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	if server == nil {
-		return nil, fmt.Errorf("server is nil")
+		return nil, errors.New("server is nil")
 	}
 	// Apparently the response doesn't contain the value
 	server.Name = serverName
