@@ -29,15 +29,18 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
@@ -67,6 +70,14 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.Get(ctx, req.NamespacedName, eviction); err != nil {
 		// ignore not found errors, could be deleted
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if global.LabelSelector != "" {
+		// This test-fetch the Node assigned to the eviction, it won't be cached if it's not part of our partition so
+		// we won't reconcile evictions for nodes outside our partition
+		if err := r.Get(ctx, types.NamespacedName{Name: eviction.Spec.Hypervisor}, &corev1.Node{}); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
 	}
 
 	log := logger.FromContext(ctx).

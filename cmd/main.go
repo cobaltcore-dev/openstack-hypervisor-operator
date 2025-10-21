@@ -27,10 +27,15 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -39,6 +44,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/logger"
 
 	// +kubebuilder:scaffold:imports
@@ -80,6 +86,7 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&global.LabelSelector, "label-selector", "", "Label selector to filter watched resources (namely nodes).")
 
 	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
@@ -138,6 +145,28 @@ func main() {
 	}
 	restConfig := ctrl.GetConfigOrDie()
 
+	var cacheOptions cache.Options
+	if global.LabelSelector != "" {
+		setupLog.Info("setting up cache with label selector", "selector", global.LabelSelector)
+		selector := labels.NewSelector()
+		req, err := labels.NewRequirement(global.LabelSelector, selection.Exists, nil)
+		if err != nil {
+			setupLog.Error(err, "unable to parse label selector")
+			os.Exit(1)
+		}
+
+		cacheOptions = cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Node{}: {
+					Label: selector.Add(*req),
+				},
+				&kvmv1.Hypervisor{}: {
+					Label: selector.Add(*req),
+				},
+			},
+		}
+	}
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -156,6 +185,9 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
+
+		// Optionally configure the cache to listen/watch for specific labeled resources only
+		Cache: cacheOptions,
 	})
 
 	if err != nil {
