@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 )
 
 const (
@@ -172,6 +173,11 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create label selector predicate: %w", err)
+	}
+
+	// append the custom label selector from global config
+	if global.LabelSelector != "" {
+		transferLabels = append(transferLabels, global.LabelSelector)
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
