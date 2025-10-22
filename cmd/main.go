@@ -26,6 +26,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,6 +39,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/logger"
 
 	// +kubebuilder:scaffold:imports
 
@@ -85,11 +87,12 @@ func main() {
 
 	opts := zap.Options{
 		Development: true,
+		TimeEncoder: zapcore.ISO8601TimeEncoder,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(logger.WrapLogger(zap.New(zap.UseFlagOptions(&opts))))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
