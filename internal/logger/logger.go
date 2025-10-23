@@ -18,50 +18,41 @@ limitations under the License.
 package logger
 
 import (
-	"github.com/go-logr/logr"
+	"go.uber.org/zap/zapcore"
 )
 
-type wrapper struct {
-	orig logr.LogSink
+type wrapCore struct {
+	core zapcore.Core
 }
 
-// Enabled implements logr.LogSink.
-func (w wrapper) Enabled(level int) bool {
-	return w.orig.Enabled(level)
+func WrapCore(core zapcore.Core) zapcore.Core {
+	return wrapCore{core}
 }
 
-// Error implements logr.LogSink.
-func (w wrapper) Error(err error, msg string, keysAndValues ...any) {
-	if msg == "Reconciler error" {
-		w.orig.Info(2, msg, append(keysAndValues, "error", err.Error())...)
-	} else {
-		w.orig.Error(err, msg, keysAndValues...)
+// Check implements zapcore.Core.
+func (w wrapCore) Check(entry zapcore.Entry, checkedEntry *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if entry.Message == "Reconciler error" {
+		entry.Level = -2
 	}
+	return w.core.Check(entry, checkedEntry)
 }
 
-// Info implements logr.LogSink.
-func (w wrapper) Info(level int, msg string, keysAndValues ...any) {
-	w.orig.Info(level, msg, keysAndValues...)
+// Enabled implements zapcore.Core.
+func (w wrapCore) Enabled(level zapcore.Level) bool {
+	return w.core.Enabled(level)
 }
 
-// Init implements logr.LogSink.
-func (w wrapper) Init(info logr.RuntimeInfo) {
-	w.orig.Init(info)
+// Sync implements zapcore.Core.
+func (w wrapCore) Sync() error {
+	return w.core.Sync()
 }
 
-// WithName implements logr.LogSink.
-func (w wrapper) WithName(name string) logr.LogSink {
-	w.orig.WithName(name)
-	return w
+// With implements zapcore.Core.
+func (w wrapCore) With(fields []zapcore.Field) zapcore.Core {
+	return wrapCore{w.core.With(fields)}
 }
 
-// WithValues implements logr.LogSink.
-func (w wrapper) WithValues(keysAndValues ...any) logr.LogSink {
-	w.orig.WithValues(keysAndValues...)
-	return w
-}
-
-func WrapLogger(logger logr.Logger) logr.Logger {
-	orig := logger.GetSink()
-	return logger.WithSink(wrapper{orig})
+// Write implements zapcore.Core.
+func (w wrapCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	return w.core.Write(entry, fields)
 }
