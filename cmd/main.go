@@ -94,9 +94,10 @@ func main() {
 		"Name of the certificate issuer.")
 
 	opts := ctrlzap.Options{
-		Development: true,
-		TimeEncoder: zapcore.ISO8601TimeEncoder,
-		ZapOpts:     []zap.Option{zap.WrapCore(logger.WrapCore)},
+		Development:     true,
+		TimeEncoder:     zapcore.ISO8601TimeEncoder,
+		ZapOpts:         []zap.Option{zap.WrapCore(logger.WrapCore)},
+		StacktraceLevel: zap.DPanicLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
