@@ -238,30 +238,43 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 	return ctrl.Result{}, r.Status().Update(ctx, eviction)
 }
 
+// Tries to handle the NotFound-error by updating the status
+func (r *EvictionReconciler) handleNotFound(ctx context.Context, eviction *kvmv1.Eviction, err error) error {
+	if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return err
+	}
+	logger.FromContext(ctx).Info("Instance is gone")
+	instances := &eviction.Status.OutstandingInstances
+	uuid := (*instances)[len(*instances)-1]
+	*instances = (*instances)[:len(*instances)-1]
+	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+		Type:    kvmv1.ConditionTypeMigration,
+		Status:  metav1.ConditionFalse,
+		Message: fmt.Sprintf("Instance %s is gone", uuid),
+		Reason:  kvmv1.ConditionReasonSucceeded,
+	})
+	return r.Status().Update(ctx, eviction)
+}
+
 func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
 	instances := &eviction.Status.OutstandingInstances
 	uuid := (*instances)[len(*instances)-1]
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
+	logger.IntoContext(ctx, log)
 
 	res := servers.Get(ctx, r.computeClient, uuid)
 	vm, err := res.Extract()
 
 	if err != nil {
-		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			log.Info("Instance is gone")
-			*instances = (*instances)[:len(*instances)-1]
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("Instance %s is gone", uuid),
-				Reason:  kvmv1.ConditionReasonSucceeded,
-			})
-			return ctrl.Result{}, r.Status().Update(ctx, eviction)
+		if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
+			return ctrl.Result{}, err2
+		} else {
+			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 		}
-		return ctrl.Result{}, err
 	}
 
 	log = log.WithValues("server_status", vm.Status)
+	logger.IntoContext(ctx, log)
 
 	// First, check the transient statuses
 	switch vm.Status {
@@ -300,14 +313,13 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 
 		// So, it is already off this one, do we need to verify it?
 		if vm.Status == "VERIFY_RESIZE" {
-			if err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr(); err != nil {
-				if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-					log.Info("Instance is gone")
-					// Fall-back to beginning, which will clean it out
-					return ctrl.Result{RequeueAfter: shortRetryTime}, nil
-				}
+			err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr()
+			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
 				// Retry confirm in next reconciliation
-				return ctrl.Result{}, err
+				return ctrl.Result{}, err2
+			} else {
+				// handled not found without errors
+				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
 		}
 
@@ -332,48 +344,23 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		}
 	} else if vm.Status == "ACTIVE" || vm.PowerState == 1 {
 		log.Info("trigger live-migration")
-		if err = r.liveMigrate(ctx, vm.ID, eviction); err != nil {
-			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-				log.Info("Instance is gone")
-				// Fall-back to beginning, which will clean it out
+		err := r.liveMigrate(ctx, vm.ID, eviction)
+		if err != nil {
+			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
+				return ctrl.Result{}, err2
+			} else {
 				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
-			copy((*instances)[1:], (*instances)[:len(*instances)-1])
-			(*instances)[0] = uuid
-
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionTrue,
-				Message: fmt.Sprintf("Live migration of instance %s triggered", vm.ID),
-				Reason:  kvmv1.ConditionReasonRunning,
-			})
-			if err2 := r.Status().Update(ctx, eviction); err2 != nil {
-				return ctrl.Result{}, fmt.Errorf("could not live-migrate due to %w and %w", err, err2)
-			}
-
-			return ctrl.Result{}, err
 		}
 	} else {
 		log.Info("trigger cold-migration")
-		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
-			if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-				log.Info("Instance is gone")
+		err := r.coldMigrate(ctx, vm.ID, eviction)
+		if err != nil {
+			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
+				return ctrl.Result{}, err2
+			} else {
 				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
-			copy((*instances)[1:], (*instances)[:len(*instances)-1])
-			(*instances)[0] = uuid
-
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionTrue,
-				Message: fmt.Sprintf("Cold-migration of instance %s triggered", vm.ID),
-				Reason:  kvmv1.ConditionReasonRunning,
-			})
-			if err2 := r.Status().Update(ctx, eviction); err2 != nil {
-				return ctrl.Result{}, fmt.Errorf("could not cold-migrate due to %w and %w", err, err2)
-			}
-
-			return ctrl.Result{}, err
 		}
 	}
 
