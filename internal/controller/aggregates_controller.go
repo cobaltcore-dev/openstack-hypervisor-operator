@@ -37,6 +37,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -56,17 +57,10 @@ type AggregatesController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
 
 func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx).WithName(req.Name)
-	ctx = logger.IntoContext(ctx, log)
-
+	log := logger.FromContext(ctx)
 	hv := &kvmv1.Hypervisor{}
 	if err := ac.Get(ctx, req.NamespacedName, hv); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-	}
-
-	// apply traits only when lifecycle management is enabled
-	if !hv.Spec.LifecycleEnabled {
-		return ctrl.Result{}, nil
 	}
 
 	if slices.Equal(hv.Spec.Aggregates, hv.Status.Aggregates) {
@@ -76,7 +70,11 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	aggs, err := aggregatesByName(ctx, ac.computeClient)
 	if err != nil {
-		return ctrl.Result{}, ac.trackError(ctx, hv, "failed fetching aggregates", err)
+		err = fmt.Errorf("failed listing aggregates: %w", err)
+		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
+			return ctrl.Result{}, errors.Join(err, err2)
+		}
+		return ctrl.Result{}, err
 	}
 
 	toAdd := Difference(hv.Status.Aggregates, hv.Spec.Aggregates)
@@ -91,8 +89,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(toAdd) > 0 {
 		log.Info("Adding", "aggregates", toAdd)
 		for item := range slices.Values(toAdd) {
-			err = addToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, "")
-			if err != nil {
+			if err = addToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, ""); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -101,15 +98,18 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(toRemove) > 0 {
 		log.Info("Removing", "aggregates", toRemove)
 		for item := range slices.Values(toRemove) {
-			err = removeFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item)
-			if err != nil {
+			if err = removeFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	}
 
 	if errs != nil {
-		return ctrl.Result{}, ac.trackError(ctx, hv, "failed updating aggregates", errs...)
+		err = fmt.Errorf("encountered errors during aggregate update: %w", errors.Join(errs...))
+		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
+			return ctrl.Result{}, errors.Join(err, err2)
+		}
+		return ctrl.Result{}, err
 	}
 
 	hv.Status.Aggregates = hv.Spec.Aggregates
@@ -122,29 +122,22 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, ac.Status().Update(ctx, hv)
 }
 
-func (ac *AggregatesController) trackError(ctx context.Context, hv *kvmv1.Hypervisor, msg string, errs ...error) error {
-	err := errors.Join(errs...)
-	if err == nil {
-		return nil
-	}
-
+// setErrorCondition sets the error condition on the Hypervisor status, returns error if update fails
+func (ac *AggregatesController) setErrorCondition(ctx context.Context, hv *kvmv1.Hypervisor, msg string) error {
 	condition := metav1.Condition{
 		Type:    ConditionTypeAggregatesUpdated,
 		Status:  metav1.ConditionFalse,
 		Reason:  ConditionAggregatesFailed,
-		Message: err.Error(),
+		Message: msg,
 	}
 
 	if meta.SetStatusCondition(&hv.Status.Conditions, condition) {
-		if err2 := ac.Status().Update(ctx, hv); err2 != nil {
-			return errors.Join(err, err2)
+		if err := ac.Status().Update(ctx, hv); err != nil {
+			return err
 		}
-		logger.FromContext(ctx).
-			WithCallDepth(1). // Where did we call trackError() from?
-			Error(err, msg)
 	}
 
-	return err
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -160,7 +153,8 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(AggregatesControllerName).
-		For(&kvmv1.Hypervisor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(ac)
 }
 

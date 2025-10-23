@@ -18,41 +18,30 @@ limitations under the License.
 package logger
 
 import (
+	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
 
-type wrapCore struct {
-	core zapcore.Core
+func NewSanitzeReconcileErrorEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
+	return &SanitzeReconcileErrorEncoder{zapcore.NewConsoleEncoder(cfg), cfg}
 }
 
-func WrapCore(core zapcore.Core) zapcore.Core {
-	return wrapCore{core}
+type SanitzeReconcileErrorEncoder struct {
+	zapcore.Encoder
+	cfg zapcore.EncoderConfig
 }
 
-// Check implements zapcore.Core.
-func (w wrapCore) Check(entry zapcore.Entry, checkedEntry *zapcore.CheckedEntry) *zapcore.CheckedEntry {
-	if entry.Message == "Reconciler error" {
-		entry.Level = -2
+func (e *SanitzeReconcileErrorEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	if entry.Message == "Reconcile error" {
+		// Downgrade the log level to debug to avoid log spam
+		entry.Level = zapcore.WarnLevel
+		entry.Stack = ""
 	}
-	return w.core.Check(entry, checkedEntry)
+	return e.Encoder.EncodeEntry(entry, fields)
 }
 
-// Enabled implements zapcore.Core.
-func (w wrapCore) Enabled(level zapcore.Level) bool {
-	return w.core.Enabled(level)
-}
-
-// Sync implements zapcore.Core.
-func (w wrapCore) Sync() error {
-	return w.core.Sync()
-}
-
-// With implements zapcore.Core.
-func (w wrapCore) With(fields []zapcore.Field) zapcore.Core {
-	return wrapCore{w.core.With(fields)}
-}
-
-// Write implements zapcore.Core.
-func (w wrapCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
-	return w.core.Write(entry, fields)
+func (e *SanitzeReconcileErrorEncoder) Clone() zapcore.Encoder {
+	return &SanitzeReconcileErrorEncoder{
+		Encoder: e.Encoder.Clone(),
+	}
 }
