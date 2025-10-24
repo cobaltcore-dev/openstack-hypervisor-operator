@@ -21,8 +21,6 @@ spec:
     spec:
       containers:
       - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
-        command:
-        - /manager
         env:
         - name: OS_AUTH_URL
           value: {{ quote .Values.controllerManager.manager.env.osAuthUrl }}
