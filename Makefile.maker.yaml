@@ -33,6 +33,12 @@ githubWorkflow:
   securityChecks:
     enabled: true
     queries: security-extended
+  pushContainerToGhcr:
+    enabled: true
+    tagStrategy:
+      - edge
+      - latest
+      - semver
 
 metadata:
   url: https://github.com/cobaltcore-dev/openstack-hypervisor-operator
