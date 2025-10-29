@@ -20,7 +20,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -134,5 +133,3 @@ func Difference[S ~[]E, E comparable](s1, s2 S) S {
 
 	return diff
 }
-
-var ErrRetry = errors.New("ErrRetry")
