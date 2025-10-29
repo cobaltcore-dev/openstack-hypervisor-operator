@@ -99,7 +99,7 @@ func main() {
 	opts := ctrlzap.Options{
 		Development:     true,
 		TimeEncoder:     zapcore.ISO8601TimeEncoder,
-		Encoder:         logger.NewSanitzeReconcileErrorEncoder(zapcore.EncoderConfig{}),
+		ZapOpts:         []zap.Option{zap.WrapCore(logger.WrapCore)},
 		StacktraceLevel: zap.DPanicLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
