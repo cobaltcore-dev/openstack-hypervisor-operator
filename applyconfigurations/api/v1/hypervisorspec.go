@@ -15,6 +15,7 @@ type HypervisorSpecApplyConfiguration struct {
 	HighAvailability             *bool    `json:"highAvailability,omitempty"`
 	CreateCertManagerCertificate *bool    `json:"createCertManagerCertificate,omitempty"`
 	InstallCertificate           *bool    `json:"installCertificate,omitempty"`
+	Maintenance                  *string  `json:"maintenance,omitempty"`
 }
 
 // HypervisorSpecApplyConfiguration constructs a declarative configuration of the HypervisorSpec type for use with
@@ -104,5 +105,13 @@ func (b *HypervisorSpecApplyConfiguration) WithCreateCertManagerCertificate(valu
 // If called multiple times, the InstallCertificate field is set to the value of the last call.
 func (b *HypervisorSpecApplyConfiguration) WithInstallCertificate(value bool) *HypervisorSpecApplyConfiguration {
 	b.InstallCertificate = &value
+	return b
+}
+
+// WithMaintenance sets the Maintenance field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Maintenance field is set to the value of the last call.
+func (b *HypervisorSpecApplyConfiguration) WithMaintenance(value string) *HypervisorSpecApplyConfiguration {
+	b.Maintenance = &value
 	return b
 }
