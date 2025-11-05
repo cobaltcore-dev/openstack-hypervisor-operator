@@ -92,7 +92,11 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
-		return ctrl.Result{}, errors.Join(err, tc.UpdateStatusCondition(ctx, hv, err, "Failed to get current traits from placement"))
+		if meta.SetStatusCondition(&hv.Status.Conditions,
+			getTraitCondition(err, "Failed to get current traits from placement")) {
+			err = errors.Join(tc.Status().Update(ctx, hv))
+		}
+		return ctrl.Result{}, err
 	}
 
 	var targetTraits []string
@@ -119,17 +123,22 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		if result.Err != nil {
 			// set status condition
-			return ctrl.Result{}, errors.Join(result.Err, tc.UpdateStatusCondition(ctx, hv, result.Err, "Failed to update traits in placement"))
+			if meta.SetStatusCondition(&hv.Status.Conditions,
+				getTraitCondition(err, "Failed to update traits in placement")) {
+				err = errors.Join(tc.Status().Update(ctx, hv))
+			}
+			return ctrl.Result{}, err
 		}
 	}
 
-	// update status
+	// update status unconditionally, since we want always to propagate the current traits
 	hv.Status.Traits = targetTraits
-	return ctrl.Result{}, tc.UpdateStatusCondition(ctx, hv, nil, "Traits successfully updated")
+	meta.SetStatusCondition(&hv.Status.Conditions, getTraitCondition(nil, "Traits successfully updated"))
+	return ctrl.Result{}, tc.Status().Update(ctx, hv)
 }
 
-// UpdateStatusCondition updates the TraitsUpdated condition of the Hypervisor status and handles conflicts by retrying.
-func (tc *TraitsController) UpdateStatusCondition(ctx context.Context, hv *kvmv1.Hypervisor, err error, msg string) error {
+// getTraitCondition creates a Condition object for trait updates
+func getTraitCondition(err error, msg string) metav1.Condition {
 	// set status condition
 	var (
 		reason  = ConditionTraitsSuccess
@@ -147,16 +156,12 @@ func (tc *TraitsController) UpdateStatusCondition(ctx context.Context, hv *kvmv1
 		}
 	}
 
-	if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+	return metav1.Condition{
 		Type:    ConditionTypeTraitsUpdated,
 		Status:  status,
 		Reason:  reason,
 		Message: message,
-	}) {
-		return tc.Status().Update(ctx, hv)
 	}
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
