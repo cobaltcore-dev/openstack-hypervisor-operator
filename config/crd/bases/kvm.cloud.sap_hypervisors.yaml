@@ -139,6 +139,15 @@ spec:
                 description: LifecycleEnabled enables the lifecycle management of
                   the hypervisor via hypervisor-operator.
                 type: boolean
+              maintenance:
+                description: Maintenance indicates whether the hypervisor is in maintenance
+                  mode.
+                enum:
+                - ""
+                - manual
+                - auto
+                - ha
+                type: string
               reboot:
                 default: false
                 description: Reboot request an reboot after successful installation
@@ -252,6 +261,10 @@ spec:
                   - type
                   type: object
                 type: array
+              evicted:
+                description: Evicted indicates whether the hypervisor is evicted.
+                  (no instances left with active maintenance mode)
+                type: boolean
               hypervisorId:
                 description: HypervisorID is the unique identifier of the hypervisor
                   in OpenStack.

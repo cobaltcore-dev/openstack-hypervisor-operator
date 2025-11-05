@@ -74,6 +74,11 @@ type HypervisorSpec struct {
 	// +kubebuilder:default:=true
 	// InstallCertificate is used to enable the installations of the certificates via kvm-node-agent.
 	InstallCertificate bool `json:"installCertificate"`
+
+	// +kubebuilder:optional
+	// +kubebuilder:validation:Enum:="";manual;auto;ha
+	// Maintenance indicates whether the hypervisor is in maintenance mode.
+	Maintenance string `json:"maintenance,omitempty"`
 }
 
 type Instance struct {
@@ -183,6 +188,9 @@ type HypervisorStatus struct {
 
 	// InternalIP is the internal IP address of the hypervisor.
 	InternalIP string `json:"internalIp,omitempty"`
+
+	// Evicted indicates whether the hypervisor is evicted. (no instances left with active maintenance mode)
+	Evicted bool `json:"evicted,omitempty"`
 
 	// Represents the Hypervisor node conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`

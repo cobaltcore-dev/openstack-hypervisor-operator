@@ -20,6 +20,7 @@ type HypervisorStatusApplyConfiguration struct {
 	Traits          []string                                  `json:"traits,omitempty"`
 	Aggregates      []string                                  `json:"aggregates,omitempty"`
 	InternalIP      *string                                   `json:"internalIp,omitempty"`
+	Evicted         *bool                                     `json:"evicted,omitempty"`
 	Conditions      []metav1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
 	SpecHash        *string                                   `json:"specHash,omitempty"`
 }
@@ -124,6 +125,14 @@ func (b *HypervisorStatusApplyConfiguration) WithAggregates(values ...string) *H
 // If called multiple times, the InternalIP field is set to the value of the last call.
 func (b *HypervisorStatusApplyConfiguration) WithInternalIP(value string) *HypervisorStatusApplyConfiguration {
 	b.InternalIP = &value
+	return b
+}
+
+// WithEvicted sets the Evicted field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Evicted field is set to the value of the last call.
+func (b *HypervisorStatusApplyConfiguration) WithEvicted(value bool) *HypervisorStatusApplyConfiguration {
+	b.Evicted = &value
 	return b
 }
 
