@@ -131,10 +131,9 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
 		}
 
-		// transport label/anotations changes
+		// transport label changes
 		before := hypervisor.DeepCopy()
-		updateLabelsAndAnnotations(&node.ObjectMeta, hypervisor)
-		if !reflect.DeepEqual(before, hypervisor) {
+		if transportLabels(&node.ObjectMeta, hypervisor) {
 			return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFrom(before))
 		}
 
@@ -147,8 +146,10 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
 	}
 
+	// transport relevant labels
+	transportLabels(&node.ObjectMeta, hypervisor)
 	// transport relevant annotations
-	updateLabelsAndAnnotations(&node.ObjectMeta, hypervisor)
+	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
 
 	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
@@ -187,8 +188,9 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(hv)
 }
 
-// updateLabelsAndAnnotations transports relevant annotations from the Node to the Hypervisor spec
-func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) {
+// transportAggregatesAndTraits transports relevant aggregates/traits from the Node to the Hypervisor spec
+func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) bool {
+	before := hypervisor.DeepCopy()
 	// transport aggregates annotation to hypervisor spec
 	if aggregates, found := node.Annotations[annotationAggregates]; found {
 		// split aggregates string
@@ -214,11 +216,17 @@ func updateLabelsAndAnnotations(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyper
 			}
 		})
 	}
+	return !reflect.DeepEqual(before, hypervisor)
+}
 
+// transportLabels transports relevant labels from the Node to the Hypervisor spec
+func transportLabels(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) bool {
+	before := hypervisor.DeepCopy()
 	// transfer labels
 	for _, transferLabel := range transferLabels {
 		if label, ok := node.Labels[transferLabel]; ok {
 			hypervisor.Labels[transferLabel] = label
 		}
 	}
+	return !reflect.DeepEqual(before, hypervisor)
 }

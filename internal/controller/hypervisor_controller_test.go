@@ -47,8 +47,9 @@ var _ = Describe("Hypervisor Controller", func() {
 		// pregenerate the resource
 		resource = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "other-node",
-				Labels: map[string]string{corev1.LabelTopologyZone: "test-zone"},
+				Name:        "other-node",
+				Labels:      map[string]string{corev1.LabelTopologyZone: "test-zone"},
+				Annotations: map[string]string{annotationCustomTraits: "test-trait"},
 			},
 		}
 	})
@@ -83,14 +84,11 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(hypervisor.Labels).ToNot(BeNil())
 			Expect(hypervisor.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone"))
 
-			By("Adding a aggregate annotation to the node and reconciling again")
+			By("Adding a label annotation to the node and reconciling again")
 			// Add an aggregate annotation to the node
-			annotedResource := resource.DeepCopy()
-			if annotedResource.Annotations == nil {
-				annotedResource.Annotations = map[string]string{}
-			}
-			annotedResource.Annotations[annotationCustomTraits] = "test-trait"
-			Expect(k8sClient.Patch(ctx, annotedResource, client.Merge)).To(Succeed())
+			labeledResource := resource.DeepCopy()
+			labeledResource.Labels["worker.garden.sapcloud.io/group"] = "new-group"
+			Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: resource.Name},
@@ -104,6 +102,7 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
 			Expect(updatedHypervisor.Spec.CustomTraits).ToNot(BeNil())
 			Expect(updatedHypervisor.Spec.CustomTraits).To(ContainElement("test-trait"))
+			Expect(updatedHypervisor.Labels).To(HaveKeyWithValue("worker.garden.sapcloud.io/group", "new-group"))
 		})
 	})
 
