@@ -58,7 +58,9 @@ jobs:
   cleanup:
     name: Cleanup old container images in GHCR
     runs-on: ubuntu-latest
-      - uses: actions/delete-package-versions@v5
+    steps:
+      - name: Delete untagged GHCR images
+        uses: actions/delete-package-versions@v5
         with:
           package-name: 'openstack-hypervisor-operator'
           package-type: 'container'
