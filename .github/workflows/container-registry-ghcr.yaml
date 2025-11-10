@@ -54,3 +54,13 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+
+  cleanup:
+    name: Cleanup old container images in GHCR
+    runs-on: ubuntu-latest
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'openstack-hypervisor-operator'
+          package-type: 'container'
+          min-versions-to-keep: 1
+          delete-only-untagged-versions: 'true'
