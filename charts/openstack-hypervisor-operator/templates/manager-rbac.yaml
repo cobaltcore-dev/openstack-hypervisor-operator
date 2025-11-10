@@ -97,5 +97,5 @@ roleRef:
   name: '{{ include "openstack-hypervisor-operator.fullname" . }}-manager-role'
 subjects:
 - kind: ServiceAccount
-  name: '{{ include "openstack-hypervisor-operator.fullname" . }}-controller-manager'
+  name: '{{ include "openstack-hypervisor-operator.serviceAccountName" . }}'
   namespace: '{{ .Release.Namespace }}'
