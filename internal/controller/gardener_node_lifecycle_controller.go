@@ -41,7 +41,7 @@ import (
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
-type MaintenanceController struct {
+type GardenerNodeLifecycleController struct {
 	k8sclient.Client
 	Scheme        *runtime.Scheme
 	serviceClient *gophercloud.ServiceClient
@@ -49,7 +49,6 @@ type MaintenanceController struct {
 }
 
 const (
-	labelManagedBy                  = "app.kubernetes.io/managed-by"
 	labelDeployment                 = "cobaltcore-maintenance-controller"
 	maintenancePodsNamespace        = "kube-system"
 	labelCriticalComponent          = "node.gardener.cloud/critical-component"
@@ -65,7 +64,7 @@ const (
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=create;delete;get;list;patch;update;watch
 
-func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
 	ctx = logger.IntoContext(ctx, log)
 
@@ -115,7 +114,7 @@ func (r *MaintenanceController) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func (r *MaintenanceController) ensureBlockingPodDisruptionBudget(ctx context.Context, node *corev1.Node, minAvailable int32) error {
+func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx context.Context, node *corev1.Node, minAvailable int32) error {
 	name := nameForNode(node)
 	podDisruptionBudget := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metav1.ObjectMeta{
@@ -165,7 +164,7 @@ func labelsForNode(node *corev1.Node) map[string]string {
 	}
 }
 
-func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, node *corev1.Node, scale int32, ready bool) error {
+func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context.Context, node *corev1.Node, scale int32, ready bool) error {
 	name := nameForNode(node)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -250,7 +249,7 @@ func (r *MaintenanceController) ensureSignallingDeployment(ctx context.Context, 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *MaintenanceController) SetupWithManager(mgr ctrl.Manager, namespace string) error {
+func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, namespace string) error {
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
 	r.namespace = namespace

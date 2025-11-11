@@ -27,12 +27,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Maintenance Controller", func() {
+var _ = Describe("Gardener Maintenance Controller", func() {
 	const nodeName = "node-test"
-	var maintenanceController *MaintenanceController
+	var controller *GardenerNodeLifecycleController
 
 	BeforeEach(func() {
-		maintenanceController = &MaintenanceController{
+		controller = &GardenerNodeLifecycleController{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 		}
@@ -64,7 +64,7 @@ var _ = Describe("Maintenance Controller", func() {
 			}
 
 			By("Reconciling the created resource")
-			_, err := maintenanceController.Reconcile(ctx, req)
+			_, err := controller.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

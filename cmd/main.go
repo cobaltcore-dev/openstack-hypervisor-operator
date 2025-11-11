@@ -253,7 +253,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.MaintenanceController{
+	if err = (&controller.GardenerNodeLifecycleController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr, certificateNamespace); err != nil {
