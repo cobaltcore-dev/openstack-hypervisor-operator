@@ -107,7 +107,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if value != "" {
-		err = disableInstanceHA(node)
+		err = disableInstanceHA(hv)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
