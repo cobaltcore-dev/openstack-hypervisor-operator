@@ -31,6 +31,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 // setNodeLabels sets the labels on the node.
@@ -51,17 +53,17 @@ func InstanceHaUrl(region, zone, hostname string) string {
 	return fmt.Sprintf("https://kvm-ha-service-%v.%v.cloud.sap/api/hypervisors/%v", zone, region, hostname)
 }
 
-func updateInstanceHA(node *corev1.Node, data string, acceptedCodes []int) error {
-	zone, found := node.Labels[corev1.LabelTopologyZone]
+func updateInstanceHA(hypervisor *kvmv1.Hypervisor, data string, acceptedCodes []int) error {
+	zone, found := hypervisor.Labels[corev1.LabelTopologyZone]
 	if !found {
 		return fmt.Errorf("could not find label %v for node", corev1.LabelTopologyZone)
 	}
-	region, found := node.Labels[corev1.LabelTopologyRegion]
+	region, found := hypervisor.Labels[corev1.LabelTopologyRegion]
 	if !found {
 		return fmt.Errorf("could not find label %v for node", corev1.LabelTopologyRegion)
 	}
 
-	hostname, found := node.Labels[corev1.LabelHostname]
+	hostname, found := hypervisor.Labels[corev1.LabelHostname]
 	if !found {
 		return fmt.Errorf("could not find label %v for node", corev1.LabelHostname)
 	}
@@ -81,12 +83,12 @@ func updateInstanceHA(node *corev1.Node, data string, acceptedCodes []int) error
 	return nil
 }
 
-func enableInstanceHA(node *corev1.Node) error {
-	return updateInstanceHA(node, `{"enabled": true}`, []int{http.StatusOK})
+func enableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
+	return updateInstanceHA(hypervisor, `{"enabled": true}`, []int{http.StatusOK})
 }
 
-func disableInstanceHA(node *corev1.Node) error {
-	return updateInstanceHA(node, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
+func disableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
+	return updateInstanceHA(hypervisor, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
 }
 
 // IsNodeConditionTrue returns true when the conditionType is present and set to `corev1.ConditionTrue`

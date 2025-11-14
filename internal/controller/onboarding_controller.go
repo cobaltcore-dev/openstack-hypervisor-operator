@@ -77,20 +77,6 @@ type OnboardingController struct {
 	testNetworkClient *gophercloud.ServiceClient
 }
 
-func getHypervisorAddress(node *corev1.Node) string {
-	for _, addr := range node.Status.Addresses {
-		if addr.Address == "" {
-			continue
-		}
-
-		if addr.Type == corev1.NodeHostName {
-			return addr.Address
-		}
-	}
-
-	return ""
-}
-
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;patch
 func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
@@ -144,24 +130,14 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, r.Status().Update(ctx, hv)
 	}
 
-	// TODO: cleanup node retrieval
-	node := &corev1.Node{}
-	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
-		if k8sclient.IgnoreNotFound(err) == nil {
-			// Node not found, could be deleted
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
-	}
-
 	switch status.Reason {
 	case ConditionReasonInitial:
 		return ctrl.Result{}, r.initialOnboarding(ctx, hv, computeHost)
 	case ConditionReasonTesting:
 		if hv.Spec.SkipTests {
-			return r.completeOnboarding(ctx, computeHost, node, hv)
+			return r.completeOnboarding(ctx, computeHost, hv)
 		} else {
-			return r.smokeTest(ctx, node, hv, computeHost)
+			return r.smokeTest(ctx, hv, computeHost)
 		}
 	default:
 		// Nothing to be done
@@ -170,16 +146,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, host string) error {
-	node := &corev1.Node{}
-	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
-		if k8sclient.IgnoreNotFound(err) == nil {
-			// Node not found, could be deleted
-			return nil
-		}
-		return err
-	}
-
-	zone, found := node.Labels[corev1.LabelTopologyZone]
+	zone, found := hv.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
@@ -193,11 +160,9 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
 	}
 
-	if _, found := node.Labels[corev1.LabelTopologyZone]; found {
-		err = addToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
-		if err != nil {
-			return fmt.Errorf("failed to agg to test aggregate %w", err)
-		}
+	err = addToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
+	if err != nil {
+		return fmt.Errorf("failed to agg to test aggregate %w", err)
 	}
 
 	// The service may be forced down previously due to an HA event,
@@ -220,10 +185,10 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 	return r.Status().Update(ctx, hv)
 }
 
-func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node, hv *kvmv1.Hypervisor, host string) (ctrl.Result, error) {
+func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
-	zone := node.Labels[corev1.LabelTopologyZone]
-	server, err := r.createOrGetTestServer(ctx, zone, host, node.UID)
+	zone := hv.Labels[corev1.LabelTopologyZone]
+	server, err := r.createOrGetTestServer(ctx, zone, host, hv.UID)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance %w", err)
 	}
@@ -288,13 +253,13 @@ func (r *OnboardingController) smokeTest(ctx context.Context, node *corev1.Node,
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
-		return r.completeOnboarding(ctx, host, node, hv)
+		return r.completeOnboarding(ctx, host, hv)
 	default:
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 }
 
-func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, node *corev1.Node, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
+func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 
 	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
@@ -331,7 +296,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	}
 	log.Info("removed from test-aggregate", "name", testAggregateName)
 
-	err = enableInstanceHA(node)
+	err = enableInstanceHA(hv)
 	log.Info("enabled instance-ha")
 	if err != nil {
 		return ctrl.Result{}, err
@@ -356,12 +321,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 }
 
 func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) error {
-	node := &corev1.Node{}
-	if err := r.Get(ctx, types.NamespacedName{Name: hv.Name}, node); err != nil {
-		return k8sclient.IgnoreNotFound(err)
-	}
-
-	hypervisorAddress := getHypervisorAddress(node)
+	hypervisorAddress := hv.Labels[corev1.LabelHostname]
 	if hypervisorAddress == "" {
 		return errRequeue
 	}
