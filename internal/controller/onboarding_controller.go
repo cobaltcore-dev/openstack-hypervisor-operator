@@ -57,7 +57,6 @@ const (
 	ConditionReasonOnboarding = "onboarding"
 	ConditionReasonTesting    = "testing"
 	ConditionReasonCompleted  = "completed"
-	ConditionReasonReady      = "ready"
 	testAggregateName         = "tenant_filter_tests"
 	testProjectName           = "test"
 	testDomainName            = "cc3test"
@@ -306,7 +305,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeReady,
 		Status:  metav1.ConditionTrue,
-		Reason:  ConditionReasonReady,
+		Reason:  kvmv1.ConditionReasonReadyReady,
 		Message: "Hypervisor is ready",
 	})
 
