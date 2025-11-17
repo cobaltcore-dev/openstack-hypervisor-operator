@@ -54,3 +54,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+  cleanup-untagged-versions:
+    name: Cleanup untagged GHCR versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+      - name: Cleanup untagged GHCR versions
+        uses: actions/delete-package-versions@v5
+        with:
+          min-versions-to-keep: "0"
+          package-name: ${{ github.event.repository.name }}
+          package-type: container
+          delete-only-untagged-versions: "true"
