@@ -35,6 +35,13 @@ const (
 	ConditionReasonReadyReady = "ready"
 	// or not
 	ConditionReasonReadyMaintenance = "maintenance"
+	ConditionReasonReadyEvicted     = "evicted"
+
+	// HypervisorMaintenance "enum"
+	MaintenanceUnset  = ""
+	MaintenanceManual = "manual"
+	MaintenanceAuto   = "auto"
+	MaintenanceHA     = "ha"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
