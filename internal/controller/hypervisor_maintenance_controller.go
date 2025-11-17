@@ -93,12 +93,20 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorDisabled,
 			Status:  metav1.ConditionFalse,
-			Message: "Hypervisor enabled",
+			Message: "Hypervisor is enabled",
 			Reason:  kvmv1.ConditionReasonSucceeded,
 		}) {
 			// Spec matches status
 			return false, nil
 		}
+
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  kvmv1.ConditionReasonReadyReady,
+			Message: "Hypervisor is ready",
+		})
+
 		// We need to enable the host as per spec
 		enableService := services.UpdateOpts{Status: services.ServiceEnabled}
 		log.Info("Enabling hypervisor", "id", serviceId)
@@ -110,12 +118,19 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorDisabled,
 			Status:  metav1.ConditionTrue,
-			Message: "Hypervisor disabled",
+			Message: "Hypervisor is disabled",
 			Reason:  kvmv1.ConditionReasonSucceeded,
 		}) {
 			// Spec matches status
 			return false, nil
 		}
+
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  kvmv1.ConditionReasonReadyMaintenance,
+			Message: "Hypervisor is disabled",
+		})
 
 		// We need to disable the host as per spec
 		enableService := services.UpdateOpts{

@@ -30,6 +30,11 @@ const (
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
 	ConditionTypeReady       = "Ready"
 	ConditionTypeTerminating = "Terminating"
+
+	// Reasons for the various being ready...
+	ConditionReasonReadyReady = "ready"
+	// or not
+	ConditionReasonReadyMaintenance = "maintenance"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor

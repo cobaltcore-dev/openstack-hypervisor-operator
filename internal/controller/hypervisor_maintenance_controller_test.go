@@ -27,7 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -90,7 +90,7 @@ var _ = Describe("HypervisorServiceController", func() {
 
 		By("Creating a blank Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:      hypervisorName.Name,
 				Namespace: hypervisorName.Namespace,
 			},
@@ -116,10 +116,10 @@ var _ = Describe("HypervisorServiceController", func() {
 			Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			hypervisor.Status.ServiceID = "1234"
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
-				v1.Condition{
+				metav1.Condition{
 					Type:    ConditionTypeOnboarding,
-					Status:  v1.ConditionFalse,
-					Reason:  v1.StatusSuccess,
+					Status:  metav1.ConditionFalse,
+					Reason:  metav1.StatusSuccess,
 					Message: "random text",
 				},
 			)
@@ -146,6 +146,16 @@ var _ = Describe("HypervisorServiceController", func() {
 					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
+
+				It("should set the ConditionTypeReady to true", func() {
+					updated := &kvmv1.Hypervisor{}
+					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(updated.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Status", metav1.ConditionTrue),
+						)))
+				})
 			}) // Spec.Maintenance=""
 		})
 
@@ -167,6 +177,16 @@ var _ = Describe("HypervisorServiceController", func() {
 					updated := &kvmv1.Hypervisor{}
 					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
+				})
+
+				It("should set the ConditionTypeReady to false", func() {
+					updated := &kvmv1.Hypervisor{}
+					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(updated.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Status", metav1.ConditionFalse),
+						)))
 				})
 			}) // Spec.Maintenance="<mode>"
 		}
