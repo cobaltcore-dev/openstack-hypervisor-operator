@@ -80,6 +80,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 	BeforeEach(func(ctx context.Context) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
+		DeferCleanup(fakeServer.Teardown)
 
 		By("Creating the HypervisorMaintenanceController")
 		controller = &HypervisorMaintenanceController{
@@ -97,6 +98,12 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			Spec: kvmv1.HypervisorSpec{},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		DeferCleanup(func(ctx context.Context) {
+			By("Deleting the Hypervisor resource")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+		})
 	})
 
 	// After the setup in JustBefore, we want to reconcile
@@ -104,16 +111,6 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 		req := ctrl.Request{NamespacedName: hypervisorName}
 		_, err := controller.Reconcile(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
-	})
-
-	AfterEach(func() {
-		By("Deleting the Hypervisor resource")
-		hypervisor := &kvmv1.Hypervisor{}
-		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
-
-		By("Tearing down the OpenStack http mock server")
-		fakeServer.Teardown()
 	})
 
 	// Tests
