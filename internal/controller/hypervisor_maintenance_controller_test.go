@@ -34,9 +34,9 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-var _ = Describe("HypervisorServiceController", func() {
+var _ = Describe("HypervisorMaintenanceController", func() {
 	var (
-		tc             *HypervisorMaintenanceController
+		controller     *HypervisorMaintenanceController
 		fakeServer     testhelper.FakeServer
 		hypervisorName = types.NamespacedName{Name: "hv-test"}
 	)
@@ -81,8 +81,8 @@ var _ = Describe("HypervisorServiceController", func() {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 
-		By("Creating the HypervisorServiceController")
-		tc = &HypervisorMaintenanceController{
+		By("Creating the HypervisorMaintenanceController")
+		controller = &HypervisorMaintenanceController{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
 			computeClient: client.ServiceClient(fakeServer),
@@ -99,11 +99,18 @@ var _ = Describe("HypervisorServiceController", func() {
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 	})
 
+	// After the setup in JustBefore, we want to reconcile
+	JustBeforeEach(func(ctx context.Context) {
+		req := ctrl.Request{NamespacedName: hypervisorName}
+		_, err := controller.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	AfterEach(func() {
 		By("Deleting the Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{}
-		Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-		Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
+		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
 
 		By("Tearing down the OpenStack http mock server")
 		fakeServer.Teardown()
@@ -113,7 +120,7 @@ var _ = Describe("HypervisorServiceController", func() {
 	Context("Onboarded Hypervisor", func() {
 		BeforeEach(func() {
 			hypervisor := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			hypervisor.Status.ServiceID = "1234"
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
 				metav1.Condition{
@@ -131,25 +138,22 @@ var _ = Describe("HypervisorServiceController", func() {
 			Context("Spec.Maintenance=\"\"", func() {
 				BeforeEach(func() {
 					hypervisor := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = ""
-					Expect(tc.Client.Update(ctx, hypervisor)).To(Succeed())
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 					expectedBody := `{"status": "enabled"}`
 					mockServiceUpdate(expectedBody)
-					req := ctrl.Request{NamespacedName: hypervisorName}
-					_, err := tc.Reconcile(ctx, req)
-					Expect(err).NotTo(HaveOccurred())
 				})
 
 				It("should set the ConditionTypeHypervisorDisabled to false", func() {
 					updated := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
 
 				It("should set the ConditionTypeReady to true", func() {
 					updated := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(updated.Status.Conditions).To(ContainElement(
 						SatisfyAll(
 							HaveField("Type", kvmv1.ConditionTypeReady),
@@ -163,25 +167,25 @@ var _ = Describe("HypervisorServiceController", func() {
 			Context(fmt.Sprintf("Spec.Maintenance=\"%v\"", mode), func() {
 				BeforeEach(func() {
 					hypervisor := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = mode
-					Expect(tc.Client.Update(ctx, hypervisor)).To(Succeed())
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 					expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
 					mockServiceUpdate(expectedBody)
 					req := ctrl.Request{NamespacedName: hypervisorName}
-					_, err := tc.Reconcile(ctx, req)
+					_, err := controller.Reconcile(ctx, req)
 					Expect(err).NotTo(HaveOccurred())
 				})
 
 				It("should set the ConditionTypeHypervisorDisabled to true", func() {
 					updated := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
 
 				It("should set the ConditionTypeReady to false", func() {
 					updated := &kvmv1.Hypervisor{}
-					Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(updated.Status.Conditions).To(ContainElement(
 						SatisfyAll(
 							HaveField("Type", kvmv1.ConditionTypeReady),
