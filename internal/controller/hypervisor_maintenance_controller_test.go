@@ -57,6 +57,25 @@ var _ = Describe("HypervisorServiceController", func() {
 		}`
 	)
 
+	mockServiceUpdate := func(expectedBody string) {
+		// Mock services.Update
+		fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, r *http.Request) {
+			// parse request
+			Expect(r.Method).To(Equal("PUT"))
+			Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
+
+			// verify request body
+			body := make([]byte, r.ContentLength)
+			_, err := r.Body.Read(body)
+			Expect(err == nil || err.Error() == "EOF").To(BeTrue())
+			Expect(string(body)).To(MatchJSON(expectedBody))
+
+			w.WriteHeader(http.StatusOK)
+			_, err = fmt.Fprint(w, ServiceEnabledResponse)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	}
+
 	// Setup and teardown
 	BeforeEach(func(ctx context.Context) {
 		By("Setting up the OpenStack http mock server")
@@ -115,24 +134,8 @@ var _ = Describe("HypervisorServiceController", func() {
 					Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = ""
 					Expect(tc.Client.Update(ctx, hypervisor)).To(Succeed())
-					// Mock services.Update
-					fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, r *http.Request) {
-						// parse request
-						Expect(r.Method).To(Equal("PUT"))
-						Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
-
-						// verify request body
-						expectedBody := `{"status": "enabled"}`
-						body := make([]byte, r.ContentLength)
-						_, err := r.Body.Read(body)
-						Expect(err == nil || err.Error() == "EOF").To(BeTrue())
-						Expect(string(body)).To(MatchJSON(expectedBody))
-
-						w.WriteHeader(http.StatusOK)
-						_, err = fmt.Fprint(w, ServiceEnabledResponse)
-						Expect(err).NotTo(HaveOccurred())
-					})
-
+					expectedBody := `{"status": "enabled"}`
+					mockServiceUpdate(expectedBody)
 					req := ctrl.Request{NamespacedName: hypervisorName}
 					_, err := tc.Reconcile(ctx, req)
 					Expect(err).NotTo(HaveOccurred())
@@ -153,24 +156,8 @@ var _ = Describe("HypervisorServiceController", func() {
 					Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = mode
 					Expect(tc.Client.Update(ctx, hypervisor)).To(Succeed())
-					// Mock services.Update
-					fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, r *http.Request) {
-						// parse request
-						Expect(r.Method).To(Equal("PUT"))
-						Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
-
-						// verify request body
-						expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
-						body := make([]byte, r.ContentLength)
-						_, err := r.Body.Read(body)
-						Expect(err == nil || err.Error() == "EOF").To(BeTrue())
-						Expect(string(body)).To(MatchJSON(expectedBody))
-
-						w.WriteHeader(http.StatusOK)
-						_, err = fmt.Fprint(w, ServiceEnabledResponse)
-						Expect(err).NotTo(HaveOccurred())
-					})
-
+					expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
+					mockServiceUpdate(expectedBody)
 					req := ctrl.Request{NamespacedName: hypervisorName}
 					_, err := tc.Reconcile(ctx, req)
 					Expect(err).NotTo(HaveOccurred())
