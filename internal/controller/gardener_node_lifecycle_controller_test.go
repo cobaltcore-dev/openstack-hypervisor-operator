@@ -18,18 +18,27 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-var _ = Describe("Gardener Maintenance Controller", func() {
-	const nodeName = "node-test"
-	var controller *GardenerNodeLifecycleController
+var _ = Describe("GardenerNodeLifecycleController", func() {
+	var (
+		controller     *GardenerNodeLifecycleController
+		hypervisorName = types.NamespacedName{Name: "hv-test"}
+		podName        = types.NamespacedName{Name: fmt.Sprintf("maint-%v", hypervisorName.Name), Namespace: "kube-system"}
+	)
 
 	BeforeEach(func() {
 		controller = &GardenerNodeLifecycleController{
@@ -37,35 +46,99 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			Scheme: k8sClient.Scheme(),
 		}
 
-		By("creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
-		By("creating the core resource for the Kind Node")
-		resource := &corev1.Node{
+		By("Creating a Hypervisor resource with LifecycleEnabled")
+		hypervisor := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName,
-				Labels: map[string]string{labelEvictionRequired: "true"},
+				Name:      hypervisorName.Name,
+				Namespace: hypervisorName.Namespace,
+			},
+			Spec: kvmv1.HypervisorSpec{
+				LifecycleEnabled: true,
 			},
 		}
-		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		DeferCleanup(func(ctx context.Context) {
+			By("Deleting the Hypervisor resource")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+		})
 	})
 
-	AfterEach(func() {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		By("Cleanup the specific node")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-	})
-
-	Context("When reconciling a node", func() {
-		It("should successfully reconcile the resource", func() {
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
-			}
-
-			By("Reconciling the created resource")
+	// After the setup in JustBefore, we want to reconcile
+	JustBeforeEach(func(ctx context.Context) {
+		req := ctrl.Request{NamespacedName: hypervisorName}
+		for range 3 {
 			_, err := controller.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+
+	Context("setting the pod disruption budget", func() {
+		When("not evicted", func() {
+			It("should set the pdb to minimum 1", func() {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(1))))
+			})
+		})
+		When("evicted", func() {
+			BeforeEach(func() {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("should set the pdb to minimum 0", func() {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(0))))
+			})
+		})
+	})
+
+	Context("create a signalling deployment", func() {
+		When("onboarding not completed", func() {
+			It("should create a failing deployment for the node", func() {
+				deployment := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
+				Expect(deployment.Spec.Template.Spec.Containers).To(
+					ContainElement(
+						HaveField("StartupProbe",
+							HaveField("ProbeHandler",
+								HaveField("Exec",
+									HaveField("Command", ContainElements("/bin/false")))))))
+			})
+		})
+		When("onboarding is completed", func() {
+			BeforeEach(func() {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("should create a succeeding deployment for the node", func() {
+				deployment := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
+				Expect(deployment.Spec.Template.Spec.Containers).To(
+					ContainElement(
+						HaveField("StartupProbe",
+							HaveField("ProbeHandler",
+								HaveField("Exec",
+									HaveField("Command", ContainElements("/bin/true")))))))
+			})
 		})
 	})
 })
