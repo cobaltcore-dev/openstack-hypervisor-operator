@@ -147,6 +147,74 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 
 			_, err := controller.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+
+	Context("setting the pod disruption budget", func() {
+		When("not evicted", func() {
+			It("should set the pdb to minimum 1", func() {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(1))))
+			})
+		})
+		When("evicted", func() {
+			BeforeEach(func() {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("should set the pdb to minimum 0", func() {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(0))))
+			})
+		})
+	})
+
+	Context("create a signalling deployment", func() {
+		When("onboarding not completed", func() {
+			It("should create a failing deployment for the node", func() {
+				deployment := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
+				Expect(deployment.Spec.Template.Spec.Containers).To(
+					ContainElement(
+						HaveField("StartupProbe",
+							HaveField("ProbeHandler",
+								HaveField("Exec",
+									HaveField("Command", ContainElements("/bin/false")))))))
+			})
+		})
+		When("onboarding is completed", func() {
+			BeforeEach(func() {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("should create a succeeding deployment for the node", func() {
+				deployment := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
+				Expect(deployment.Spec.Template.Spec.Containers).To(
+					ContainElement(
+						HaveField("StartupProbe",
+							HaveField("ProbeHandler",
+								HaveField("Exec",
+									HaveField("Command", ContainElements("/bin/true")))))))
+			})
 		})
 	})
 
@@ -164,30 +232,29 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 		})
 	})
 
-	Context("When node is terminating and offboarded", func() {
+	Context("When hypervisor is in termination maintenance and offboarded", func() {
 		BeforeEach(func(ctx SpecContext) {
-			// Set node as terminating and add required labels for disableInstanceHA
-			node := &corev1.Node{}
-			Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
-			node.Labels = map[string]string{
-				corev1.LabelHostname:          nodeName,
-				"topology.kubernetes.io/zone": "test-zone",
-			}
-			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
-				Type:   "Terminating",
-				Status: corev1.ConditionTrue,
-			})
-			Expect(k8sClient.Update(ctx, node)).To(Succeed())
-			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
-
-			// Set hypervisor as onboarded and offboarded
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeEvicting,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Succeeded",
+				Message: "All VMs evicted",
+			})
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeOnboarding,
 				Status:  metav1.ConditionFalse,
 				Reason:  "Onboarded",
 				Message: "Onboarding completed",
+			})
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeHaEnabled,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Evicted",
+				Message: "HA disabled",
 			})
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeOffboarded,
@@ -199,7 +266,11 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 		})
 
 		It("should allow pod eviction by setting the PDB to minAvailable 0", func(ctx SpecContext) {
+			// First reconcile applies the offboarding taint and returns early.
 			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+			// Second reconcile proceeds to update the PDB.
+			_, err = controller.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
 
 			pdb := &policyv1.PodDisruptionBudget{}
