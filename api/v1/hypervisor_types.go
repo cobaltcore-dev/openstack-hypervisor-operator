@@ -73,6 +73,10 @@ const (
 	ConditionReasonTerminating        = "Terminating"
 	ConditionReasonEvictionInProgress = "EvictionInProgress"
 	ConditionReasonWaitingForTraits   = "WaitingForTraits"
+
+	// ConditionTypeHaEnabled reasons
+	ConditionReasonHaEvicted    = "Evicted"    // HA disabled due to eviction
+	ConditionReasonHaOnboarding = "Onboarding" // HA disabled during onboarding
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
