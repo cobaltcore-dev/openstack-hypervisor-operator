@@ -311,21 +311,20 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 }
 
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
-	log := logger.FromContext(ctx)
-
 	// Check if we're in the RemovingTestAggregate phase
 	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates controller to sync
 		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated) {
-			log.Info("waiting for aggregates to be updated", "condition", kvmv1.ConditionTypeAggregatesUpdated)
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{}, nil
 		}
 
-		// Aggregates have been synced, mark onboarding as complete
-		log.Info("aggregates updated successfully", "aggregates", hv.Status.Aggregates)
-		base := hv.DeepCopy()
+		// Wait for HypervisorInstanceHa controller to enable HA
+		if hv.Spec.HighAvailability && !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
+			return ctrl.Result{}, nil
+		}
 
+		base := hv.DeepCopy()
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  metav1.ConditionFalse,
@@ -359,15 +358,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		return ctrl.Result{}, err
 	}
 
-	// Enable HA service before marking onboarding complete
-	err = enableInstanceHA(hv)
-	log.Info("enabled instance-ha")
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	base := hv.DeepCopy()
-
 	// Mark onboarding as almost complete, triggers other controllers to do their part
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOnboarding,
