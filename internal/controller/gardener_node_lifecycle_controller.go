@@ -93,9 +93,9 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 		minAvailable = 0
 
 		if onboardingCompleted && isTerminating(node) {
-			// Onboarded & terminating & eviction complete -> disable HA
-			if err := disableInstanceHA(hv); err != nil {
-				return ctrl.Result{}, err
+			// Wait for HypervisorInstanceHa controller to disable HA
+			if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
+				return ctrl.Result{}, nil // Will be reconciled again when condition changes
 			}
 		}
 	}

@@ -72,6 +72,10 @@ const (
 	ConditionReasonTestAggregates     = "TestAggregates"
 	ConditionReasonTerminating        = "Terminating"
 	ConditionReasonEvictionInProgress = "EvictionInProgress"
+
+	// ConditionTypeHaEnabled reasons
+	ConditionReasonHaEvicted    = "Evicted"    // HA disabled due to eviction
+	ConditionReasonHaOnboarding = "Onboarding" // HA disabled during onboarding
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
