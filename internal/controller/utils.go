@@ -37,7 +37,7 @@ import (
 
 func InstanceHaUrl(region, zone, hostname string) string {
 	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
-		return haURL
+		return haURL + "api/hypervisors/" + hostname
 	}
 	return fmt.Sprintf("https://kvm-ha-service-%v.%v.cloud.sap/api/hypervisors/%v", zone, region, hostname)
 }

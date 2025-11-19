@@ -52,6 +52,9 @@ const (
 	// ConditionTypeHypervisorDisabled is the type of condition for hypervisor disabled status
 	ConditionTypeHypervisorDisabled = "HypervisorDisabled"
 
+	// ConditionTypeHaEnabled is the type of condition for signalling if HA is enabled / disabled for the hypervisor
+	ConditionTypeHaEnabled = "HaEnabled"
+
 	// ConditionTypeEvicting is the type of condition for eviction status
 	ConditionTypeEvicting = "Evicting"
 )

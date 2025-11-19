@@ -430,6 +430,7 @@ var _ = Describe("Onboarding Controller", func() {
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = true
+				hv.Spec.HighAvailability = true
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 
 				// Simulate aggregates being set by aggregates controller
@@ -445,12 +446,22 @@ var _ = Describe("Onboarding Controller", func() {
 				err := reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
 
+				By("Simulating HypervisorInstanceHa controller enabling HA")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHaEnabled,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "HA is enabled",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
 				By("Reconciling again to call completeOnboarding and set RemovingTestAggregate")
 				err = reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verifying onboarding is in RemovingTestAggregate state")
-				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 				Expect(onboardingCond).NotTo(BeNil())
@@ -498,6 +509,7 @@ var _ = Describe("Onboarding Controller", func() {
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = false
+				hv.Spec.HighAvailability = true
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 
 				// Simulate aggregates being set by aggregates controller
@@ -517,8 +529,18 @@ var _ = Describe("Onboarding Controller", func() {
 				err = reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("Simulating aggregates and traits controllers setting conditions after removing test aggregate")
+				By("Simulating HypervisorInstanceHa controller enabling HA")
 				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHaEnabled,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "HA is enabled",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Simulating aggregates controller setting condition after removing test aggregate")
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Status.Aggregates = []kvmv1.Aggregate{
 					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
