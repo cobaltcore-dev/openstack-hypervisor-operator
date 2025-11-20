@@ -35,12 +35,8 @@ import (
 )
 
 var _ = Describe("TraitsController", func() {
-	var (
-		tc         *TraitsController
-		fakeServer testhelper.FakeServer
-	)
-
-	const TraitsBody = `
+	const (
+		TraitsBody = `
 {
     "resource_provider_generation": 1,
     "traits": [
@@ -48,7 +44,7 @@ var _ = Describe("TraitsController", func() {
         "HW_CPU_X86_VMX"
     ]
 }`
-	const TraitsBodyUpdated = `
+		TraitsBodyUpdated = `
 {
 	"resource_provider_generation": 2,
 	"traits": [
@@ -57,12 +53,20 @@ var _ = Describe("TraitsController", func() {
 		"HW_CPU_X86_VMX"
 	]
 }`
+	)
+
+	var (
+		tc             *TraitsController
+		fakeServer     testhelper.FakeServer
+		hypervisorName = types.NamespacedName{Name: "hv-test"}
+	)
 
 	// Setup and teardown
 
 	BeforeEach(func(ctx context.Context) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
+		DeferCleanup(fakeServer.Teardown)
 
 		By("Creating the TraitsController")
 		tc = &TraitsController{
@@ -74,8 +78,7 @@ var _ = Describe("TraitsController", func() {
 		By("Creating a Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{
 			ObjectMeta: v1.ObjectMeta{
-				Name:      "hv-test",
-				Namespace: "default",
+				Name: hypervisorName.Name,
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
@@ -83,30 +86,18 @@ var _ = Describe("TraitsController", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
-		// Ensure the resource status is being updated
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
-			Type:   kvmv1.ConditionTypeReady,
-			Status: v1.ConditionTrue,
-			Reason: "UnitTest",
+
+		DeferCleanup(func(ctx context.Context) {
+			By("Deleting the Hypervisor resource")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
 		})
-		hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
-		hypervisor.Status.HypervisorID = "1234"
-		Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-	})
-
-	AfterEach(func() {
-		By("Deleting the Hypervisor resource")
-		hypervisor := &kvmv1.Hypervisor{}
-		Expect(tc.Client.Get(ctx, types.NamespacedName{Name: "hv-test", Namespace: "default"}, hypervisor)).To(Succeed())
-		Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
-
-		By("Tearing down the OpenStack http mock server")
-		fakeServer.Teardown()
 	})
 
 	// Tests
 
-	Context("Reconcile", func() {
+	Context("Reconcile after onboarding before decomissioning", func() {
 		BeforeEach(func() {
 			// Mock resourceproviders.GetTraits
 			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
@@ -142,17 +133,103 @@ var _ = Describe("TraitsController", func() {
 				_, err = fmt.Fprint(w, TraitsBodyUpdated)
 				Expect(err).NotTo(HaveOccurred())
 			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+				Type:   ConditionTypeOnboarding,
+				Status: v1.ConditionFalse,
+				Reason: "UnitTest",
+			})
+			hypervisor.Status.HypervisorID = "1234"
+			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
 		It("should update traits and set status condition when traits differ", func() {
-			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "hv-test", Namespace: "default"}}
+			req := ctrl.Request{NamespacedName: hypervisorName}
 			_, err := tc.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, req.NamespacedName, updated)).To(Succeed())
+			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).To(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeTrue())
+		})
+	})
+
+	Context("Reconcile before onboarding", func() {
+		BeforeEach(func() {
+			// Mock resourceproviders.GetTraits
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+			// Mock resourceproviders.UpdateTraits
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Status.HypervisorID = "1234"
+			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should not update traits", func() {
+			req := ctrl.Request{NamespacedName: hypervisorName}
+			_, err := tc.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeFalse())
+		})
+	})
+
+	Context("Reconcile when terminating", func() {
+		BeforeEach(func() {
+			// Mock resourceproviders.GetTraits
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+			// Mock resourceproviders.UpdateTraits
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+				Type:   ConditionTypeOnboarding,
+				Status: v1.ConditionFalse,
+				Reason: "UnitTest",
+			})
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+				Type:   kvmv1.ConditionTypeTerminating,
+				Status: v1.ConditionTrue,
+				Reason: "UnitTest",
+			})
+			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
+			hypervisor.Status.HypervisorID = "1234"
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+		})
+
+		It("should not update traits", func() {
+			req := ctrl.Request{NamespacedName: hypervisorName}
+			_, err := tc.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeFalse())
 		})
 	})
 })

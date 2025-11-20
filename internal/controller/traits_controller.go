@@ -30,7 +30,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
@@ -71,6 +70,11 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// ensure hypervisorID is set
 	if hv.Status.HypervisorID == "" {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding) ||
+		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+		return ctrl.Result{}, nil
 	}
 
 	customTraitsApplied := slices.Collect(func(yield func(string) bool) {
@@ -178,6 +182,5 @@ func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(TraitsControllerName).
 		For(&kvmv1.Hypervisor{}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(tc)
 }
