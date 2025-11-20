@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
@@ -61,6 +60,12 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	hv := &kvmv1.Hypervisor{}
 	if err := ac.Get(ctx, req.NamespacedName, hv); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
+	}
+
+	/// On- and off-boarding need to mess with the aggregates, so let's get out of their way
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding) ||
+		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+		return ctrl.Result{}, nil
 	}
 
 	if slices.Equal(hv.Spec.Aggregates, hv.Status.Aggregates) {
@@ -154,7 +159,6 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(AggregatesControllerName).
 		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(ac)
 }
 
