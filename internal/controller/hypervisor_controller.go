@@ -20,11 +20,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -131,25 +131,16 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
 		}
 
-		// transport label changes
 		before := hypervisor.DeepCopy()
-		if transportLabels(&node.ObjectMeta, hypervisor) {
-			return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFrom(before))
+		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
+		if equality.Semantic.DeepEqual(hypervisor, before) {
+			return ctrl.Result{}, nil
 		}
 
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before, k8sclient.MergeFromWithOptimisticLock{}))
 	}
 
-	// transport lifecycle label to hypervisor spec
-	if nodeLabels.Has(labelLifecycleMode) {
-		hypervisor.Spec.LifecycleEnabled = true
-		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
-	}
-
-	// transport relevant labels
-	transportLabels(&node.ObjectMeta, hypervisor)
-	// transport relevant annotations
-	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
+	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
 
 	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
@@ -161,6 +152,19 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	log.Info("Created Hypervisor resource", "hypervisor", hypervisor.Name)
 	return ctrl.Result{}, nil
+}
+
+func syncLabelsAndAnnotations(nodeLabels labels.Set, hypervisor *kvmv1.Hypervisor, node *corev1.Node) {
+	// transport lifecycle label to hypervisor spec
+	if nodeLabels.Has(labelLifecycleMode) {
+		hypervisor.Spec.LifecycleEnabled = true
+		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
+	}
+
+	// transport relevant labels
+	transportLabels(&node.ObjectMeta, hypervisor)
+	// transport relevant annotations
+	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
 }
 
 func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
@@ -189,8 +193,7 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // transportAggregatesAndTraits transports relevant aggregates/traits from the Node to the Hypervisor spec
-func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) bool {
-	before := hypervisor.DeepCopy()
+func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) {
 	// transport aggregates annotation to hypervisor spec
 	if aggregates, found := node.Annotations[annotationAggregates]; found {
 		// split aggregates string
@@ -216,17 +219,14 @@ func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyp
 			}
 		})
 	}
-	return !reflect.DeepEqual(before, hypervisor)
 }
 
 // transportLabels transports relevant labels from the Node to the Hypervisor spec
-func transportLabels(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) bool {
-	before := hypervisor.DeepCopy()
+func transportLabels(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) {
 	// transfer labels
 	for _, transferLabel := range transferLabels {
 		if label, ok := node.Labels[transferLabel]; ok {
 			hypervisor.Labels[transferLabel] = label
 		}
 	}
-	return !reflect.DeepEqual(before, hypervisor)
 }
