@@ -19,11 +19,9 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -32,21 +30,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
-
-// setNodeLabels sets the labels on the node.
-func setNodeLabels(ctx context.Context, writer client.Writer, node *corev1.Node, labels map[string]string) (bool, error) {
-	newNode := node.DeepCopy()
-	maps.Copy(newNode.Labels, labels)
-	if maps.Equal(node.Labels, newNode.Labels) {
-		return false, nil
-	}
-
-	return true, writer.Patch(ctx, newNode, client.MergeFrom(node))
-}
 
 func InstanceHaUrl(region, zone, hostname string) string {
 	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
