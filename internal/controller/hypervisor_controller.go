@@ -68,6 +68,7 @@ type HypervisorController struct {
 // +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisorconfigoverrides,verbs=get;list;watch
 
 func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
@@ -78,7 +79,6 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	nodeLabels := labels.Set(node.Labels)
 	hypervisor := &kvmv1.Hypervisor{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   node.Name,
@@ -132,7 +132,11 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		before := hypervisor.DeepCopy()
-		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
+
+		if err := hv.reconcileHypervisor(ctx, hypervisor, node); err != nil {
+			return ctrl.Result{}, err
+		}
+
 		if equality.Semantic.DeepEqual(hypervisor, before) {
 			return ctrl.Result{}, nil
 		}
@@ -140,7 +144,9 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before, k8sclient.MergeFromWithOptimisticLock{}))
 	}
 
-	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
+	if err := hv.reconcileHypervisor(ctx, hypervisor, node); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
@@ -154,17 +160,77 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func syncLabelsAndAnnotations(nodeLabels labels.Set, hypervisor *kvmv1.Hypervisor, node *corev1.Node) {
+func (hv *HypervisorController) reconcileHypervisor(ctx context.Context, hypervisor *kvmv1.Hypervisor, node *corev1.Node) error {
+	nodeLabels := labels.Set(node.Labels)
+
+	spec := &hypervisor.Spec
+
 	// transport lifecycle label to hypervisor spec
 	if nodeLabels.Has(labelLifecycleMode) {
-		hypervisor.Spec.LifecycleEnabled = true
-		hypervisor.Spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
+		spec.LifecycleEnabled = true
+		spec.SkipTests = nodeLabels.Get(labelLifecycleMode) == "skip-tests"
 	}
 
 	// transport relevant labels
 	transportLabels(&node.ObjectMeta, hypervisor)
 	// transport relevant annotations
 	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
+
+	overrides := &kvmv1.HypervisorConfigOverride{}
+	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), overrides); k8sclient.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to get hypervisor-overrides: %w", err)
+	}
+	override := &overrides.Spec.Override
+
+	if override.Aggregates != nil {
+		spec.Aggregates = *override.Aggregates
+	}
+
+	if override.CreateCertManagerCertificate != nil {
+		spec.CreateCertManagerCertificate = *override.CreateCertManagerCertificate
+	}
+
+	if override.CreateCertManagerCertificate != nil {
+		spec.CreateCertManagerCertificate = *override.CreateCertManagerCertificate
+	}
+
+	if override.CustomTraits != nil {
+		spec.CustomTraits = *override.CustomTraits
+	}
+
+	if override.EvacuateOnReboot != nil {
+		spec.EvacuateOnReboot = *override.EvacuateOnReboot
+	}
+
+	if override.HighAvailability != nil {
+		spec.HighAvailability = *override.HighAvailability
+	}
+
+	if override.InstallCertificate != nil {
+		spec.InstallCertificate = *override.InstallCertificate
+	}
+
+	if override.LifecycleEnabled != nil {
+		spec.LifecycleEnabled = *override.LifecycleEnabled
+	}
+
+	if override.Maintenance != nil {
+		spec.Maintenance = *override.Maintenance
+	}
+
+	if override.OperatingSystemVersion != nil {
+		spec.OperatingSystemVersion = *override.OperatingSystemVersion
+	}
+
+	if override.Reboot != nil {
+		spec.Reboot = *override.Reboot
+	}
+
+	if override.SkipTests != nil {
+		spec.SkipTests = *override.SkipTests
+	}
+
+	return nil
 }
 
 func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
@@ -188,6 +254,7 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(HypervisorControllerName).
 		For(&corev1.Node{}).
+		For(&kvmv1.HypervisorConfigOverride{}).
 		WithEventFilter(novaVirtLabeledPredicate).
 		Complete(hv)
 }

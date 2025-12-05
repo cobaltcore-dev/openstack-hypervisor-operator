@@ -72,6 +72,14 @@ rules:
   - patch
   - update
 - apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - hypervisorconfigoverrides
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - policy
   resources:
   - poddisruptionbudgets
