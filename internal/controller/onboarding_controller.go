@@ -53,6 +53,7 @@ var errRequeue = errors.New("requeue requested")
 const (
 	defaultWaitTime           = 1 * time.Minute
 	ConditionTypeOnboarding   = "Onboarding"
+	ConditionReasonAborted    = "aborted"
 	ConditionReasonInitial    = "initial"
 	ConditionReasonOnboarding = "onboarding"
 	ConditionReasonTesting    = "testing"
@@ -87,17 +88,18 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
+	computeHost := hv.Name
+
 	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
-		return ctrl.Result{}, nil
+		return r.abortOnboarding(ctx, hv, computeHost)
 	}
 
 	// check if hv is terminating
 	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
-		return ctrl.Result{}, nil
+		return r.abortOnboarding(ctx, hv, computeHost)
 	}
 
-	computeHost := hv.Name
 	// We bail here out, because the openstack api is not the best to poll
 	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
 		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -142,6 +144,34 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
+}
+
+func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) (ctrl.Result, error) {
+	status := meta.FindStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
+	// Never onboarded
+	if status == nil {
+		return ctrl.Result{}, nil
+	}
+
+	changed := meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    kvmv1.ConditionTypeReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  ConditionReasonOnboarding,
+		Message: "Onboarding aborted",
+	}) || meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeOnboarding,
+		Status:  metav1.ConditionTrue,
+		Reason:  ConditionReasonAborted,
+		Message: "Aborted due to LivecycleEnabled being false",
+	})
+	if !changed {
+		// Already aborted
+		return ctrl.Result{}, nil
+	}
+	if err := r.deleteTestServers(ctx, computeHost); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, r.Status().Update(ctx, hv)
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, host string) error {
@@ -261,27 +291,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 
-	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
-
-	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{
-		Name: serverPrefix,
-	}).AllPages(ctx)
-
-	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{}, err
-	}
-
-	serverList, err := servers.ExtractServers(serverPages)
+	err := r.deleteTestServers(ctx, host)
 	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	for _, server := range serverList {
-		log.Info("deleting server", "name", server.Name)
-		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
-		if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			return ctrl.Result{}, err
-		}
+		return ctrl.Result{}, fmt.Errorf("failed to delete test servers due to %w", err)
 	}
 
 	aggs, err := aggregatesByName(ctx, r.computeClient)
@@ -317,6 +329,35 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		Message: "Onboarding completed",
 	})
 	return ctrl.Result{}, r.Status().Update(ctx, hv)
+}
+
+func (r *OnboardingController) deleteTestServers(ctx context.Context, host string) error {
+	log := logger.FromContext(ctx)
+	serverPrefix := fmt.Sprintf("%v-%v", testPrefixName, host)
+
+	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{
+		Name: serverPrefix,
+	}).AllPages(ctx)
+
+	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return err
+	}
+
+	serverList, err := servers.ExtractServers(serverPages)
+	if err != nil {
+		return err
+	}
+
+	errs := make([]error, 0)
+	for _, server := range serverList {
+		log.Info("deleting server", "name", server.Name)
+		err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
+		if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) error {
@@ -392,7 +433,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 			continue
 		}
 		if server.Name != serverName || foundServer != nil {
-			log.Info("deleting server", "name", server.Name)
+			log.Info("deleting outdated server", "name", server.Name)
 			err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr()
 			if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 				log.Error(err, "failed deleting instance due to", "instance", server.ID)
