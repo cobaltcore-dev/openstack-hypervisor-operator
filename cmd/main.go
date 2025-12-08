@@ -20,8 +20,11 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	gruntime "runtime"
 
+	"github.com/sapcc/go-api-declarations/bininfo"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -154,6 +157,10 @@ func main() {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 	restConfig := ctrl.GetConfigOrDie()
+	// This will set the managed field manager to openstack-hypervisor-operator
+	restConfig.UserAgent = fmt.Sprintf("%s/%s (%s/%s) %s",
+		bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
+		bininfo.CommitOr("edge"))
 
 	var cacheOptions cache.Options
 	if global.LabelSelector != "" {
