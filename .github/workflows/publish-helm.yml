@@ -15,7 +15,7 @@ jobs:
   publish-chart:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # Required for pushing the repository
       packages: write # Required to push to GHCR
 
     steps:
@@ -24,6 +24,13 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v4.3.1
+
+      - name: Bump Helm Chart
+        uses: pluralsh/chart-releaser@v0.1.3
+        with:
+          path: ./charts/openstack-hypervisor-operator/
+          release: "0.1.0"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package Helm chart
         run: |
@@ -37,4 +44,4 @@ jobs:
         run: |
           CHART_NAME=openstack-hypervisor-operator
           CHART_VERSION=$(grep "version:" ./charts/${CHART_NAME}/Chart.yaml | awk '{print $2}')
-          helm push "${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}"
+          helm push "${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/${CHART_NAME}/charts"
