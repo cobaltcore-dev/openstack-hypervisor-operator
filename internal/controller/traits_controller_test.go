@@ -97,7 +97,7 @@ var _ = Describe("TraitsController", func() {
 
 	// Tests
 
-	Context("Reconcile after onboarding before decomissioning", func() {
+	Context("Reconcile after onboarding before decommissioning", func() {
 		BeforeEach(func() {
 			// Mock resourceproviders.GetTraits
 			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {

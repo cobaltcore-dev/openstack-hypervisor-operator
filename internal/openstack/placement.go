@@ -135,7 +135,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 		return err
 	}
 
-	// It is a map of consumer-ids to their alloctions, we just go over their ids
+	// It is a map of consumer-ids to their allocations, we just go over their ids
 	// to cross-check, what is stored for the consumer itself
 	for consumerID := range providerAllocations.Allocations {
 		// Allocations of the consumer mapped by the resource provider, so the
