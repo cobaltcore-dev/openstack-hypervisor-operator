@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -149,3 +150,13 @@ func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.Owner
 }
 
 var ErrRetry = errors.New("ErrRetry")
+
+// returns if any ManagedField of the object has been modified by kubectl
+func HasKubectlManagedFields(object *metav1.ObjectMeta) bool {
+	for _, field := range object.GetManagedFields() {
+		if strings.HasPrefix(field.Manager, "kubectl") {
+			return true
+		}
+	}
+	return false
+}
