@@ -26,6 +26,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.EvictionStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Hypervisor"):
 		return &apiv1.HypervisorApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigOverride"):
+		return &apiv1.HypervisorConfigOverrideApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigOverrideSpec"):
+		return &apiv1.HypervisorConfigOverrideSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigOverrideStatus"):
+		return &apiv1.HypervisorConfigOverrideStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigSet"):
+		return &apiv1.HypervisorConfigSetApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigSetSpec"):
+		return &apiv1.HypervisorConfigSetSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigSetStatus"):
+		return &apiv1.HypervisorConfigSetStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigSetTemplate"):
+		return &apiv1.HypervisorConfigSetTemplateApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("HypervisorConfigSpec"):
+		return &apiv1.HypervisorConfigSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("HypervisorSpec"):
 		return &apiv1.HypervisorSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("HypervisorStatus"):
