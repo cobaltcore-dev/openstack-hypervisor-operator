@@ -62,6 +62,32 @@ var _ = Describe("Onboarding Controller", func() {
 	]
 }`
 
+		aggregatesBodyUnexpected = `{
+	"aggregates": [
+		{
+			"name": "test-az",
+			"availability_zone": "test-az",
+			"deleted": false,
+			"id": 100001,
+			"hosts": []
+		},
+		{
+			"name": "tenant_filter_tests",
+			"availability_zone": "",
+			"deleted": false,
+			"id": 99,
+			"hosts": []
+		},
+		{
+			"name": "unexpected",
+			"availability_zone": "",
+			"deleted": false,
+			"id": -1,
+			"hosts": ["test-host"]
+		}
+	]
+}`
+
 		aggregatesBodySetup = `{
     "aggregates": [
 		{
@@ -249,12 +275,6 @@ var _ = Describe("Onboarding Controller", func() {
 				w.WriteHeader(http.StatusOK)
 				Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)).ToNot(BeNil())
 			})
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, aggregatesBodyInitial)
-				Expect(err).NotTo(HaveOccurred())
-			})
 
 			fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
@@ -278,34 +298,93 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 		})
 
-		It("should set the Service- and HypervisorId from Nova", func(ctx SpecContext) {
-			By("Reconciling the created resource")
-			err := reconcileLoop(ctx, 1)
-			Expect(err).NotTo(HaveOccurred())
-			hv := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-			Expect(hv.Status.ServiceID).To(Equal(serviceId))
-			Expect(hv.Status.HypervisorID).To(Equal(hypervisorId))
+		When("it is a clean setup", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, aggregatesBodyInitial)
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
+			It("should set the Service- and HypervisorId from Nova", func(ctx SpecContext) {
+				By("Reconciling the created resource")
+				err := reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(Equal(serviceId))
+				Expect(hv.Status.HypervisorID).To(Equal(hypervisorId))
+			})
+
+			It("should update the status accordingly", func(ctx SpecContext) {
+				By("Reconciling the created resource")
+				err := reconcileLoop(ctx, 2)
+				Expect(err).NotTo(HaveOccurred())
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.Conditions).To(ContainElements(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeReady),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", ConditionReasonOnboarding),
+					),
+					SatisfyAll(
+						HaveField("Type", ConditionTypeOnboarding),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", ConditionReasonTesting),
+					),
+				))
+			})
 		})
 
-		It("should update the status accordingly", func(ctx SpecContext) {
-			By("Reconciling the created resource")
-			err := reconcileLoop(ctx, 2)
-			Expect(err).NotTo(HaveOccurred())
-			hv := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-			Expect(hv.Status.Conditions).To(ContainElements(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", ConditionReasonOnboarding),
-				),
-				SatisfyAll(
-					HaveField("Type", ConditionTypeOnboarding),
-					HaveField("Status", metav1.ConditionTrue),
-					HaveField("Reason", ConditionReasonTesting),
-				),
-			))
+		When("it the host is already in an unexpected aggregate", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, aggregatesBodyUnexpected)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/-1/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, addedHostToTestBody)
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
+			It("should set the Service- and HypervisorId from Nova", func(ctx SpecContext) {
+				By("Reconciling the created resource")
+				err := reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(Equal(serviceId))
+				Expect(hv.Status.HypervisorID).To(Equal(hypervisorId))
+			})
+
+			It("should update the status accordingly", func(ctx SpecContext) {
+				By("Reconciling the created resource")
+				err := reconcileLoop(ctx, 2)
+				Expect(err).NotTo(HaveOccurred())
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.Conditions).To(ContainElements(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeReady),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", ConditionReasonOnboarding),
+					),
+					SatisfyAll(
+						HaveField("Type", ConditionTypeOnboarding),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", ConditionReasonTesting),
+					),
+				))
+			})
 		})
 	})
 
