@@ -30,6 +30,7 @@ const (
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
 	ConditionTypeReady       = "Ready"
 	ConditionTypeTerminating = "Terminating"
+	ConditionTypeTainted     = "Tainted"
 
 	// Reasons for the various being ready...
 	ConditionReasonReadyReady = "ready"
@@ -218,6 +219,7 @@ type HypervisorStatus struct {
 // +kubebuilder:printcolumn:JSONPath=.metadata.labels.worker\.garden\.sapcloud\.io/group,name="Group",type="string",priority=2
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].status",name="Ready",type="string"
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Ready\")].reason",name="State",type="string"
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Tainted\")].message",name="Taint",type="string"
 // +kubebuilder:printcolumn:JSONPath=".spec.lifecycleEnabled",name="Lifecycle",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".spec.highAvailability",name="High Availability",type="boolean"
 // +kubebuilder:printcolumn:JSONPath=".spec.skipTests",name="Skip Tests",type="boolean"

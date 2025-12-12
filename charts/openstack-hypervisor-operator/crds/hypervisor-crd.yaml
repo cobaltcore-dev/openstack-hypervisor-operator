@@ -34,6 +34,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Ready")].reason
       name: State
       type: string
+    - jsonPath: .status.conditions[?(@.type=="Tainted")].message
+      name: Taint
+      type: string
     - jsonPath: .spec.lifecycleEnabled
       name: Lifecycle
       type: boolean
