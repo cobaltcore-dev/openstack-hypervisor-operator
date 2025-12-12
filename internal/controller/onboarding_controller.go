@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -203,6 +204,22 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 	err = addToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
 	if err != nil {
 		return fmt.Errorf("failed to agg to test aggregate %w", err)
+	}
+
+	var errs []error
+	for aggregateName, aggregate := range aggs {
+		if aggregateName == testAggregateName || aggregateName == zone {
+			continue
+		}
+		if slices.Contains(aggregate.Hosts, host) {
+			if err := removeFromAggregate(ctx, r.computeClient, aggs, host, aggregateName); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to remove host %v from aggregates due to %w", host, errors.Join(errs...))
 	}
 
 	// The service may be forced down previously due to an HA event,
