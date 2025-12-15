@@ -62,7 +62,6 @@ const (
 	testAggregateName         = "tenant_filter_tests"
 	testProjectName           = "test"
 	testDomainName            = "cc3test"
-	testFlavorName            = "c_k_c2_m2_v2"
 	testImageName             = "cirros-d240801-kvm"
 	testPrefixName            = "ohooc-"
 	testVolumeType            = "kvm-pilot"
@@ -484,72 +483,22 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		return foundServer, nil
 	}
 
-	flavorPages, err := flavors.ListDetail(r.testComputeClient, nil).AllPages(ctx)
-	if err != nil {
-		return nil, err
-	}
-	extractedFlavors, err := flavors.ExtractFlavors(flavorPages)
+	flavorRef, err := r.findTestFlavor(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var flavorRef string
-	for _, flavor := range extractedFlavors {
-		if flavor.Name == testFlavorName {
-			flavorRef = flavor.ID
-			break
-		}
-	}
-
-	if flavorRef == "" {
-		return nil, errors.New("couldn't find flavor")
-	}
-
-	var imageRef string
-
-	imagePages, err := images.List(r.testImageClient, images.ListOpts{Name: testImageName}).AllPages(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	imagesList, err := images.ExtractImages(imagePages)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, image := range imagesList {
-		if image.Name == testImageName {
-			imageRef = image.ID
-			break
-		}
-	}
-
-	if imageRef == "" {
-		return nil, errors.New("couldn't find image")
-	}
-
-	falseVal := false
-	networkPages, err := networks.List(r.testNetworkClient, networks.ListOpts{Shared: &falseVal}).AllPages(ctx)
+	imageRef, err := r.findTestImage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("could not list networks due to %w", err)
 	}
 
-	extractedNetworks, err := networks.ExtractNetworks(networkPages)
+	networkRef, err := r.findTestNetwork(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("could not extract network due to %w", err)
 	}
 
-	var networkRef string
-	for _, network := range extractedNetworks {
-		networkRef = network.ID
-		break
-	}
-
-	if networkRef == "" {
-		return nil, errors.New("couldn't find network")
-	}
-
-	log.Info("creating server", "name", serverName)
+	log.Info("creating server", "name", serverName, "flavor", flavorRef)
 	server, err := servers.Create(ctx, r.testComputeClient, servers.CreateOpts{
 		Name:             serverName,
 		AvailabilityZone: fmt.Sprintf("%v:%v", zone, computeHost),
@@ -579,6 +528,67 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	// Apparently the response doesn't contain the value
 	server.Name = serverName
 	return server, nil
+}
+
+func (r *OnboardingController) findTestNetwork(ctx context.Context) (string, error) {
+	falseVal := false
+	networkPages, err := networks.List(r.testNetworkClient, networks.ListOpts{Shared: &falseVal}).AllPages(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	extractedNetworks, err := networks.ExtractNetworks(networkPages)
+	if err != nil {
+		return "", err
+	}
+
+	for _, network := range extractedNetworks {
+		return network.ID, nil
+	}
+
+	return "", errors.New("couldn't find network")
+}
+
+func (r *OnboardingController) findTestImage(ctx context.Context) (string, error) {
+	imagePages, err := images.List(r.testImageClient, images.ListOpts{Name: testImageName}).AllPages(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	imagesList, err := images.ExtractImages(imagePages)
+	if err != nil {
+		return "", err
+	}
+
+	for _, image := range imagesList {
+		if image.Name == testImageName {
+			return image.ID, nil
+		}
+	}
+
+	return "", errors.New("couldn't find image")
+}
+
+func (r *OnboardingController) findTestFlavor(ctx context.Context) (string, error) {
+	flavorPages, err := flavors.ListDetail(r.testComputeClient, flavors.ListOpts{SortDir: "asc", SortKey: "memory_mb"}).AllPages(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	extractedFlavors, err := flavors.ExtractFlavors(flavorPages)
+	if err != nil {
+		return "", err
+	}
+
+	for _, flavor := range extractedFlavors {
+		_, found := flavor.ExtraSpecs["capabilities:hypervisor_type"]
+		if !found {
+			// Flavor does not restrict the hypervisor-type
+			return flavor.ID, nil
+		}
+	}
+
+	return "", errors.New("couldn't find flavor")
 }
 
 // SetupWithManager sets up the controller with the Manager.
