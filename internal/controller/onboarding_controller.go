@@ -152,12 +152,20 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 		return nil
 	}
 
-	changed := meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeReady,
-		Status:  metav1.ConditionFalse,
-		Reason:  ConditionReasonOnboarding,
-		Message: "Onboarding aborted",
-	})
+	changed := false
+	ready := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady)
+	if ready != nil {
+		// Only undo ones own readiness status reporting
+		if ready.Reason == ConditionReasonOnboarding {
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  ConditionReasonOnboarding,
+				Message: "Onboarding aborted",
+			})
+			changed = true
+		}
+	}
 
 	if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    ConditionTypeOnboarding,
