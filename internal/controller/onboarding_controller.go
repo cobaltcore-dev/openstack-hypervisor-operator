@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -104,9 +103,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// We bail here out, because the openstack api is not the best to poll
 	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return r.ensureNovaProperties(ctx, hv)
-		}); err != nil {
+		if err := r.ensureNovaProperties(ctx, hv); err != nil {
 			if errors.Is(err, errRequeue) {
 				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 			}
