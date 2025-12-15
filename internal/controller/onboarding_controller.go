@@ -516,12 +516,12 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	falseVal := false
 	networkPages, err := networks.List(r.testNetworkClient, networks.ListOpts{Shared: &falseVal}).AllPages(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not list networks due to %w", err)
 	}
 
 	extractedNetworks, err := networks.ExtractNetworks(networkPages)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not extract network due to %w", err)
 	}
 
 	var networkRef string
