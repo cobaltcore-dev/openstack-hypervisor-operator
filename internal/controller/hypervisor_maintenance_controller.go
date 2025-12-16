@@ -233,7 +233,7 @@ func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, 
 		}
 
 		// This also transports the label-selector, if set
-		transportLabels(&eviction.ObjectMeta, hypervisor)
+		transportLabels(&eviction.ObjectMeta, &hypervisor.ObjectMeta)
 
 		if err = hec.Create(ctx, eviction); err != nil {
 			return metav1.ConditionUnknown, fmt.Errorf("failed to create eviction due to %w", err)
