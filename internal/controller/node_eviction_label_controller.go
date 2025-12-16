@@ -140,6 +140,7 @@ func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, evi
 			Reason:     fmt.Sprintf("openstack-hypervisor-operator: label %v=%v", labelEvictionRequired, maintenanceValue),
 		}
 
+		transportLabels(&hypervisor.ObjectMeta, &eviction.ObjectMeta)
 		if err = r.Create(ctx, eviction); err != nil {
 			return "", fmt.Errorf("failed to create eviction due to %w", err)
 		}
