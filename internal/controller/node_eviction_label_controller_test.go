@@ -43,64 +43,81 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		zone     = "zone"
 	)
 	var (
-		nodeReconciler *NodeEvictionLabelReconciler
-		req            = ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
-		fakeServer     testhelper.FakeServer
-	)
-
-	Context("When reconciling a node", func() {
-		ctx := context.Background() //nolint:govet
-
-		reconcileNodeLoop := func(steps int) (res ctrl.Result, err error) {
+		reconciler        *NodeEvictionLabelReconciler
+		req               = ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
+		fakeServer        testhelper.FakeServer
+		reconcileNodeLoop = func(ctx context.Context, steps int) (res ctrl.Result, err error) {
 			for range steps {
-				res, err = nodeReconciler.Reconcile(ctx, req)
+				res, err = reconciler.Reconcile(ctx, req)
 				if err != nil {
 					return
 				}
 			}
 			return
 		}
+	)
 
-		BeforeEach(func() {
-			fakeServer = testhelper.SetupHTTP()
-			Expect(os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint())).To(Succeed())
-			nodeReconciler = &NodeEvictionLabelReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	BeforeEach(func(ctx context.Context) {
+		fakeServer = testhelper.SetupHTTP()
+		Expect(os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint())).To(Succeed())
 
-			By("creating the namespace for the reconciler")
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+		DeferCleanup(func() {
+			Expect(os.Unsetenv("KVM_HA_SERVICE_URL")).To(Succeed())
+			fakeServer.Teardown()
+		})
 
-			By("creating the node resource")
-			resource := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						corev1.LabelHostname:       hostName,
-						corev1.LabelTopologyRegion: region,
-						corev1.LabelTopologyZone:   zone,
-						labelEvictionRequired:      "true",
-					},
+		reconciler = &NodeEvictionLabelReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		By("creating the namespace for the reconciler")
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+
+		By("creating the node resource")
+		resource := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					corev1.LabelHostname:       hostName,
+					corev1.LabelTopologyRegion: region,
+					corev1.LabelTopologyZone:   zone,
+					labelEvictionRequired:      "true",
 				},
-			}
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			By("creating the hypervisor resource")
-			hypervisor := &kvmv1.Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						corev1.LabelHostname: nodeName,
-					},
-				},
-				Spec: kvmv1.HypervisorSpec{
-					LifecycleEnabled: true,
-				},
-			}
-			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
+		DeferCleanup(func(ctx context.Context) {
+			By("Cleanup the specific node")
+			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+		})
 
+		By("creating the hypervisor resource")
+		hypervisor := &kvmv1.Hypervisor{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					corev1.LabelHostname: nodeName,
+				},
+			},
+			Spec: kvmv1.HypervisorSpec{
+				LifecycleEnabled: true,
+			},
+		}
+		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		DeferCleanup(func(ctx context.Context) {
+			By("Cleanup the specific hypervisor")
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+		})
+
+	})
+
+	Context("When reconciling a node", func() {
+		BeforeEach(func(ctx context.Context) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, hypervisor)).To(Succeed())
 			By("updating the hypervisor status sub-resource")
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    ConditionTypeOnboarding,
@@ -111,22 +128,9 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		AfterEach(func() {
-			// Cleanup the hypervisor created for the test
-			hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			By("Cleanup the specific hypervisor")
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
-
-			// Cleanup the node created for the test
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			By("Cleanup the specific node")
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-			fakeServer.Teardown()
-		})
-
-		It("should successfully reconcile the resource", func() {
+		It("should successfully reconcile the resource", func(ctx context.Context) {
 			By("ConditionType the created resource")
-			_, err := reconcileNodeLoop(5)
+			_, err := reconcileNodeLoop(ctx, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// expect node controller to create an eviction for the node
