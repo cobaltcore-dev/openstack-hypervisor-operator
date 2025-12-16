@@ -67,10 +67,9 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	maintenanceValue, found := node.Labels[labelEvictionRequired]
-	name := fmt.Sprintf("maintenance-required-%v", hostname)
 	eviction := &kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: hostname,
 		},
 	}
 

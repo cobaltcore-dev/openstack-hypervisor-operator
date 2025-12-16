@@ -19,7 +19,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -135,7 +134,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 
 			// expect node controller to create an eviction for the node
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      fmt.Sprintf("maintenance-required-%v", hostName),
+				Name:      hostName,
 				Namespace: "monsoon3",
 			}, &kvmv1.Eviction{})
 			Expect(err).NotTo(HaveOccurred())
