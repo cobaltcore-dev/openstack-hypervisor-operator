@@ -40,10 +40,7 @@ import (
 )
 
 const (
-	ConditionTypeAggregatesUpdated = "AggregatesUpdated"
-	ConditionAggregatesSuccess     = "Success"
-	ConditionAggregatesFailed      = "Failed"
-	AggregatesControllerName       = "aggregates"
+	AggregatesControllerName = "aggregates"
 )
 
 type AggregatesController struct {
@@ -63,7 +60,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	/// On- and off-boarding need to mess with the aggregates, so let's get out of their way
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding) ||
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) ||
 		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
 		return ctrl.Result{}, nil
 	}
@@ -119,9 +116,9 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	hv.Status.Aggregates = hv.Spec.Aggregates
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeAggregatesUpdated,
+		Type:    kvmv1.ConditionTypeAggregatesUpdated,
 		Status:  metav1.ConditionTrue,
-		Reason:  ConditionAggregatesSuccess,
+		Reason:  kvmv1.ConditionReasonSucceeded,
 		Message: "Aggregates updated successfully",
 	})
 	return ctrl.Result{}, ac.Status().Update(ctx, hv)
@@ -130,9 +127,9 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 // setErrorCondition sets the error condition on the Hypervisor status, returns error if update fails
 func (ac *AggregatesController) setErrorCondition(ctx context.Context, hv *kvmv1.Hypervisor, msg string) error {
 	condition := metav1.Condition{
-		Type:    ConditionTypeAggregatesUpdated,
+		Type:    kvmv1.ConditionTypeAggregatesUpdated,
 		Status:  metav1.ConditionFalse,
-		Reason:  ConditionAggregatesFailed,
+		Reason:  kvmv1.ConditionReasonFailed,
 		Message: msg,
 	}
 

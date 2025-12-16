@@ -94,7 +94,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	if !HasStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding) {
+	if !HasStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
 		// Hasn't even started to onboard that node, so nothing to evict for sure
 		value = "true"
 	} else {

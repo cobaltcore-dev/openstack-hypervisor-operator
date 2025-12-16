@@ -150,6 +150,7 @@ spec:
                 - manual
                 - auto
                 - ha
+                - termination
                 type: string
               reboot:
                 default: false

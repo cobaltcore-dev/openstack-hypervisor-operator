@@ -26,23 +26,41 @@ import (
 // INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 // Important: Run "make" to regenerate code after modifying this file
 
+// Hypervisor Condition Types
+// type of condition in CamelCase or in foo.example.com/CamelCase.
 const (
+	// ConditionTypeOnboarding is the type of condition for onboarding status
+	ConditionTypeOnboarding = "Onboarding"
+
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
-	ConditionTypeReady       = "Ready"
+	ConditionTypeReady = "Ready"
+
+	// ConditionTypeTerminating is the type of condition for terminating status of a hypervisor
 	ConditionTypeTerminating = "Terminating"
-	ConditionTypeTainted     = "Tainted"
 
-	// Reasons for the various being ready...
-	ConditionReasonReadyReady = "ready"
-	// or not
-	ConditionReasonReadyMaintenance = "maintenance"
-	ConditionReasonReadyEvicted     = "evicted"
+	// ConditionTypeTainted is the type of condition for tainted status of a hypervisor
+	ConditionTypeTainted = "Tainted"
 
-	// HypervisorMaintenance "enum"
-	MaintenanceUnset  = ""
-	MaintenanceManual = "manual"
-	MaintenanceAuto   = "auto"
-	MaintenanceHA     = "ha"
+	// ConditionTypeTraitsUpdated is the type of condition for traits updated status of a hypervisor
+	ConditionTypeTraitsUpdated = "TraitsUpdated"
+
+	// ConditionTypeAggregatesUpdated is the type of condition for aggregates updated status of a hypervisor
+	ConditionTypeAggregatesUpdated = "AggregatesUpdated"
+)
+
+// Condition Reasons
+// The value should be a CamelCase string.
+const (
+	// ConditionTypeReady reasons
+	ConditionReasonReadyReady       = "Ready"
+	ConditionReasonReadyMaintenance = "Maintenance"
+	ConditionReasonReadyEvicted     = "Evicted"
+
+	// ConditionTypeOnboarding reasons
+	ConditionReasonInitial    = "Initial"
+	ConditionReasonOnboarding = "Onboarding"
+	ConditionReasonTesting    = "Testing"
+	ConditionReasonAborted    = "Aborted"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
@@ -89,10 +107,19 @@ type HypervisorSpec struct {
 	InstallCertificate bool `json:"installCertificate"`
 
 	// +kubebuilder:optional
-	// +kubebuilder:validation:Enum:="";manual;auto;ha
+	// +kubebuilder:validation:Enum:="";manual;auto;ha;termination
 	// Maintenance indicates whether the hypervisor is in maintenance mode.
 	Maintenance string `json:"maintenance,omitempty"`
 }
+
+const (
+	// HypervisorMaintenance "enum"
+	MaintenanceUnset       = ""
+	MaintenanceManual      = "manual"      // manual maintenance mode by external user
+	MaintenanceAuto        = "auto"        // automatic maintenance mode
+	MaintenanceHA          = "ha"          // high availability maintenance mode
+	MaintenanceTermination = "termination" // internal use only, when node is terminating state
+)
 
 type Instance struct {
 	// Represents the instance ID (uuidv4).

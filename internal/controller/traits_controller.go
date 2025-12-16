@@ -39,11 +39,8 @@ import (
 )
 
 const (
-	customPrefix               = "CUSTOM_"
-	ConditionTypeTraitsUpdated = "TraitsUpdated"
-	ConditionTraitsSuccess     = "Success"
-	ConditionTraitsFailed      = "Failed"
-	TraitsControllerName       = "traits"
+	customPrefix         = "CUSTOM_"
+	TraitsControllerName = "traits"
 )
 
 type TraitsController struct {
@@ -72,7 +69,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding) ||
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) ||
 		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
 		return ctrl.Result{}, nil
 	}
@@ -145,14 +142,14 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func getTraitCondition(err error, msg string) metav1.Condition {
 	// set status condition
 	var (
-		reason  = ConditionTraitsSuccess
+		reason  = kvmv1.ConditionReasonSucceeded
 		message = msg
 		status  = metav1.ConditionTrue
 	)
 
 	if err != nil {
 		status = metav1.ConditionFalse
-		reason = ConditionTraitsFailed
+		reason = kvmv1.ConditionReasonFailed
 		if msg != "" {
 			message = msg + ": " + err.Error()
 		} else {
@@ -161,7 +158,7 @@ func getTraitCondition(err error, msg string) metav1.Condition {
 	}
 
 	return metav1.Condition{
-		Type:    ConditionTypeTraitsUpdated,
+		Type:    kvmv1.ConditionTypeTraitsUpdated,
 		Status:  status,
 		Reason:  reason,
 		Message: message,

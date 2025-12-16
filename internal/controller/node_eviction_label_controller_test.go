@@ -119,9 +119,9 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, hypervisor)).To(Succeed())
 			By("updating the hypervisor status sub-resource")
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    ConditionTypeOnboarding,
+				Type:    kvmv1.ConditionTypeOnboarding,
 				Status:  metav1.ConditionTrue,
-				Reason:  ConditionReasonInitial,
+				Reason:  kvmv1.ConditionReasonInitial,
 				Message: "Initial onboarding",
 			})
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())

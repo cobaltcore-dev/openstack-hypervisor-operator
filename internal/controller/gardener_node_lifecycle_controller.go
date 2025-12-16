@@ -101,7 +101,7 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, err
 	}
 
-	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding)
+	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted)
