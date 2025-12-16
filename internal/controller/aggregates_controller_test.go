@@ -121,7 +121,7 @@ var _ = Describe("AggregatesController", func() {
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 		meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
-			Type:    ConditionTypeOnboarding,
+			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  v1.ConditionFalse,
 			Reason:  "dontcare",
 			Message: "dontcare",
@@ -193,7 +193,7 @@ var _ = Describe("AggregatesController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(ContainElements("test-aggregate1"))
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeAggregatesUpdated)).To(BeTrue())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 		})
 	})
 
@@ -237,7 +237,7 @@ var _ = Describe("AggregatesController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeAggregatesUpdated)).To(BeTrue())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 		})
 	})
 
@@ -254,7 +254,7 @@ var _ = Describe("AggregatesController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeAggregatesUpdated)).To(BeFalse())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
 		})
 	})
 
@@ -276,7 +276,7 @@ var _ = Describe("AggregatesController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeAggregatesUpdated)).To(BeFalse())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
 		})
 	})
 })

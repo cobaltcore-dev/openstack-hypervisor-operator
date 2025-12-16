@@ -37,6 +37,8 @@ type EvictionSpec struct {
 	Reason string `json:"reason"`
 }
 
+// Eviction Condition Types
+// type of condition in CamelCase or in foo.example.com/CamelCase.
 const (
 	// ConditionTypeMigration is the type of condition for migration status of a server
 	ConditionTypeMigration = "MigratingInstance"
@@ -52,7 +54,10 @@ const (
 
 	// ConditionTypeEvicting is the type of condition for eviction status
 	ConditionTypeEvicting = "Evicting"
+)
 
+// Condition Reasons
+const (
 	// ConditionReasonRunning means the eviction is currently running
 	ConditionReasonRunning string = "Running"
 

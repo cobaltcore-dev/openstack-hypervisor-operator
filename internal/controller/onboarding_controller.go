@@ -51,21 +51,14 @@ import (
 var errRequeue = errors.New("requeue requested")
 
 const (
-	defaultWaitTime           = 1 * time.Minute
-	ConditionTypeOnboarding   = "Onboarding"
-	ConditionReasonAborted    = "aborted"
-	ConditionReasonError      = "error"
-	ConditionReasonInitial    = "initial"
-	ConditionReasonOnboarding = "onboarding"
-	ConditionReasonTesting    = "testing"
-	ConditionReasonCompleted  = "completed"
-	testAggregateName         = "tenant_filter_tests"
-	testProjectName           = "test"
-	testDomainName            = "cc3test"
-	testImageName             = "cirros-d240801-kvm"
-	testPrefixName            = "ohooc-"
-	testVolumeType            = "kvm-pilot"
-	OnboardingControllerName  = "onboarding"
+	defaultWaitTime          = 1 * time.Minute
+	testAggregateName        = "tenant_filter_tests"
+	testProjectName          = "test"
+	testDomainName           = "cc3test"
+	testImageName            = "cirros-d240801-kvm"
+	testPrefixName           = "ohooc-"
+	testVolumeType           = "kvm-pilot"
+	OnboardingControllerName = "onboarding"
 )
 
 type OnboardingController struct {
@@ -112,28 +105,28 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// check condition reason
-	status := meta.FindStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
+	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if status == nil {
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  ConditionReasonOnboarding,
+			Reason:  kvmv1.ConditionReasonOnboarding,
 			Message: "Onboarding in progress",
 		})
 
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeOnboarding,
+			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  metav1.ConditionTrue,
-			Reason:  ConditionReasonInitial,
+			Reason:  kvmv1.ConditionReasonInitial,
 			Message: "Initial onboarding",
 		})
 		return ctrl.Result{}, r.Status().Update(ctx, hv)
 	}
 
 	switch status.Reason {
-	case ConditionReasonInitial:
+	case kvmv1.ConditionReasonInitial:
 		return ctrl.Result{}, r.initialOnboarding(ctx, hv, computeHost)
-	case ConditionReasonTesting:
+	case kvmv1.ConditionReasonTesting:
 		if hv.Spec.SkipTests {
 			return r.completeOnboarding(ctx, computeHost, hv)
 		} else {
@@ -146,7 +139,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) error {
-	status := meta.FindStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
+	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Never onboarded
 	if status == nil {
 		return nil
@@ -156,11 +149,11 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	ready := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady)
 	if ready != nil {
 		// Only undo ones own readiness status reporting
-		if ready.Reason == ConditionReasonOnboarding {
+		if ready.Reason == kvmv1.ConditionReasonOnboarding {
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeReady,
 				Status:  metav1.ConditionFalse,
-				Reason:  ConditionReasonOnboarding,
+				Reason:  kvmv1.ConditionReasonOnboarding,
 				Message: "Onboarding aborted",
 			})
 			changed = true
@@ -168,9 +161,9 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	}
 
 	if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeOnboarding,
+		Type:    kvmv1.ConditionTypeOnboarding,
 		Status:  metav1.ConditionFalse,
-		Reason:  ConditionReasonAborted,
+		Reason:  kvmv1.ConditionReasonAborted,
 		Message: "Aborted due to LifecycleEnabled being false",
 	}) {
 		changed = true
@@ -182,9 +175,9 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	}
 	if err := r.deleteTestServers(ctx, computeHost); err != nil {
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeOnboarding,
+			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
-			Reason:  ConditionReasonAborted,
+			Reason:  kvmv1.ConditionReasonAborted,
 			Message: err.Error(),
 		})
 
@@ -241,9 +234,9 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 	}
 
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeOnboarding,
+		Type:    kvmv1.ConditionTypeOnboarding,
 		Status:  metav1.ConditionTrue,
-		Reason:  ConditionReasonTesting,
+		Reason:  kvmv1.ConditionReasonTesting,
 		Message: "Running onboarding tests",
 	})
 	return r.Status().Update(ctx, hv)
@@ -270,9 +263,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 
 		// Set condition back to testing
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeOnboarding,
+			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  metav1.ConditionTrue,
-			Reason:  ConditionReasonTesting,
+			Reason:  kvmv1.ConditionReasonTesting,
 			Message: "Server ended up in error state: " + server.Fault.Message,
 		})
 		if err = r.Status().Update(ctx, hv); err != nil {
@@ -289,9 +282,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		consoleOutput, err := servers.ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).Extract()
 		if err != nil {
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    ConditionTypeOnboarding,
+				Type:    kvmv1.ConditionTypeOnboarding,
 				Status:  metav1.ConditionTrue,
-				Reason:  ConditionReasonTesting,
+				Reason:  kvmv1.ConditionReasonTesting,
 				Message: fmt.Sprintf("could not get console output %v", err),
 			})
 			if err := r.Status().Update(ctx, hv); err != nil {
@@ -306,9 +299,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 
 		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    ConditionTypeOnboarding,
+				Type:    kvmv1.ConditionTypeOnboarding,
 				Status:  metav1.ConditionTrue,
-				Reason:  ConditionReasonTesting,
+				Reason:  kvmv1.ConditionReasonTesting,
 				Message: fmt.Sprintf("failed to terminate instance %v", err),
 			})
 			if err := r.Status().Update(ctx, hv); err != nil {
@@ -329,9 +322,9 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	err := r.deleteTestServers(ctx, host)
 	if err != nil {
 		if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeOnboarding,
+			Type:    kvmv1.ConditionTypeOnboarding,
 			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
-			Reason:  ConditionReasonAborted,
+			Reason:  kvmv1.ConditionReasonAborted,
 			Message: err.Error(),
 		}) {
 			return ctrl.Result{}, errors.Join(err, r.Status().Update(ctx, hv))
@@ -367,9 +360,9 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 
 	// set onboarding condition completed
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    ConditionTypeOnboarding,
+		Type:    kvmv1.ConditionTypeOnboarding,
 		Status:  metav1.ConditionFalse,
-		Reason:  ConditionReasonCompleted,
+		Reason:  kvmv1.ConditionReasonSucceeded,
 		Message: "Onboarding completed",
 	})
 	return ctrl.Result{}, r.Status().Update(ctx, hv)

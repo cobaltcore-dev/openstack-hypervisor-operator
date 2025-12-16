@@ -133,7 +133,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			hypervisor.Status.ServiceID = "1234"
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
 				metav1.Condition{
-					Type:    ConditionTypeOnboarding,
+					Type:    kvmv1.ConditionTypeOnboarding,
 					Status:  metav1.ConditionFalse,
 					Reason:  metav1.StatusSuccess,
 					Message: "random text",

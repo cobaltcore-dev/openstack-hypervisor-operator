@@ -164,7 +164,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 		}
 
 		if hv.Name != "" {
-			expectHypervisor = HasStatusCondition(hv.Status.Conditions, ConditionTypeOnboarding)
+			expectHypervisor = HasStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 		}
 
 		if expectHypervisor {

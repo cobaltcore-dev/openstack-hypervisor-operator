@@ -63,7 +63,7 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 	}
 
 	// is onboarding completed?
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, ConditionTypeOnboarding) {
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
 		return ctrl.Result{}, nil
 	}
 
@@ -120,7 +120,7 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 		if err != nil {
 			return fmt.Errorf("failed to enable hypervisor due to %w", err)
 		}
-	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceHA:
+	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceHA, kvmv1.MaintenanceTermination:
 		// Disable the compute service:
 		// Also in case of HA, as it doesn't hurt to disable it twice, and this
 		// allows us to enable the service again, when the maintenance field is
@@ -173,7 +173,7 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 			return err
 		}
 		return nil
-	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto:
+	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceTermination:
 		// In case of "ha", the host gets emptied from the HA service
 		if cond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting); cond != nil {
 			if cond.Reason == kvmv1.ConditionReasonSucceeded {

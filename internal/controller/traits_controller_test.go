@@ -137,7 +137,7 @@ var _ = Describe("TraitsController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
-				Type:   ConditionTypeOnboarding,
+				Type:   kvmv1.ConditionTypeOnboarding,
 				Status: v1.ConditionFalse,
 				Reason: "UnitTest",
 			})
@@ -154,7 +154,7 @@ var _ = Describe("TraitsController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).To(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeTrue())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeTrue())
 		})
 	})
 
@@ -186,7 +186,7 @@ var _ = Describe("TraitsController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeFalse())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeFalse())
 		})
 	})
 
@@ -206,7 +206,7 @@ var _ = Describe("TraitsController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
-				Type:   ConditionTypeOnboarding,
+				Type:   kvmv1.ConditionTypeOnboarding,
 				Status: v1.ConditionFalse,
 				Reason: "UnitTest",
 			})
@@ -229,7 +229,7 @@ var _ = Describe("TraitsController", func() {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
-			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, ConditionTypeTraitsUpdated)).To(BeFalse())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeFalse())
 		})
 	})
 })
