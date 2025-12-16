@@ -162,7 +162,7 @@ func syncLabelsAndAnnotations(nodeLabels labels.Set, hypervisor *kvmv1.Hyperviso
 	}
 
 	// transport relevant labels
-	transportLabels(&node.ObjectMeta, hypervisor)
+	transportLabels(&node.ObjectMeta, &hypervisor.ObjectMeta)
 	// transport relevant annotations
 	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
 }
@@ -221,12 +221,12 @@ func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyp
 	}
 }
 
-// transportLabels transports relevant labels from the Node to the Hypervisor spec
-func transportLabels(node *metav1.ObjectMeta, hypervisor *kvmv1.Hypervisor) {
+// transportLabels transports relevant labels from the source to the destination metadata
+func transportLabels(source, destination *metav1.ObjectMeta) {
 	// transfer labels
 	for _, transferLabel := range transferLabels {
-		if label, ok := node.Labels[transferLabel]; ok {
-			hypervisor.Labels[transferLabel] = label
+		if label, ok := source.Labels[transferLabel]; ok {
+			destination.Labels[transferLabel] = label
 		}
 	}
 }
