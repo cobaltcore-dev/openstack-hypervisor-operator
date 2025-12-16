@@ -99,7 +99,7 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		value = "true"
 	} else {
 		// check for existing eviction, else create it
-		value, err = r.reconcileEviction(ctx, eviction, node, hostname, maintenanceValue)
+		value, err = r.reconcileEviction(ctx, eviction, hv, hostname, maintenanceValue)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -125,13 +125,13 @@ func (r *NodeEvictionLabelReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 }
 
-func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, eviction *kvmv1.Eviction, node *corev1.Node, hostname, maintenanceValue string) (string, error) {
+func (r *NodeEvictionLabelReconciler) reconcileEviction(ctx context.Context, eviction *kvmv1.Eviction, hypervisor *kvmv1.Hypervisor, hostname, maintenanceValue string) (string, error) {
 	log := logger.FromContext(ctx)
 	if err := r.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
 		if !k8serrors.IsNotFound(err) {
 			return "", err
 		}
-		if err := controllerutil.SetOwnerReference(node, eviction, r.Scheme); err != nil {
+		if err := controllerutil.SetOwnerReference(hypervisor, eviction, r.Scheme); err != nil {
 			return "", err
 		}
 		log.Info("Creating new eviction", "name", eviction.Name)
