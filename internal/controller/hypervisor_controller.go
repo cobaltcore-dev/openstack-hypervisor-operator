@@ -223,6 +223,10 @@ func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyp
 
 // transportLabels transports relevant labels from the source to the destination metadata
 func transportLabels(source, destination *metav1.ObjectMeta) {
+	// If destination is created "manually" (not gotten from the api), this might be nil
+	if destination.Labels == nil {
+		destination.Labels = make(map[string]string)
+	}
 	// transfer labels
 	for _, transferLabel := range transferLabels {
 		if label, ok := source.Labels[transferLabel]; ok {
