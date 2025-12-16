@@ -93,9 +93,10 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
+		base := hv.DeepCopy()
 		if meta.SetStatusCondition(&hv.Status.Conditions,
 			getTraitCondition(err, "Failed to get current traits from placement")) {
-			err = errors.Join(tc.Status().Update(ctx, hv))
+			err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 		}
 		return ctrl.Result{}, err
 	}
@@ -124,18 +125,20 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		if result.Err != nil {
 			// set status condition
+			base := hv.DeepCopy()
 			if meta.SetStatusCondition(&hv.Status.Conditions,
 				getTraitCondition(err, "Failed to update traits in placement")) {
-				err = errors.Join(tc.Status().Update(ctx, hv))
+				err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 			}
 			return ctrl.Result{}, err
 		}
 	}
 
+	base := hv.DeepCopy()
 	// update status unconditionally, since we want always to propagate the current traits
 	hv.Status.Traits = targetTraits
 	meta.SetStatusCondition(&hv.Status.Conditions, getTraitCondition(nil, "Traits successfully updated"))
-	return ctrl.Result{}, tc.Status().Update(ctx, hv)
+	return ctrl.Result{}, tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName))
 }
 
 // getTraitCondition creates a Condition object for trait updates
