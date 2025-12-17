@@ -37,7 +37,6 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -216,18 +215,8 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.placementClient.Microversion = "1.39" // yoga, or later
 
-	// add predicate to only reconcile nodes with DeletionTimestamp set (i.e. being deleted)
-	predicateFilter := predicate.NewPredicateFuncs(func(object k8sclient.Object) bool {
-		node, ok := object.(*corev1.Node)
-		if !ok {
-			return false
-		}
-		return !node.DeletionTimestamp.IsZero() || controllerutil.ContainsFinalizer(node, decommissionFinalizerName)
-	})
-
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(DecommissionControllerName).
 		For(&corev1.Node{}).
-		WithEventFilter(predicateFilter).
 		Complete(r)
 }
