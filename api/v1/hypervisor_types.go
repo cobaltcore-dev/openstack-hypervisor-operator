@@ -123,6 +123,9 @@ type OperatingSystemStatus struct {
 	// Represents the Operating System version.
 	Version string `json:"version,omitempty"`
 
+	// Identifying a specific variant or edition of the operating system
+	VariantID string `json:"variantID,omitempty"`
+
 	// PrettyVersion
 	PrettyVersion string `json:"prettyVersion,omitempty"`
 
@@ -152,6 +155,12 @@ type OperatingSystemStatus struct {
 
 	// FirmwareDate
 	FirmwareDate metav1.Time `json:"firmwareDate,omitempty"`
+
+	// Represents the Garden Linux build commit id
+	GardenLinuxCommitID string `json:"gardenLinuxCommitID,omitempty"`
+
+	// Represents the Garden Linux Feature Set
+	GardenLinuxFeatures []string `json:"gardenLinuxFeatures,omitempty"`
 }
 
 // Current capabilities reported by libvirt.

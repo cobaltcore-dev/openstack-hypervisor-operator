@@ -9,17 +9,20 @@ import (
 // OperatingSystemStatusApplyConfiguration represents a declarative configuration of the OperatingSystemStatus type for use
 // with apply.
 type OperatingSystemStatusApplyConfiguration struct {
-	Version         *string      `json:"version,omitempty"`
-	PrettyVersion   *string      `json:"prettyVersion,omitempty"`
-	KernelName      *string      `json:"kernelName,omitempty"`
-	KernelRelease   *string      `json:"kernelRelease,omitempty"`
-	KernelVersion   *string      `json:"kernelVersion,omitempty"`
-	HardwareVendor  *string      `json:"hardwareVendor,omitempty"`
-	HardwareModel   *string      `json:"hardwareModel,omitempty"`
-	HardwareSerial  *string      `json:"hardwareSerial,omitempty"`
-	FirmwareVersion *string      `json:"firmwareVersion,omitempty"`
-	FirmwareVendor  *string      `json:"firmwareVendor,omitempty"`
-	FirmwareDate    *metav1.Time `json:"firmwareDate,omitempty"`
+	Version             *string      `json:"version,omitempty"`
+	VariantID           *string      `json:"variantID,omitempty"`
+	PrettyVersion       *string      `json:"prettyVersion,omitempty"`
+	KernelName          *string      `json:"kernelName,omitempty"`
+	KernelRelease       *string      `json:"kernelRelease,omitempty"`
+	KernelVersion       *string      `json:"kernelVersion,omitempty"`
+	HardwareVendor      *string      `json:"hardwareVendor,omitempty"`
+	HardwareModel       *string      `json:"hardwareModel,omitempty"`
+	HardwareSerial      *string      `json:"hardwareSerial,omitempty"`
+	FirmwareVersion     *string      `json:"firmwareVersion,omitempty"`
+	FirmwareVendor      *string      `json:"firmwareVendor,omitempty"`
+	FirmwareDate        *metav1.Time `json:"firmwareDate,omitempty"`
+	GardenLinuxCommitID *string      `json:"gardenLinuxCommitID,omitempty"`
+	GardenLinuxFeatures []string     `json:"gardenLinuxFeatures,omitempty"`
 }
 
 // OperatingSystemStatusApplyConfiguration constructs a declarative configuration of the OperatingSystemStatus type for use with
@@ -33,6 +36,14 @@ func OperatingSystemStatus() *OperatingSystemStatusApplyConfiguration {
 // If called multiple times, the Version field is set to the value of the last call.
 func (b *OperatingSystemStatusApplyConfiguration) WithVersion(value string) *OperatingSystemStatusApplyConfiguration {
 	b.Version = &value
+	return b
+}
+
+// WithVariantID sets the VariantID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the VariantID field is set to the value of the last call.
+func (b *OperatingSystemStatusApplyConfiguration) WithVariantID(value string) *OperatingSystemStatusApplyConfiguration {
+	b.VariantID = &value
 	return b
 }
 
@@ -113,5 +124,23 @@ func (b *OperatingSystemStatusApplyConfiguration) WithFirmwareVendor(value strin
 // If called multiple times, the FirmwareDate field is set to the value of the last call.
 func (b *OperatingSystemStatusApplyConfiguration) WithFirmwareDate(value metav1.Time) *OperatingSystemStatusApplyConfiguration {
 	b.FirmwareDate = &value
+	return b
+}
+
+// WithGardenLinuxCommitID sets the GardenLinuxCommitID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the GardenLinuxCommitID field is set to the value of the last call.
+func (b *OperatingSystemStatusApplyConfiguration) WithGardenLinuxCommitID(value string) *OperatingSystemStatusApplyConfiguration {
+	b.GardenLinuxCommitID = &value
+	return b
+}
+
+// WithGardenLinuxFeatures adds the given value to the GardenLinuxFeatures field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the GardenLinuxFeatures field.
+func (b *OperatingSystemStatusApplyConfiguration) WithGardenLinuxFeatures(values ...string) *OperatingSystemStatusApplyConfiguration {
+	for i := range values {
+		b.GardenLinuxFeatures = append(b.GardenLinuxFeatures, values[i])
+	}
 	return b
 }
