@@ -195,7 +195,7 @@ func (r *NodeDecommissionReconciler) setDecommissioningCondition(ctx context.Con
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
