@@ -19,10 +19,14 @@ package controller
 
 import (
 	"context"
+	"net/http"
 
+	"github.com/gophercloud/gophercloud/v2/testhelper"
+	osclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,12 +45,15 @@ var _ = Describe("Decommission Controller", func() {
 		reconcileReq = ctrl.Request{
 			NamespacedName: nodeName,
 		}
+		fakeServer testhelper.FakeServer
 	)
 
 	BeforeEach(func(ctx SpecContext) {
+		fakeServer = testhelper.SetupHTTP()
 		r = &NodeDecommissionReconciler{
-			Client: k8sClient,
-			Scheme: k8sClient.Scheme(),
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			computeClient: osclient.ServiceClient(fakeServer),
 		}
 
 		By("creating the namespace for the reconciler")
@@ -58,58 +65,65 @@ var _ = Describe("Decommission Controller", func() {
 		})
 
 		By("creating the core resource for the Kind Node")
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName.Name,
-				Labels: map[string]string{labelEvictionRequired: "true"},
-			},
-		}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-		DeferCleanup(func(ctx SpecContext) {
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-		})
-
-		By("Create the hypervisor resource with lifecycle enabled")
-		hypervisor := &kvmv1.Hypervisor{
+		hv := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName.Name,
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
+				Maintenance:      kvmv1.MaintenanceTermination,
 			},
 		}
-		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		Expect(k8sClient.Create(ctx, hv)).To(Succeed())
+
+		// set ready condition
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  kvmv1.ConditionReasonReadyReady,
+			Message: "Setting initial ready condition for testing",
+		})
+		Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hv))).To(Succeed())
+			fakeServer.Teardown()
 		})
 	})
 
-	AfterEach(func(ctx context.Context) {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName.Name}}
-		By("Cleanup the specific node and hypervisor resource")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-
-		// Due to the decommissioning finalizer, we need to reconcile once more to delete the node completely
-		req := ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: nodeName.Name},
-		}
-		_, err := r.Reconcile(ctx, req)
-		Expect(err).NotTo(HaveOccurred())
-
-		nodelist := &corev1.NodeList{}
-		Expect(k8sClient.List(ctx, nodelist)).To(Succeed())
-		Expect(nodelist.Items).To(BeEmpty())
-	})
-
-	Context("When reconciling a node", func() {
-		It("should set the finalizer", func(ctx context.Context) {
+	Context("When reconciling a hypervisor", func() {
+		It("It should set the ready status", func(ctx context.Context) {
 			By("reconciling the created resource")
 			_, err := r.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
-			node := &corev1.Node{}
 
-			Expect(k8sClient.Get(ctx, nodeName, node)).To(Succeed())
-			Expect(node.Finalizers).To(ContainElement(decommissionFinalizerName))
+			By("checking that the ready condition is set to false with the decommissioning reason")
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, nodeName, hv)).To(Succeed())
+			cond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonDecommissioning))
+
+			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+
+				Expect(err).NotTo(HaveOccurred())
+			})
+			By("reconciling the created resource")
+			_, err = r.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the eviction succeeded")
+			hv = &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, nodeName, hv)).To(Succeed())
+			Expect(hv.Status.Evicted).To(BeTrue())
+			cond = meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonDecommissioning))
+			Expect(cond.Message).To(Equal("Node not registered in nova anymore, proceeding with deletion"))
 		})
 	})
 })

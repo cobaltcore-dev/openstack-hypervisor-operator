@@ -70,7 +70,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	aggs, err := aggregatesByName(ctx, ac.computeClient)
+	aggs, err := openstack.GetAggregatesByName(ctx, ac.computeClient)
 	if err != nil {
 		err = fmt.Errorf("failed listing aggregates: %w", err)
 		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
@@ -161,24 +161,6 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 		Named(AggregatesControllerName).
 		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
 		Complete(ac)
-}
-
-func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceClient) (map[string]*aggregates.Aggregate, error) {
-	pages, err := aggregates.List(serviceClient).AllPages(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggs, err := aggregates.ExtractAggregates(pages)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggregateMap := make(map[string]*aggregates.Aggregate, len(aggs))
-	for _, aggregate := range aggs {
-		aggregateMap[aggregate.Name] = &aggregate
-	}
-	return aggregateMap, nil
 }
 
 func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name, zone string) (err error) {

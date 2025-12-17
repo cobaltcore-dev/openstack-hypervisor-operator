@@ -57,10 +57,11 @@ const (
 	ConditionReasonReadyEvicted     = "Evicted"
 
 	// ConditionTypeOnboarding reasons
-	ConditionReasonInitial    = "Initial"
-	ConditionReasonOnboarding = "Onboarding"
-	ConditionReasonTesting    = "Testing"
-	ConditionReasonAborted    = "Aborted"
+	ConditionReasonInitial         = "Initial"
+	ConditionReasonOnboarding      = "Onboarding"
+	ConditionReasonTesting         = "Testing"
+	ConditionReasonAborted         = "Aborted"
+	ConditionReasonDecommissioning = "Decommissioning"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
