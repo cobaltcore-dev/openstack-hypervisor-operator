@@ -98,13 +98,12 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// continue with creation
 	} else {
 		// update Status if needed
-		changed := false
+		base := hypervisor.DeepCopy()
 
 		// transfer internal IP
 		for _, address := range node.Status.Addresses {
 			if address.Type == corev1.NodeInternalIP && hypervisor.Status.InternalIP != address.Address {
 				hypervisor.Status.InternalIP = address.Address
-				changed = true
 				break
 			}
 		}
@@ -113,31 +112,30 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
 		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
 			// Node might be terminating, propagate condition to hypervisor
-			changed = meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  nodeTerminationCondition.Reason,
 				Message: nodeTerminationCondition.Message,
-			}) || changed
-			changed = meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+			})
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeTerminating,
 				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
 				Reason:  nodeTerminationCondition.Reason,
 				Message: nodeTerminationCondition.Message,
-			}) || changed
+			})
 		}
 
-		if changed {
-			return ctrl.Result{}, hv.Status().Update(ctx, hypervisor)
+		if !equality.Semantic.DeepEqual(hypervisor, base) {
+			return ctrl.Result{}, hv.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
 		}
 
-		before := hypervisor.DeepCopy()
 		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
-		if equality.Semantic.DeepEqual(hypervisor, before) {
+		if equality.Semantic.DeepEqual(hypervisor, base) {
 			return ctrl.Result{}, nil
 		}
 
-		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before, k8sclient.MergeFromWithOptimisticLock{}))
+		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
 	}
 
 	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
