@@ -86,7 +86,8 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, hec.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old, k8sclient.MergeFromWithOptimisticLock{}))
+	return ctrl.Result{}, hec.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
 func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.Context, hv *kvmv1.Hypervisor) error {

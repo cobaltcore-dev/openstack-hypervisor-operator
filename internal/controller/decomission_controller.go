@@ -179,7 +179,8 @@ func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *
 
 	nodeBase := node.DeepCopy()
 	controllerutil.RemoveFinalizer(node, decommissionFinalizerName)
-	err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName))
+	err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName))
 	return ctrl.Result{}, err
 }
 
@@ -191,7 +192,8 @@ func (r *NodeDecommissionReconciler) setDecommissioningCondition(ctx context.Con
 		Reason:  "Decommissioning",
 		Message: message,
 	})
-	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
+	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
 	return ctrl.Result{}, nil

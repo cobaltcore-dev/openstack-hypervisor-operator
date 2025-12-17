@@ -84,7 +84,8 @@ func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, r.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before, k8sclient.MergeFromWithOptimisticLock{}))
+	return ctrl.Result{}, r.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorTaintControllerName))
 }
 
 func (r *HypervisorTaintController) SetupWithManager(mgr ctrl.Manager) error {

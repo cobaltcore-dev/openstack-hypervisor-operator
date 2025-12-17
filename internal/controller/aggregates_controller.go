@@ -122,7 +122,8 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		Reason:  kvmv1.ConditionReasonSucceeded,
 		Message: "Aggregates updated successfully",
 	})
-	return ctrl.Result{}, ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName))
+	return ctrl.Result{}, ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName))
 }
 
 // setErrorCondition sets the error condition on the Hypervisor status, returns error if update fails
@@ -136,7 +137,8 @@ func (ac *AggregatesController) setErrorCondition(ctx context.Context, hv *kvmv1
 
 	base := hv.DeepCopy()
 	if meta.SetStatusCondition(&hv.Status.Conditions, condition) {
-		if err := ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName)); err != nil {
+		if err := ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName)); err != nil {
 			return err
 		}
 	}

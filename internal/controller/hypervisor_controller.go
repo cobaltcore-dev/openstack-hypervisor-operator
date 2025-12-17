@@ -127,7 +127,8 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if !equality.Semantic.DeepEqual(hypervisor, base) {
-			return ctrl.Result{}, hv.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
+			return ctrl.Result{}, hv.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
+				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
 		}
 
 		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
@@ -135,16 +136,18 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, nil
 		}
 
-		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
+		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
+			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
 	}
 
 	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
 
-	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme, controllerutil.WithBlockOwnerDeletion(true)); err != nil {
+	if err := controllerutil.SetOwnerReference(node, hypervisor, hv.Scheme,
+		controllerutil.WithBlockOwnerDeletion(true)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
 	}
 
-	if err := hv.Create(ctx, hypervisor); err != nil {
+	if err := hv.Create(ctx, hypervisor, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
 		return ctrl.Result{}, err
 	}
 
