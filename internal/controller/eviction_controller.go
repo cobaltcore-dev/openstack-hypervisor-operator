@@ -154,7 +154,8 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 }
 
 func (r *EvictionReconciler) updateStatus(ctx context.Context, eviction, base *kvmv1.Eviction) error {
-	return r.Status().Patch(ctx, eviction, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
+	return r.Status().Patch(ctx, eviction, client.MergeFromWithOptions(base,
+		client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
 }
 
 func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {

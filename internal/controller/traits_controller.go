@@ -96,7 +96,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		base := hv.DeepCopy()
 		if meta.SetStatusCondition(&hv.Status.Conditions,
 			getTraitCondition(err, "Failed to get current traits from placement")) {
-			err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
+			err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 		}
 		return ctrl.Result{}, err
 	}
@@ -128,7 +129,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			base := hv.DeepCopy()
 			if meta.SetStatusCondition(&hv.Status.Conditions,
 				getTraitCondition(err, "Failed to update traits in placement")) {
-				err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
+				err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+					k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 			}
 			return ctrl.Result{}, err
 		}
@@ -138,7 +140,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// update status unconditionally, since we want always to propagate the current traits
 	hv.Status.Traits = targetTraits
 	meta.SetStatusCondition(&hv.Status.Conditions, getTraitCondition(nil, "Traits successfully updated"))
-	return ctrl.Result{}, tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName))
+	return ctrl.Result{}, tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName))
 }
 
 // getTraitCondition creates a Condition object for trait updates

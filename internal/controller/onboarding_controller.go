@@ -286,7 +286,9 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	case "ACTIVE":
-		consoleOutput, err := servers.ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).Extract()
+		consoleOutput, err := servers.
+			ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).
+			Extract()
 		if err != nil {
 			base := hv.DeepCopy()
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
@@ -605,7 +607,8 @@ func (r *OnboardingController) findTestFlavor(ctx context.Context) (string, erro
 }
 
 func (r *OnboardingController) patchStatus(ctx context.Context, hv, base *kvmv1.Hypervisor) error {
-	return r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OnboardingControllerName))
+	return r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OnboardingControllerName))
 }
 
 // SetupWithManager sets up the controller with the Manager.
