@@ -194,7 +194,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
 	}
 
-	if err := hv.Create(ctx, hypervisor, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+	if err := hv.Create(ctx, hypervisor); err != nil {
 		return ctrl.Result{}, err
 	}
 
