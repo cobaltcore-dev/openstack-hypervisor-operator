@@ -136,7 +136,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Before removing the service, first take the node out of the aggregates,
 	// so when the node comes back, it doesn't up with the old associations
-	aggs, err := aggregatesByName(ctx, r.computeClient)
+	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
 	if err != nil {
 		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot list aggregates due to %v", err))
 	}
