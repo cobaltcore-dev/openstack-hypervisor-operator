@@ -41,10 +41,11 @@ import (
 )
 
 const (
-	labelLifecycleMode       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
-	annotationAggregates     = "nova.openstack.cloud.sap/aggregates"
-	annotationCustomTraits   = "nova.openstack.cloud.sap/custom-traits"
-	HypervisorControllerName = "hypervisor"
+	labelLifecycleMode        = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
+	annotationAggregates      = "nova.openstack.cloud.sap/aggregates"
+	annotationCustomTraits    = "nova.openstack.cloud.sap/custom-traits"
+	decommissionFinalizerName = "cobaltcore.cloud.sap/decommission-hypervisor"
+	HypervisorControllerName  = "hypervisor"
 )
 
 var transferLabels = []string{
@@ -81,8 +82,9 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 	nodeLabels := labels.Set(node.Labels)
 	hypervisor := &kvmv1.Hypervisor{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   node.Name,
-			Labels: map[string]string{},
+			Name:       node.Name,
+			Labels:     map[string]string{},
+			Finalizers: []string{decommissionFinalizerName},
 		},
 		Spec: kvmv1.HypervisorSpec{
 			HighAvailability:   true,

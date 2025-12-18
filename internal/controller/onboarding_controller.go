@@ -197,7 +197,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
-	aggs, err := aggregatesByName(ctx, r.computeClient)
+	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
 	if err != nil {
 		return fmt.Errorf("cannot list aggregates %w", err)
 	}
@@ -345,7 +345,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		return ctrl.Result{}, err
 	}
 
-	aggs, err := aggregatesByName(ctx, r.computeClient)
+	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
 	}

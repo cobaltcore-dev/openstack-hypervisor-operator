@@ -17,24 +17,8 @@ limitations under the License.
 
 package utils
 
-import (
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+import "time"
 
-	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-)
-
-var (
-	LifecycleEnabledPredicate = predicate.NewPredicateFuncs(func(object client.Object) bool {
-		if hv, ok := object.(*kvmv1.Hypervisor); ok {
-			return hv.Spec.LifecycleEnabled
-		}
-		return true
-	})
-	HypervisorTerminationPredicate = predicate.NewPredicateFuncs(func(object client.Object) bool {
-		if hv, ok := object.(*kvmv1.Hypervisor); ok {
-			return hv.Spec.Maintenance == kvmv1.MaintenanceTermination
-		}
-		return false
-	})
+const (
+	ShortRetryTime = 1 * time.Second
 )
