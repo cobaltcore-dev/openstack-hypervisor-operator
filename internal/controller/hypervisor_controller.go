@@ -147,7 +147,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
 	}
 
-	if err := hv.Create(ctx, hypervisor, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+	if err := hv.Create(ctx, hypervisor); err != nil {
 		return ctrl.Result{}, err
 	}
 
