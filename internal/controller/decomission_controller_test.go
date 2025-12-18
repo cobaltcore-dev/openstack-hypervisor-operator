@@ -18,38 +18,82 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
+	"net/http"
+	"os"
+
+	"github.com/gophercloud/gophercloud/v2/testhelper"
+	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
+const (
+	EOF                 = "EOF"
+	serviceId           = "service-1234"
+	hypervisorName      = "node-test"
+	namespaceName       = "namespace-test"
+	AggregateListWithHv = `
+{
+    "aggregates": [
+		{
+			"name": "test-aggregate2",
+			"availability_zone": "",
+			"deleted": false,
+			"id": 100001,
+			"hosts": ["note-test"]
+		}
+    ]
+}
+`
+	AggregateRemoveHostBody = `
+{
+        "aggregate": {
+			"name": "test-aggregate2",
+			"availability_zone": "",
+			"deleted": false,
+			"id": 100001
+		}
+}`
+)
+
 var _ = Describe("Decommission Controller", func() {
-	const (
-		namespaceName = "namespace-test"
-	)
 	var (
 		r            *NodeDecommissionReconciler
-		nodeName     = types.NamespacedName{Name: "node-test"}
+		nodeName     = types.NamespacedName{Name: hypervisorName}
 		reconcileReq = ctrl.Request{
 			NamespacedName: nodeName,
 		}
+		fakeServer testhelper.FakeServer
 	)
 
 	BeforeEach(func(ctx SpecContext) {
+		fakeServer = testhelper.SetupHTTP()
+		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
+
+		DeferCleanup(func() {
+			os.Unsetenv("KVM_HA_SERVICE_URL")
+			fakeServer.Teardown()
+		})
+
 		r = &NodeDecommissionReconciler{
-			Client: k8sClient,
-			Scheme: k8sClient.Scheme(),
+			Client:          k8sClient,
+			Scheme:          k8sClient.Scheme(),
+			computeClient:   client.ServiceClient(fakeServer),
+			placementClient: client.ServiceClient(fakeServer),
 		}
 
 		By("creating the namespace for the reconciler")
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+		Expect(k8sclient.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 
 		DeferCleanup(func(ctx SpecContext) {
 			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
@@ -64,7 +108,15 @@ var _ = Describe("Decommission Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, node)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+			node := &corev1.Node{}
+			Expect(k8sclient.IgnoreNotFound(k8sClient.Get(ctx, nodeName, node))).To(Succeed())
+			if len(node.Finalizers) > 0 {
+				node.Finalizers = make([]string, 0)
+				Expect(k8sClient.Update(ctx, node)).To(Succeed())
+			}
+			if node.Name != "" {
+				Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+			}
 		})
 
 		By("Create the hypervisor resource with lifecycle enabled")
@@ -82,23 +134,6 @@ var _ = Describe("Decommission Controller", func() {
 		})
 	})
 
-	AfterEach(func(ctx SpecContext) {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName.Name}}
-		By("Cleanup the specific node and hypervisor resource")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-
-		// Due to the decommissioning finalizer, we need to reconcile once more to delete the node completely
-		req := ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: nodeName.Name},
-		}
-		_, err := r.Reconcile(ctx, req)
-		Expect(err).NotTo(HaveOccurred())
-
-		nodelist := &corev1.NodeList{}
-		Expect(k8sClient.List(ctx, nodelist)).To(Succeed())
-		Expect(nodelist.Items).To(BeEmpty())
-	})
-
 	Context("When reconciling a node", func() {
 		It("should set the finalizer", func(ctx SpecContext) {
 			By("reconciling the created resource")
@@ -109,5 +144,130 @@ var _ = Describe("Decommission Controller", func() {
 			Expect(k8sClient.Get(ctx, nodeName, node)).To(Succeed())
 			Expect(node.Finalizers).To(ContainElement(decommissionFinalizerName))
 		})
+	})
+
+	Context("When terminating a node", func() {
+		JustBeforeEach(func(ctx SpecContext) {
+			By("reconciling first reconciling the to add the finalizer")
+			_, err := r.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+			node := &corev1.Node{}
+
+			Expect(k8sClient.Get(ctx, nodeName, node)).To(Succeed())
+			Expect(node.Finalizers).To(ContainElement(decommissionFinalizerName))
+
+			By("and then terminating then node")
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:    "Terminating",
+				Status:  corev1.ConditionTrue,
+				Reason:  "dontcare",
+				Message: "dontcare",
+			})
+			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
+			nodelist := &corev1.NodeList{}
+			Expect(k8sClient.List(ctx, nodelist)).To(Succeed())
+			Expect(nodelist.Items).NotTo(BeEmpty())
+		})
+
+		When("the hypervisor was set to ready", func() {
+			getHypervisorsCalled := 0
+			BeforeEach(func(ctx SpecContext) {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, nodeName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions,
+					metav1.Condition{
+						Type:    kvmv1.ConditionTypeReady,
+						Status:  metav1.ConditionTrue,
+						Reason:  "dontcare",
+						Message: "dontcare",
+					},
+				)
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					getHypervisorsCalled++
+					Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
+				})
+
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+
+					_, err := fmt.Fprint(w, AggregateListWithHv)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
+					// parse request
+					Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
+					expectedBody := `{"remove_host":{"host":"hv-test"}}`
+					body := make([]byte, r.ContentLength)
+					_, err := r.Body.Read(body)
+					Expect(err == nil || err.Error() == EOF).To(BeTrue())
+					Expect(string(body)).To(MatchJSON(expectedBody))
+
+					// send response
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+
+					_, err = fmt.Fprint(w, AggregateRemoveHostBody)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				// c48f6247-abe4-4a24-824e-ea39e108874f comes from the HypervisorWithServers const
+				fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+
+					_, err := fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+
+					_, err := fmt.Fprint(w, `{"allocations": {}}}`)
+					Expect(err).NotTo(HaveOccurred())
+
+				})
+				fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusAccepted)
+				})
+			})
+
+			It("should set the hypervisor condition", func(ctx SpecContext) {
+				By("reconciling the created resource")
+				_, err := r.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, nodeName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeReady),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", "Decommissioning"),
+					),
+				))
+			})
+
+			It("should remove the finalizer", func(ctx SpecContext) {
+				By("reconciling the created resource")
+				for range 3 {
+					_, err := r.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(getHypervisorsCalled).To(BeNumerically(">", 0))
+
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, nodeName, node)
+				Expect(err).To(HaveOccurred())
+				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+			})
+		})
+
 	})
 })
