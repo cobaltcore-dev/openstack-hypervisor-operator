@@ -32,7 +32,6 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
@@ -70,7 +69,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	aggs, err := aggregatesByName(ctx, ac.computeClient)
+	aggs, err := openstack.GetAggregatesByName(ctx, ac.computeClient)
 	if err != nil {
 		err = fmt.Errorf("failed listing aggregates: %w", err)
 		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
@@ -91,7 +90,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(toAdd) > 0 {
 		log.Info("Adding", "aggregates", toAdd)
 		for item := range slices.Values(toAdd) {
-			if err = addToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, ""); err != nil {
+			if err = openstack.AddToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, ""); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -100,7 +99,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(toRemove) > 0 {
 		log.Info("Removing", "aggregates", toRemove)
 		for item := range slices.Values(toRemove) {
-			if err = removeFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item); err != nil {
+			if err = openstack.RemoveFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -161,82 +160,4 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 		Named(AggregatesControllerName).
 		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
 		Complete(ac)
-}
-
-func aggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceClient) (map[string]*aggregates.Aggregate, error) {
-	pages, err := aggregates.List(serviceClient).AllPages(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggs, err := aggregates.ExtractAggregates(pages)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
-	}
-
-	aggregateMap := make(map[string]*aggregates.Aggregate, len(aggs))
-	for _, aggregate := range aggs {
-		aggregateMap[aggregate.Name] = &aggregate
-	}
-	return aggregateMap, nil
-}
-
-func addToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name, zone string) (err error) {
-	aggregate, found := aggs[name]
-	log := logger.FromContext(ctx)
-	if !found {
-		aggregate, err = aggregates.Create(ctx, serviceClient,
-			aggregates.CreateOpts{
-				Name:             name,
-				AvailabilityZone: zone,
-			}).Extract()
-		if err != nil {
-			return fmt.Errorf("failed to create aggregate %v due to %w", name, err)
-		}
-		aggs[name] = aggregate
-	}
-
-	if slices.Contains(aggregate.Hosts, host) {
-		log.Info("Found host in aggregate", "host", host, "name", name)
-		return nil
-	}
-
-	result, err := aggregates.AddHost(ctx, serviceClient, aggregate.ID, aggregates.AddHostOpts{Host: host}).Extract()
-	if err != nil {
-		return fmt.Errorf("failed to add host %v to aggregate %v due to %w", host, name, err)
-	}
-	log.Info("Added host to aggregate", "host", host, "name", name)
-	aggs[name] = result
-
-	return nil
-}
-
-func removeFromAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name string) error {
-	aggregate, found := aggs[name]
-	log := logger.FromContext(ctx)
-	if !found {
-		log.Info("cannot find aggregate", "name", name)
-		return nil
-	}
-
-	found = false
-	for _, aggHost := range aggregate.Hosts {
-		if aggHost == host {
-			found = true
-		}
-	}
-
-	if !found {
-		log.Info("cannot find host in aggregate", "host", host, "name", name)
-		return nil
-	}
-
-	result, err := aggregates.RemoveHost(ctx, serviceClient, aggregate.ID, aggregates.RemoveHostOpts{Host: host}).Extract()
-	if err != nil {
-		return fmt.Errorf("failed to add host %v to aggregate %v due to %w", host, name, err)
-	}
-	aggs[name] = result
-	log.Info("removed host from aggregate", "host", host, "name", name)
-
-	return nil
 }
