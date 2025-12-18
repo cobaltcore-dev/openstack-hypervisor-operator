@@ -32,7 +32,6 @@ import (
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	policyv1ac "k8s.io/client-go/applyconfigurations/policy/v1"
-	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -72,40 +71,40 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	hv := kvmv1.Hypervisor{}
-	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, &hv); k8sclient.IgnoreNotFound(err) != nil {
+	hv := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, hv); k8sclient.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, err
 	}
+
 	if !hv.Spec.LifecycleEnabled {
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 
-	if isTerminating(node) {
-		changed, err := setNodeLabels(ctx, r.Client, node, map[string]string{labelEvictionRequired: valueReasonTerminating})
-		if changed || err != nil {
-			return ctrl.Result{}, err
+	// We do not care about the particular value, as long as it isn't an error
+	var minAvailable int32 = 1
+
+	// Onboarding is not in progress anymore, i.e. the host is onboarded
+	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	// Evicting is not in progress anymore, i.e. the host is empty
+	evictionComplete := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+
+	if evictionComplete {
+		minAvailable = 0
+
+		if onboardingCompleted && isTerminating(node) {
+			// Onboarded & terminating & eviction complete -> disable HA
+			if err := disableInstanceHA(hv); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	// We do not care about the particular value, as long as it isn't an error
-	var minAvailable int32 = 1
-	evictionValue, found := node.Labels[labelEvictionApproved]
-	if found && evictionValue != "false" {
-		minAvailable = 0
-	}
-
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return r.ensureBlockingPodDisruptionBudget(ctx, node, minAvailable)
-	}); err != nil {
+	if err := r.ensureBlockingPodDisruptionBudget(ctx, node, minAvailable); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted)
-	}); err != nil {
+	if err := r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted); err != nil {
 		return ctrl.Result{}, err
 	}
 

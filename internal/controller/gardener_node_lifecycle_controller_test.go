@@ -18,18 +18,29 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 var _ = Describe("Gardener Maintenance Controller", func() {
 	const nodeName = "node-test"
-	var controller *GardenerNodeLifecycleController
+	var (
+		controller      *GardenerNodeLifecycleController
+		name            = types.NamespacedName{Name: nodeName}
+		reconcileReq    = ctrl.Request{NamespacedName: name}
+		maintenanceName = types.NamespacedName{Name: fmt.Sprintf("maint-%v", nodeName), Namespace: "kube-system"}
+	)
 
 	BeforeEach(func(ctx SpecContext) {
 		controller = &GardenerNodeLifecycleController{
@@ -37,32 +48,85 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			Scheme: k8sClient.Scheme(),
 		}
 
-		By("creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
 		By("creating the core resource for the Kind Node")
-		resource := &corev1.Node{
+		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName,
-				Labels: map[string]string{labelEvictionRequired: "true"},
+				Name: nodeName,
 			},
 		}
-		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		Expect(k8sClient.Create(ctx, node)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, resource))).To(Succeed())
+			By("Cleanup the specific node")
+			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
+		})
+
+		By("creating the core resource for the Kind hypervisor")
+		hypervisor := &kvmv1.Hypervisor{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+			Spec: kvmv1.HypervisorSpec{
+				LifecycleEnabled: true,
+			},
+		}
+		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
 		})
 	})
 
 	Context("When reconciling a node", func() {
-		It("should successfully reconcile the resource", func(ctx SpecContext) {
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
-			}
-
-			By("Reconciling the created resource")
-			_, err := controller.Reconcile(ctx, req)
+		JustBeforeEach(func(ctx SpecContext) {
+			_, err := controller.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
 		})
+		It("should create a poddisruptionbudget", func(ctx SpecContext) {
+			pdb := &policyv1.PodDisruptionBudget{}
+			Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+			Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", 1)))
+		})
+
+		It("should create a failing deployment to signal onboarding not being completed", func(ctx SpecContext) {
+			dep := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(dep.Spec.Template.Spec.Containers[0].StartupProbe.Exec.Command).To(Equal([]string{"/bin/false"}))
+		})
+
+		When("the node has been onboarded", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should create a deployment with onboarding completed", func(ctx SpecContext) {
+				dep := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+				Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
+				Expect(dep.Spec.Template.Spec.Containers[0].StartupProbe.Exec.Command).To(Equal([]string{"/bin/true"}))
+			})
+		})
+
+		When("the node has been evicted", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+		})
+
 	})
 })
