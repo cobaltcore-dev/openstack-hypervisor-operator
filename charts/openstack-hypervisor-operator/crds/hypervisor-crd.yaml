@@ -315,6 +315,14 @@ spec:
                   firmwareVersion:
                     description: FirmwareVersion
                     type: string
+                  gardenLinuxCommitID:
+                    description: Represents the Garden Linux build commit id
+                    type: string
+                  gardenLinuxFeatures:
+                    description: Represents the Garden Linux Feature Set
+                    items:
+                      type: string
+                    type: array
                   hardwareModel:
                     description: HardwareModel
                     type: string
@@ -335,6 +343,10 @@ spec:
                     type: string
                   prettyVersion:
                     description: PrettyVersion
+                    type: string
+                  variantID:
+                    description: Identifying a specific variant or edition of the
+                      operating system
                     type: string
                   version:
                     description: Represents the Operating System version.
