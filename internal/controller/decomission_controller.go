@@ -28,7 +28,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -44,7 +43,7 @@ import (
 
 const (
 	decommissionFinalizerName  = "cobaltcore.cloud.sap/decommission-hypervisor"
-	DecommissionControllerName = "nodeDecommission"
+	DecommissionControllerName = "decommission"
 )
 
 type NodeDecommissionReconciler struct {
@@ -57,19 +56,12 @@ type NodeDecommissionReconciler struct {
 // The counter-side in gardener is here:
 // https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update
-// +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;update;patch
 func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hostname := req.Name
 	log := logger.FromContext(ctx).WithName(req.Name).WithValues("hostname", hostname)
 	ctx = logger.IntoContext(ctx, log)
-
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
-		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-	}
 
 	// Fetch HV to check if lifecycle management is enabled
 	hv := &kvmv1.Hypervisor{}
@@ -79,14 +71,14 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	if !hv.Spec.LifecycleEnabled {
 		// Get out of the way
-		return r.removeFinalizer(ctx, node)
+		return r.removeFinalizer(ctx, hv)
 	}
 
-	if !controllerutil.ContainsFinalizer(node, decommissionFinalizerName) {
+	if !controllerutil.ContainsFinalizer(hv, decommissionFinalizerName) {
 		return ctrl.Result{}, retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			patch := k8sclient.MergeFrom(node.DeepCopy())
-			controllerutil.AddFinalizer(node, decommissionFinalizerName)
-			if err := r.Patch(ctx, node, patch); err != nil {
+			patch := k8sclient.MergeFrom(hv.DeepCopy())
+			controllerutil.AddFinalizer(hv, decommissionFinalizerName)
+			if err := r.Patch(ctx, hv, patch); err != nil {
 				return fmt.Errorf("failed to add finalizer due to %w", err)
 			}
 			log.Info("Added finalizer")
@@ -95,16 +87,16 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Not yet deleting hv, nothing more to do
-	if node.DeletionTimestamp.IsZero() {
+	if hv.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
 	// Someone is just deleting the hv, without going through termination
 	// See: https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L658-L659
-	if !IsNodeConditionTrue(node.Status.Conditions, "Terminating") {
+	if !meta.IsStatusConditionTrue(hv.Status.Conditions, "Terminating") {
 		log.Info("removing finalizer since not terminating")
 		// So we just get out of the way for now
-		return r.removeFinalizer(ctx, node)
+		return r.removeFinalizer(ctx, hv)
 	}
 
 	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
@@ -116,7 +108,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
 	if errors.Is(err, openstack.ErrNoHypervisor) {
 		// We are (hopefully) done
-		return r.removeFinalizer(ctx, node)
+		return r.removeFinalizer(ctx, hv)
 	}
 
 	// TODO: remove since RunningVMs is only available until micro-version 2.87, and also is updated asynchronously
@@ -141,7 +133,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot list aggregates due to %v", err))
 	}
 
-	host := node.Name
+	host := hv.Name
 	for name, aggregate := range aggs {
 		if slices.Contains(aggregate.Hosts, host) {
 			opts := aggregates.RemoveHostOpts{Host: host}
@@ -168,17 +160,17 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err))
 	}
 
-	return r.removeFinalizer(ctx, node)
+	return r.removeFinalizer(ctx, hv)
 }
 
-func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, node *corev1.Node) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(node, decommissionFinalizerName) {
+func (r *NodeDecommissionReconciler) removeFinalizer(ctx context.Context, hypervisor *kvmv1.Hypervisor) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(hypervisor, decommissionFinalizerName) {
 		return ctrl.Result{}, nil
 	}
 
-	nodeBase := node.DeepCopy()
-	controllerutil.RemoveFinalizer(node, decommissionFinalizerName)
-	err := r.Patch(ctx, node, k8sclient.MergeFromWithOptions(nodeBase,
+	base := hypervisor.DeepCopy()
+	controllerutil.RemoveFinalizer(hypervisor, decommissionFinalizerName)
+	err := r.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName))
 	return ctrl.Result{}, err
 }
@@ -195,7 +187,7 @@ func (r *NodeDecommissionReconciler) setDecommissioningCondition(ctx context.Con
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
-	return ctrl.Result{RequeueAfter: shortRetryTime}, nil
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -217,6 +209,6 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(DecommissionControllerName).
-		For(&corev1.Node{}).
+		For(&kvmv1.Hypervisor{}).
 		Complete(r)
 }

@@ -26,7 +26,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,9 +67,9 @@ const (
 var _ = Describe("Decommission Controller", func() {
 	var (
 		r            *NodeDecommissionReconciler
-		nodeName     = types.NamespacedName{Name: hypervisorName}
+		name         = types.NamespacedName{Name: hypervisorName}
 		reconcileReq = ctrl.Request{
-			NamespacedName: nodeName,
+			NamespacedName: name,
 		}
 		fakeServer testhelper.FakeServer
 	)
@@ -91,38 +90,10 @@ var _ = Describe("Decommission Controller", func() {
 			placementClient: client.ServiceClient(fakeServer),
 		}
 
-		By("creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
-		Expect(k8sclient.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
-		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
-		})
-
-		By("creating the core resource for the Kind Node")
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName.Name,
-				Labels: map[string]string{labelEvictionRequired: "true"},
-			},
-		}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-		DeferCleanup(func(ctx SpecContext) {
-			node := &corev1.Node{}
-			Expect(k8sclient.IgnoreNotFound(k8sClient.Get(ctx, nodeName, node))).To(Succeed())
-			if len(node.Finalizers) > 0 {
-				node.Finalizers = make([]string, 0)
-				Expect(k8sClient.Update(ctx, node)).To(Succeed())
-			}
-			if node.Name != "" {
-				Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
-			}
-		})
-
-		By("Create the hypervisor resource with lifecycle enabled")
+		By("Create the hypervisor to be reconciled with lifecycle enabled")
 		hypervisor := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName.Name,
+				Name: name.Name,
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
@@ -130,51 +101,59 @@ var _ = Describe("Decommission Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sclient.IgnoreNotFound(k8sClient.Get(ctx, name, hypervisor))).To(Succeed())
+			if len(hypervisor.Finalizers) > 0 {
+				hypervisor.Finalizers = make([]string, 0)
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+			}
+			if hypervisor.Name != "" {
+				Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+			}
 		})
 	})
 
-	Context("When reconciling a node", func() {
+	Context("When reconciling a hypervisor", func() {
 		It("should set the finalizer", func(ctx SpecContext) {
 			By("reconciling the created resource")
 			_, err := r.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
-			node := &corev1.Node{}
+			hypervisor := &kvmv1.Hypervisor{}
 
-			Expect(k8sClient.Get(ctx, nodeName, node)).To(Succeed())
-			Expect(node.Finalizers).To(ContainElement(decommissionFinalizerName))
+			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			Expect(hypervisor.Finalizers).To(ContainElement(decommissionFinalizerName))
 		})
 	})
 
-	Context("When terminating a node", func() {
+	Context("When terminating a hypervisor", func() {
 		JustBeforeEach(func(ctx SpecContext) {
 			By("reconciling first reconciling the to add the finalizer")
 			_, err := r.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
-			node := &corev1.Node{}
+			hypervisor := &kvmv1.Hypervisor{}
 
-			Expect(k8sClient.Get(ctx, nodeName, node)).To(Succeed())
-			Expect(node.Finalizers).To(ContainElement(decommissionFinalizerName))
+			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			Expect(hypervisor.Finalizers).To(ContainElement(decommissionFinalizerName))
 
-			By("and then terminating then node")
-			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+			By("and then terminating then hypervisor")
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    "Terminating",
-				Status:  corev1.ConditionTrue,
+				Status:  metav1.ConditionTrue,
 				Reason:  "dontcare",
 				Message: "dontcare",
 			})
-			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
-			nodelist := &corev1.NodeList{}
-			Expect(k8sClient.List(ctx, nodelist)).To(Succeed())
-			Expect(nodelist.Items).NotTo(BeEmpty())
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+			hypervisorList := &kvmv1.HypervisorList{}
+			Expect(k8sClient.List(ctx, hypervisorList)).To(Succeed())
+			Expect(hypervisorList.Items).NotTo(BeEmpty())
 		})
 
 		When("the hypervisor was set to ready", func() {
 			getHypervisorsCalled := 0
 			BeforeEach(func(ctx SpecContext) {
 				hv := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, nodeName, hv)).To(Succeed())
+				Expect(k8sClient.Get(ctx, name, hv)).To(Succeed())
 				meta.SetStatusCondition(&hv.Status.Conditions,
 					metav1.Condition{
 						Type:    kvmv1.ConditionTypeReady,
@@ -244,7 +223,7 @@ var _ = Describe("Decommission Controller", func() {
 				_, err := r.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
 				hypervisor := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, nodeName, hypervisor)).To(Succeed())
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
 				Expect(hypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeReady),
@@ -262,8 +241,8 @@ var _ = Describe("Decommission Controller", func() {
 				}
 				Expect(getHypervisorsCalled).To(BeNumerically(">", 0))
 
-				node := &corev1.Node{}
-				err := k8sClient.Get(ctx, nodeName, node)
+				hypervisor := &kvmv1.Hypervisor{}
+				err := k8sClient.Get(ctx, name, hypervisor)
 				Expect(err).To(HaveOccurred())
 				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
 			})
