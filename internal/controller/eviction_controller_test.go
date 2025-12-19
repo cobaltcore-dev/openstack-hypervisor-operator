@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -97,14 +96,12 @@ var _ = Describe("Eviction Controller", func() {
 		fakeServer           testhelper.FakeServer
 	)
 
-	ctx := context.Background() //nolint:govet
-
 	BeforeEach(func() {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 	})
 
-	AfterEach(func() {
+	AfterEach(func(ctx SpecContext) {
 		resource := &kvmv1.Eviction{}
 		err := k8sClient.Get(ctx, typeNamespacedName, resource)
 		if err != nil {
@@ -133,7 +130,7 @@ var _ = Describe("Eviction Controller", func() {
 
 	Describe("API validation", func() {
 		When("creating an eviction without hypervisor", func() {
-			It("it should fail creating the resource", func() {
+			It("it should fail creating the resource", func(ctx SpecContext) {
 				resource := &kvmv1.Eviction{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
@@ -149,7 +146,7 @@ var _ = Describe("Eviction Controller", func() {
 		})
 
 		When("creating an eviction without reason", func() {
-			It("it should fail creating the resource", func() {
+			It("it should fail creating the resource", func(ctx SpecContext) {
 				resource := &kvmv1.Eviction{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
@@ -165,7 +162,7 @@ var _ = Describe("Eviction Controller", func() {
 		})
 
 		When("creating an eviction with reason and hypervisor", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				By("creating the hypervisor resource")
 				hypervisor := &kvmv1.Hypervisor{
 					ObjectMeta: metav1.ObjectMeta{
@@ -174,7 +171,7 @@ var _ = Describe("Eviction Controller", func() {
 				}
 				Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 			})
-			It("should successfully create the resource", func() {
+			It("should successfully create the resource", func(ctx SpecContext) {
 				resource := &kvmv1.Eviction{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
@@ -193,7 +190,7 @@ var _ = Describe("Eviction Controller", func() {
 
 	Describe("Reconciliation", func() {
 		Describe("an eviction for 'test-hypervisor'", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				By("Creating the resource")
 				resource := &kvmv1.Eviction{
 					ObjectMeta: metav1.ObjectMeta{
@@ -224,7 +221,7 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 
-				It("should fail reconciliation", func() {
+				It("should fail reconciliation", func(ctx SpecContext) {
 					for range 3 {
 						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
@@ -247,7 +244,7 @@ var _ = Describe("Eviction Controller", func() {
 
 			})
 			When("enabled hypervisor has no servers", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
@@ -266,7 +263,7 @@ var _ = Describe("Eviction Controller", func() {
 					}
 					Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 				})
-				It("should succeed the reconciliation", func() {
+				It("should succeed the reconciliation", func(ctx SpecContext) {
 					runningCond := &metav1.Condition{
 						Type:    kvmv1.ConditionTypeEvicting,
 						Status:  metav1.ConditionTrue,
@@ -344,7 +341,7 @@ var _ = Describe("Eviction Controller", func() {
 				})
 			})
 			When("disabled hypervisor has no servers", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
@@ -362,7 +359,7 @@ var _ = Describe("Eviction Controller", func() {
 					}
 					Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 				})
-				It("should succeed the reconciliation", func() {
+				It("should succeed the reconciliation", func(ctx SpecContext) {
 					for range 3 {
 						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())

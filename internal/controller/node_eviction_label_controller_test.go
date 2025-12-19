@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"os"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -45,7 +44,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		reconciler        *NodeEvictionLabelReconciler
 		req               = ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}
 		fakeServer        testhelper.FakeServer
-		reconcileNodeLoop = func(ctx context.Context, steps int) (res ctrl.Result, err error) {
+		reconcileNodeLoop = func(ctx SpecContext, steps int) (res ctrl.Result, err error) {
 			for range steps {
 				res, err = reconciler.Reconcile(ctx, req)
 				if err != nil {
@@ -56,7 +55,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		}
 	)
 
-	BeforeEach(func(ctx context.Context) {
+	BeforeEach(func(ctx SpecContext) {
 		fakeServer = testhelper.SetupHTTP()
 		Expect(os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint())).To(Succeed())
 
@@ -88,7 +87,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			By("Cleanup the specific node")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
@@ -106,7 +105,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			By("Cleanup the specific hypervisor")
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
 		})
@@ -114,7 +113,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 	})
 
 	Context("When reconciling a node", func() {
-		BeforeEach(func(ctx context.Context) {
+		BeforeEach(func(ctx SpecContext) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, hypervisor)).To(Succeed())
 			By("updating the hypervisor status sub-resource")
@@ -127,7 +126,7 @@ var _ = Describe("Node Eviction Label Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should successfully reconcile the resource", func(ctx context.Context) {
+		It("should successfully reconcile the resource", func(ctx SpecContext) {
 			By("ConditionType the created resource")
 			_, err := reconcileNodeLoop(ctx, 5)
 			Expect(err).NotTo(HaveOccurred())

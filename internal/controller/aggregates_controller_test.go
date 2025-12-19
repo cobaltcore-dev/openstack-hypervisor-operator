@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -105,7 +104,7 @@ var _ = Describe("AggregatesController", func() {
 	)
 	// Setup and teardown
 
-	BeforeEach(func(ctx context.Context) {
+	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
@@ -135,19 +134,19 @@ var _ = Describe("AggregatesController", func() {
 			computeClient: client.ServiceClient(fakeServer),
 		}
 
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
 		})
 	})
 
-	JustBeforeEach(func(ctx context.Context) {
+	JustBeforeEach(func(ctx SpecContext) {
 		_, err := tc.Reconcile(ctx, ctrl.Request{NamespacedName: hypervisorName})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	// Tests
 	Context("Adding new Aggregate", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			By("Setting a missing aggregate")
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
@@ -189,7 +188,7 @@ var _ = Describe("AggregatesController", func() {
 			})
 		})
 
-		It("should update Aggregates and set status condition as Aggregates differ", func() {
+		It("should update Aggregates and set status condition as Aggregates differ", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(ContainElements("test-aggregate1"))
@@ -198,7 +197,7 @@ var _ = Describe("AggregatesController", func() {
 	})
 
 	Context("Removing Aggregate", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// update status to have existing aggregate
@@ -233,7 +232,7 @@ var _ = Describe("AggregatesController", func() {
 			fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", expectRemoveHostFromAggregate)
 		})
 
-		It("should update Aggregates and set status condition when Aggregates differ", func() {
+		It("should update Aggregates and set status condition when Aggregates differ", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
@@ -242,7 +241,7 @@ var _ = Describe("AggregatesController", func() {
 	})
 
 	Context("before onboarding", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// Remove the onboarding condition
@@ -250,7 +249,7 @@ var _ = Describe("AggregatesController", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should neither update Aggregates and nor set status condition", func() {
+		It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
@@ -259,7 +258,7 @@ var _ = Describe("AggregatesController", func() {
 	})
 
 	Context("when terminating", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// Remove the onboarding condition
@@ -272,7 +271,7 @@ var _ = Describe("AggregatesController", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should neither update Aggregates and nor set status condition", func() {
+		It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
