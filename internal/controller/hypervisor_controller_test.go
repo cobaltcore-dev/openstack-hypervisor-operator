@@ -31,14 +31,24 @@ import (
 )
 
 var _ = Describe("Hypervisor Controller", func() {
-	var hypervisorController *HypervisorController
-	var resource *corev1.Node
+	const (
+		resourceName = "other-node"
+	)
+	var (
+		hypervisorController *HypervisorController
+		resource             *corev1.Node
+		hypervisorName       = types.NamespacedName{Name: resourceName}
+	)
 
 	BeforeEach(func(ctx SpecContext) {
 		hypervisorController = &HypervisorController{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 		}
+
+		DeferCleanup(func() {
+			hypervisorController = nil
+		})
 
 		By("creating the namespace for the reconciler")
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
@@ -47,7 +57,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		// pregenerate the resource
 		resource = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        "other-node",
+				Name:        resourceName,
 				Labels:      map[string]string{corev1.LabelTopologyZone: "test-zone"},
 				Annotations: map[string]string{annotationCustomTraits: "test-trait"},
 			},
@@ -55,9 +65,8 @@ var _ = Describe("Hypervisor Controller", func() {
 	})
 
 	AfterEach(func(ctx SpecContext) {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
 		By("Cleanup the specific node")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, resource))).To(Succeed())
 
 		hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
 		By("Cleanup the specific hypervisor")
@@ -78,11 +87,11 @@ var _ = Describe("Hypervisor Controller", func() {
 			By("should have created the Hypervisor resource")
 			// Get the Hypervisor resource
 			hypervisor := &kvmv1.Hypervisor{}
-			hypervisorName := types.NamespacedName{Name: resource.Name}
-			Expect(hypervisorController.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			Expect(hypervisor.Name).To(Equal(resource.Name))
 			Expect(hypervisor.Labels).ToNot(BeNil())
 			Expect(hypervisor.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone"))
+			Expect(hypervisor.Spec.Maintenance).To(BeEmpty())
 
 			By("Adding a label annotation to the node and reconciling again")
 			// Add an aggregate annotation to the node
@@ -98,11 +107,12 @@ var _ = Describe("Hypervisor Controller", func() {
 			By("should have updated the Hypervisor resource with the aggregate")
 			// Get the Hypervisor resource again
 			updatedHypervisor := &kvmv1.Hypervisor{}
-			Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+			Expect(k8sClient.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
 			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
 			Expect(updatedHypervisor.Spec.CustomTraits).ToNot(BeNil())
 			Expect(updatedHypervisor.Spec.CustomTraits).To(ContainElement("test-trait"))
 			Expect(updatedHypervisor.Labels).To(HaveKeyWithValue("worker.garden.sapcloud.io/group", "new-group"))
+			Expect(updatedHypervisor.Spec.Maintenance).To(BeEmpty())
 		})
 	})
 
@@ -121,8 +131,16 @@ var _ = Describe("Hypervisor Controller", func() {
 			})
 			Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
 
+			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: resource.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(hypervisor.Spec.Maintenance).To(Equal(kvmv1.MaintenanceTermination))
+
 			By("Reconciling the created resource")
-			for range 3 {
+			for range 2 {
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
 					NamespacedName: types.NamespacedName{Name: resource.Name},
 				})
@@ -131,17 +149,16 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			By("should have set the terminating condition on the Hypervisor resource")
 			// Get the Hypervisor resource
-			hypervisor := &kvmv1.Hypervisor{}
-			hypervisorName := types.NamespacedName{Name: resource.Name}
-			Expect(hypervisorController.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Name).To(Equal(resource.Name))
-			Expect(hypervisor.Status.Conditions).ToNot(BeNil())
-			condition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeReady)
+			updatedHypervisor := &kvmv1.Hypervisor{}
+			Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
+			Expect(updatedHypervisor.Status.Conditions).ToNot(BeNil())
+			condition := meta.FindStatusCondition(updatedHypervisor.Status.Conditions, kvmv1.ConditionTypeReady)
 			Expect(condition).ToNot(BeNil())
 			Expect(condition.Reason).To(Equal("Terminating"))
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 
-			condition = meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
+			condition = meta.FindStatusCondition(updatedHypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
 			Expect(condition).ToNot(BeNil())
 			Expect(condition.Reason).To(Equal("Terminating"))
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))

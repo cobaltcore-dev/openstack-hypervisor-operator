@@ -147,6 +147,10 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
 	}
 
+	if IsNodeConditionPresentAndEqual(node.Status.Conditions, "Terminating", corev1.ConditionTrue) {
+		hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+	}
+
 	if err := hv.Create(ctx, hypervisor, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
 		return ctrl.Result{}, err
 	}
