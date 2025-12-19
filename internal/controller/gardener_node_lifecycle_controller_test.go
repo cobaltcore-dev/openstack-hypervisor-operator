@@ -114,17 +114,23 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			})
 		})
 
-		When("the node has been evicted", func() {
+		When("the node has been offboarded", func() {
 			BeforeEach(func(ctx SpecContext) {
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
 				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeEvicting,
-					Status:  metav1.ConditionFalse,
+					Type:    kvmv1.ConditionTypeOffboarded,
+					Status:  metav1.ConditionTrue,
 					Reason:  "dontcare",
 					Message: "dontcare",
 				})
 				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
 			})
 		})
 

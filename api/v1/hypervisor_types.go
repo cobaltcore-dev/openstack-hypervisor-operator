@@ -32,6 +32,9 @@ const (
 	// ConditionTypeOnboarding is the type of condition for onboarding status
 	ConditionTypeOnboarding = "Onboarding"
 
+	// ConditionTypeOffboarded is the type of condition for the completed offboarding
+	ConditionTypeOffboarded = "Offboarded"
+
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
 	ConditionTypeReady = "Ready"
 
