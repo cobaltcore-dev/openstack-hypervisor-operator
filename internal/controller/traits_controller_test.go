@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -63,7 +62,7 @@ var _ = Describe("TraitsController", func() {
 
 	// Setup and teardown
 
-	BeforeEach(func(ctx context.Context) {
+	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
@@ -87,7 +86,7 @@ var _ = Describe("TraitsController", func() {
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			By("Deleting the Hypervisor resource")
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
@@ -98,7 +97,7 @@ var _ = Describe("TraitsController", func() {
 	// Tests
 
 	Context("Reconcile after onboarding before decommissioning", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			// Mock resourceproviders.GetTraits
 			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
@@ -146,7 +145,7 @@ var _ = Describe("TraitsController", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should update traits and set status condition when traits differ", func() {
+		It("should update traits and set status condition when traits differ", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
 			_, err := tc.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -159,7 +158,7 @@ var _ = Describe("TraitsController", func() {
 	})
 
 	Context("Reconcile before onboarding", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			// Mock resourceproviders.GetTraits
 			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
 				defer GinkgoRecover()
@@ -178,7 +177,7 @@ var _ = Describe("TraitsController", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should not update traits", func() {
+		It("should not update traits", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
 			_, err := tc.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -191,7 +190,7 @@ var _ = Describe("TraitsController", func() {
 	})
 
 	Context("Reconcile when terminating", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			// Mock resourceproviders.GetTraits
 			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
 				defer GinkgoRecover()
@@ -221,7 +220,7 @@ var _ = Describe("TraitsController", func() {
 
 		})
 
-		It("should not update traits", func() {
+		It("should not update traits", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
 			_, err := tc.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())

@@ -41,7 +41,7 @@ var _ = Describe("Node Certificate Controller", func() {
 
 	// Setup
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the test environment")
 		scheme := runtime.NewScheme()
 		Expect(corev1.AddToScheme(scheme)).To(Succeed())
@@ -72,7 +72,7 @@ var _ = Describe("Node Certificate Controller", func() {
 		Expect(fakeClient.Create(ctx, resource)).To(Succeed())
 	})
 
-	AfterEach(func() {
+	AfterEach(func(ctx SpecContext) {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
 		By("Cleanup the specific node")
 		Expect(client.IgnoreAlreadyExists(fakeClient.Delete(ctx, node))).To(Succeed())
@@ -83,7 +83,7 @@ var _ = Describe("Node Certificate Controller", func() {
 	// Tests
 
 	Context("When reconciling a node with nova virt label", func() {
-		It("should successfully create a new certificate", func() {
+		It("should successfully create a new certificate", func(ctx SpecContext) {
 			By("Reconciling the node")
 			req := ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: nodeName},

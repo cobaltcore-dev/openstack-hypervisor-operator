@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -213,7 +212,7 @@ var _ = Describe("Onboarding Controller", func() {
 		namespacedName       = types.NamespacedName{Name: hypervisorName}
 		fakeServer           testhelper.FakeServer
 		reconcileReq         = ctrl.Request{NamespacedName: namespacedName}
-		reconcileLoop        = func(ctx context.Context, steps int) (err error) {
+		reconcileLoop        = func(ctx SpecContext, steps int) (err error) {
 			for range steps {
 				_, err = onboardingReconciler.Reconcile(ctx, reconcileReq)
 				if err != nil {
@@ -224,7 +223,7 @@ var _ = Describe("Onboarding Controller", func() {
 		}
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx SpecContext) {
 		By("creating the resource for the Kind Hypervisor")
 		hv := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
@@ -241,7 +240,7 @@ var _ = Describe("Onboarding Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, hv)).To(Succeed())
 
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			By("Cleanup the specific hypervisor CRO")
 			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
 		})
@@ -389,7 +388,7 @@ var _ = Describe("Onboarding Controller", func() {
 	})
 
 	Context("running tests after initial setup", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			hv := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 			hv.Status.HypervisorID = hypervisorId
@@ -497,14 +496,14 @@ var _ = Describe("Onboarding Controller", func() {
 		})
 
 		When("SkipTests is set to true", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = true
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 			})
 
-			It("should update the conditions", func() {
+			It("should update the conditions", func(ctx SpecContext) {
 				By("Reconciling the created resource")
 				err := reconcileLoop(ctx, 3)
 				Expect(err).NotTo(HaveOccurred())
@@ -524,14 +523,14 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 		})
 		When("SkipTests is set to false", func() {
-			BeforeEach(func() {
+			BeforeEach(func(ctx SpecContext) {
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = false
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 			})
 
-			It("should update the conditions", func() {
+			It("should update the conditions", func(ctx SpecContext) {
 				By("Reconciling the created resource")
 				err := reconcileLoop(ctx, 3)
 				Expect(err).NotTo(HaveOccurred())

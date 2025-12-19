@@ -31,7 +31,7 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 	const nodeName = "node-test"
 	var controller *GardenerNodeLifecycleController
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx SpecContext) {
 		controller = &GardenerNodeLifecycleController{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
@@ -49,16 +49,13 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-	})
-
-	AfterEach(func() {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		By("Cleanup the specific node")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, resource))).To(Succeed())
+		})
 	})
 
 	Context("When reconciling a node", func() {
-		It("should successfully reconcile the resource", func() {
+		It("should successfully reconcile the resource", func(ctx SpecContext) {
 			req := ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: nodeName},
 			}

@@ -18,8 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -84,7 +82,7 @@ var _ = Describe("Decommission Controller", func() {
 		})
 	})
 
-	AfterEach(func(ctx context.Context) {
+	AfterEach(func(ctx SpecContext) {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName.Name}}
 		By("Cleanup the specific node and hypervisor resource")
 		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
@@ -102,7 +100,7 @@ var _ = Describe("Decommission Controller", func() {
 	})
 
 	Context("When reconciling a node", func() {
-		It("should set the finalizer", func(ctx context.Context) {
+		It("should set the finalizer", func(ctx SpecContext) {
 			By("reconciling the created resource")
 			_, err := r.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())

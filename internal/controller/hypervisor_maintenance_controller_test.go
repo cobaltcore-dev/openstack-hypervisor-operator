@@ -18,7 +18,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -79,7 +78,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 	}
 
 	// Setup and teardown
-	BeforeEach(func(ctx context.Context) {
+	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
@@ -100,7 +99,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			Spec: kvmv1.HypervisorSpec{},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
-		DeferCleanup(func(ctx context.Context) {
+		DeferCleanup(func(ctx SpecContext) {
 			By("Deleting the Hypervisor resource")
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
@@ -109,13 +108,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 	})
 
 	// After the setup in JustBefore, we want to reconcile
-	JustBeforeEach(func(ctx context.Context) {
+	JustBeforeEach(func(ctx SpecContext) {
 		req := ctrl.Request{NamespacedName: hypervisorName}
 		_, err := controller.Reconcile(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	AfterEach(func(ctx context.Context) {
+	AfterEach(func(ctx SpecContext) {
 		eviction := &kvmv1.Eviction{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      hypervisorName.Name,
@@ -127,7 +126,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 	// Tests
 	Context("Onboarded Hypervisor", func() {
-		BeforeEach(func() {
+		BeforeEach(func(ctx SpecContext) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			hypervisor.Status.ServiceID = "1234"
@@ -144,7 +143,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 		Describe("Enabling or Disabling the Nova Service", func() {
 			Context("Spec.Maintenance=\"\"", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = ""
@@ -153,13 +152,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					mockServiceUpdate(expectedBody)
 				})
 
-				It("should set the ConditionTypeHypervisorDisabled to false", func() {
+				It("should set the ConditionTypeHypervisorDisabled to false", func(ctx SpecContext) {
 					updated := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
 
-				It("should set the ConditionTypeReady to true", func() {
+				It("should set the ConditionTypeReady to true", func(ctx SpecContext) {
 					updated := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(updated.Status.Conditions).To(ContainElement(
@@ -173,7 +172,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 		for _, mode := range []string{"auto", "manual", "ha"} {
 			Context(fmt.Sprintf("Spec.Maintenance=\"%v\"", mode), func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = mode
@@ -182,13 +181,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					mockServiceUpdate(expectedBody)
 				})
 
-				It("should set the ConditionTypeHypervisorDisabled to true", func() {
+				It("should set the ConditionTypeHypervisorDisabled to true", func(ctx SpecContext) {
 					updated := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
 
-				It("should set the ConditionTypeReady to false", func() {
+				It("should set the ConditionTypeReady to false", func(ctx SpecContext) {
 					updated := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(updated.Status.Conditions).To(ContainElement(
@@ -202,7 +201,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 		Describe("Eviction reconciliation", func() {
 			Context("Spec.Maintenance=\"\"", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = ""
@@ -230,7 +229,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
 				})
 
-				It("should delete the created eviction", func() {
+				It("should delete the created eviction", func(ctx SpecContext) {
 					eviction := &kvmv1.Eviction{}
 					err := k8sClient.Get(ctx, hypervisorName, eviction)
 					By(fmt.Sprintf("%+v", *eviction))
@@ -240,7 +239,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			}) // Spec.Maintenance=""
 
 			Context("Spec.Maintenance=\"ha\"", func() {
-				BeforeEach(func() {
+				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = "ha"
@@ -248,7 +247,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					expectedBody := `{"disabled_reason": "Hypervisor CRD: spec.maintenance=ha", "status": "disabled"}`
 					mockServiceUpdate(expectedBody)
 				})
-				It("should not create an eviction resource", func() {
+				It("should not create an eviction resource", func(ctx SpecContext) {
 					eviction := &kvmv1.Eviction{}
 					err := k8sClient.Get(ctx, hypervisorName, eviction)
 					Expect(err).To(HaveOccurred())
@@ -258,7 +257,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 			for _, mode := range []string{"auto", "manual"} {
 				Context(fmt.Sprintf("Spec.Maintenance=\"%v\"", mode), func() {
-					BeforeEach(func() {
+					BeforeEach(func(ctx SpecContext) {
 						hypervisor := &kvmv1.Hypervisor{}
 						Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 						hypervisor.Spec.Maintenance = mode
@@ -268,12 +267,12 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					})
 
 					When("there is no eviction yet", func() {
-						It("should create an eviction resource named as the hypervisor", func() {
+						It("should create an eviction resource named as the hypervisor", func(ctx SpecContext) {
 							eviction := &kvmv1.Eviction{}
 							Expect(k8sClient.Get(ctx, hypervisorName, eviction)).To(Succeed())
 						})
 
-						It("should create an evicting condition", func() {
+						It("should create an evicting condition", func(ctx SpecContext) {
 							hypervisor := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 							Expect(hypervisor.Status.Conditions).To(ContainElement(
@@ -285,7 +284,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							))
 						})
 
-						It("should reflect it in the hypervisor evicted status", func() {
+						It("should reflect it in the hypervisor evicted status", func(ctx SpecContext) {
 							hypervisor := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 							Expect(hypervisor.Status.Evicted).To(BeFalse())
@@ -293,7 +292,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					})
 
 					When("there is a finished eviction", func() {
-						BeforeEach(func() {
+						BeforeEach(func(ctx SpecContext) {
 							eviction := &kvmv1.Eviction{
 								ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
 								Spec: kvmv1.EvictionSpec{
@@ -316,7 +315,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
 						})
 
-						It("should reflect it in the hypervisor evicting condition", func() {
+						It("should reflect it in the hypervisor evicting condition", func(ctx SpecContext) {
 							hypervisor := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 							Expect(hypervisor.Status.Conditions).To(ContainElement(
@@ -328,13 +327,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							))
 						})
 
-						It("should reflect it in the hypervisor evicted status", func() {
+						It("should reflect it in the hypervisor evicted status", func(ctx SpecContext) {
 							hypervisor := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 							Expect(hypervisor.Status.Evicted).To(BeTrue())
 						})
 
-						It("should set the ConditionTypeReady to false and reason to evicted", func() {
+						It("should set the ConditionTypeReady to false and reason to evicted", func(ctx SpecContext) {
 							updated := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 							Expect(updated.Status.Conditions).To(ContainElement(
