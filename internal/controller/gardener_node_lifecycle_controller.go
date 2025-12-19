@@ -87,9 +87,9 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	// Onboarding is not in progress anymore, i.e. the host is onboarded
 	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Evicting is not in progress anymore, i.e. the host is empty
-	evictionComplete := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+	offboarded := meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
 
-	if evictionComplete {
+	if offboarded {
 		minAvailable = 0
 
 		if onboardingCompleted && isTerminating(node) {
