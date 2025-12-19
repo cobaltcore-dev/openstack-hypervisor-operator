@@ -30,54 +30,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	ctrlRuntimeClient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
-
-var HypervisorWithServers = `{
-    "hypervisors": [
-        {
-            "service": {
-                "host": "e6a37ee802d74863ab8b91ade8f12a67",
-                "id": "%s",
-                "disabled_reason": "%s"
-            },
-            "cpu_info": {
-                "arch": "x86_64",
-                "model": "Nehalem",
-                "vendor": "Intel",
-                "features": [
-                    "pge",
-                    "clflush"
-                ],
-                "topology": {
-                    "cores": 1,
-                    "threads": 1,
-                    "sockets": 4
-                }
-            },
-            "current_workload": 0,
-            "status": "enabled",
-            "state": "up",
-            "disk_available_least": 0,
-            "host_ip": "1.1.1.1",
-            "free_disk_gb": 1028,
-            "free_ram_mb": 7680,
-            "hypervisor_hostname": %q,
-            "hypervisor_type": "fake",
-            "hypervisor_version": 2002000,
-            "id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-            "local_gb": 1028,
-            "local_gb_used": 0,
-            "memory_mb": 8192,
-            "memory_mb_used": 512,
-            "running_vms": 0,
-            "vcpus": 1,
-            "vcpus_used": 0
-        }
-    ]
-}`
 
 var _ = Describe("Eviction Controller", func() {
 	const (
@@ -85,9 +40,32 @@ var _ = Describe("Eviction Controller", func() {
 		namespaceName  = "default"
 		hypervisorName = "test-hypervisor"
 		serviceId      = "test-id"
+		hypervisorId   = "test-hv-id"
+		hypervisorTpl  = `{
+    "hypervisor": {
+        "host_ip": "192.168.1.135",
+        "hypervisor_hostname": "fake-mini",
+        "hypervisor_type": "fake",
+        "hypervisor_version": 1000,
+        "id": "test-hv-id",
+        "servers": [],
+        "service": {
+            "disabled_reason": %v,
+            "host": "compute",
+            "id": "test-id"
+        },
+        "state": "up",
+        "status": "%v",
+        "uptime": null
+	}
+}`
 	)
 	var (
 		typeNamespacedName = types.NamespacedName{
+			Name:      resourceName,
+			Namespace: namespaceName,
+		}
+		evictionObjectMeta = metav1.ObjectMeta{
 			Name:      resourceName,
 			Namespace: namespaceName,
 		}
@@ -95,11 +73,6 @@ var _ = Describe("Eviction Controller", func() {
 		controllerReconciler *EvictionReconciler
 		fakeServer           testhelper.FakeServer
 	)
-
-	BeforeEach(func() {
-		By("Setting up the OpenStack http mock server")
-		fakeServer = testhelper.SetupHTTP()
-	})
 
 	AfterEach(func(ctx SpecContext) {
 		resource := &kvmv1.Eviction{}
@@ -116,26 +89,13 @@ var _ = Describe("Eviction Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).Should(HaveOccurred())
 		}
-
-		By("Tearing down the OpenStack http mock server")
-		fakeServer.Teardown()
-		controllerReconciler = nil
-		hv := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName,
-			},
-		}
-		Expect(ctrlRuntimeClient.IgnoreNotFound(k8sClient.Delete(ctx, hv))).To(Succeed())
 	})
 
 	Describe("API validation", func() {
 		When("creating an eviction without hypervisor", func() {
 			It("it should fail creating the resource", func(ctx SpecContext) {
 				resource := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
+					ObjectMeta: evictionObjectMeta,
 					Spec: kvmv1.EvictionSpec{
 						Reason: "test-reason",
 					},
@@ -148,10 +108,7 @@ var _ = Describe("Eviction Controller", func() {
 		When("creating an eviction without reason", func() {
 			It("it should fail creating the resource", func(ctx SpecContext) {
 				resource := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
+					ObjectMeta: evictionObjectMeta,
 					Spec: kvmv1.EvictionSpec{
 						Hypervisor: hypervisorName,
 					},
@@ -169,55 +126,89 @@ var _ = Describe("Eviction Controller", func() {
 						Name: hypervisorName,
 					},
 				}
-				Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
+				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+				DeferCleanup(func(ctx SpecContext) {
+					Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+				})
 			})
 			It("should successfully create the resource", func(ctx SpecContext) {
-				resource := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
+				eviction := &kvmv1.Eviction{
+					ObjectMeta: evictionObjectMeta,
 					Spec: kvmv1.EvictionSpec{
 						Reason:     "test-reason",
 						Hypervisor: hypervisorName,
 					},
 				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+				Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, eviction)).To(Succeed())
 			})
 		})
 	})
 
 	Describe("Reconciliation", func() {
-		Describe("an eviction for 'test-hypervisor'", func() {
+		BeforeEach(func(ctx SpecContext) {
+			By("Setting up the OpenStack http mock server")
+			fakeServer = testhelper.SetupHTTP()
+
+			DeferCleanup(func(ctx SpecContext) {
+				fakeServer.Teardown()
+			})
+
+			// Install default handler to fail unhandled requests
+			fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
+			})
+
+			By("Creating the EvictionReconciler")
+
+			controllerReconciler = &EvictionReconciler{
+				Client:        k8sClient,
+				Scheme:        k8sClient.Scheme(),
+				computeClient: client.ServiceClient(fakeServer),
+			}
+
+			DeferCleanup(func() {
+				controllerReconciler = nil
+			})
+		})
+
+		Describe("an eviction for an onboarded 'test-hypervisor'", func() {
 			BeforeEach(func(ctx SpecContext) {
-				By("Creating the resource")
-				resource := &kvmv1.Eviction{
+				By("creating the hypervisor resource")
+				hypervisor := &kvmv1.Hypervisor{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: hypervisorName,
 					},
+				}
+				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+				DeferCleanup(func(ctx SpecContext) {
+					Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+				})
+
+				hypervisor.Status.HypervisorID = hypervisorId
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				By("creating the eviction")
+				eviction := &kvmv1.Eviction{
+					ObjectMeta: evictionObjectMeta,
 					Spec: kvmv1.EvictionSpec{
 						Reason:     "test-reason",
 						Hypervisor: hypervisorName,
 					},
 				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-
-				By("Creating the controller")
-				controllerReconciler = &EvictionReconciler{
-					Client:        k8sClient,
-					Scheme:        k8sClient.Scheme(),
-					computeClient: client.ServiceClient(fakeServer),
-				}
+				Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
 			})
 
 			When("hypervisor is not found in openstack", func() {
 				BeforeEach(func() {
-					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"hypervisors": []}`)).ToNot(BeNil())
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/{hypervisor_id}", func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusNotFound)
 					})
 				})
 
@@ -232,12 +223,12 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect eviction condition to be false due to missing hypervisor
-					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
-					Expect(reconcileStatus).NotTo(BeNil())
-					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
-					Expect(reconcileStatus.Reason).To(Equal("Failed"))
-					Expect(reconcileStatus.Message).To(ContainSubstring("no hypervisor found"))
-					Expect(resource.Status.HypervisorServiceId).To(Equal(""))
+					Expect(resource.Status.Conditions).To(ContainElements(SatisfyAll(
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Type", kvmv1.ConditionTypeEvicting),
+						HaveField("Reason", "Failed"),
+						HaveField("Message", ContainSubstring("got 404")),
+					)))
 
 					Expect(resource.GetFinalizers()).To(BeEmpty())
 				})
@@ -245,23 +236,23 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("enabled hypervisor has no servers", func() {
 				BeforeEach(func(ctx SpecContext) {
-					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/{hypervisor_id}", func(w http.ResponseWriter, r *http.Request) {
+						rHypervisorId := r.PathValue("hypervisor_id")
+						Expect(rHypervisorId).To(Equal(hypervisorId))
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)).ToNot(BeNil())
+						_, err := fmt.Fprintf(w, hypervisorTpl, "null", "enabled")
+						Expect(err).To(Succeed())
 					})
-					fakeServer.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+
+					fakeServer.Mux.HandleFunc("PUT /os-services/{service_id}", func(w http.ResponseWriter, r *http.Request) {
+						rServiceId := r.PathValue("service_id")
+						Expect(rServiceId).To(Equal(serviceId))
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
+						_, err := fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)
+						Expect(err).To(Succeed())
 					})
-					By("creating the hypervisor resource")
-					hypervisor := &kvmv1.Hypervisor{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: hypervisorName,
-						},
-					}
-					Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 				})
 				It("should succeed the reconciliation", func(ctx SpecContext) {
 					runningCond := &metav1.Condition{
@@ -342,22 +333,21 @@ var _ = Describe("Eviction Controller", func() {
 			})
 			When("disabled hypervisor has no servers", func() {
 				BeforeEach(func(ctx SpecContext) {
-					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/{hypervisor_id}", func(w http.ResponseWriter, r *http.Request) {
+						rHypervisorId := r.PathValue("hypervisor_id")
+						Expect(rHypervisorId).To(Equal(hypervisorId))
 						w.Header().Add("Content-Type", "application/json")
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
+						_, err := fmt.Fprintf(w, hypervisorTpl, `"some reason"`, "disabled")
+						Expect(err).To(Succeed())
 					})
-					fakeServer.Mux.HandleFunc("PUT /os-services/test-id", func(w http.ResponseWriter, r *http.Request) {
+					fakeServer.Mux.HandleFunc("PUT /os-services/{service_id}", func(w http.ResponseWriter, r *http.Request) {
+						rServiceId := r.PathValue("service_id")
+						Expect(rServiceId).To(Equal(serviceId))
 						w.WriteHeader(http.StatusOK)
-						Expect(fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)).ToNot(BeNil())
+						_, err := fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)
+						Expect(err).To(Succeed())
 					})
-					By("creating the hypervisor resource")
-					hypervisor := &kvmv1.Hypervisor{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: hypervisorName,
-						},
-					}
-					Expect(ctrlRuntimeClient.IgnoreAlreadyExists(k8sClient.Create(ctx, hypervisor))).To(Succeed())
 				})
 				It("should succeed the reconciliation", func(ctx SpecContext) {
 					for range 3 {

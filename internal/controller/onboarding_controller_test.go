@@ -35,6 +35,52 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
+const (
+	HypervisorWithServers = `{
+    "hypervisors": [
+        {
+            "service": {
+                "host": "e6a37ee802d74863ab8b91ade8f12a67",
+                "id": "%s",
+                "disabled_reason": "%s"
+            },
+            "cpu_info": {
+                "arch": "x86_64",
+                "model": "Nehalem",
+                "vendor": "Intel",
+                "features": [
+                    "pge",
+                    "clflush"
+                ],
+                "topology": {
+                    "cores": 1,
+                    "threads": 1,
+                    "sockets": 4
+                }
+            },
+            "current_workload": 0,
+            "status": "enabled",
+            "state": "up",
+            "disk_available_least": 0,
+            "host_ip": "1.1.1.1",
+            "free_disk_gb": 1028,
+            "free_ram_mb": 7680,
+            "hypervisor_hostname": %q,
+            "hypervisor_type": "fake",
+            "hypervisor_version": 2002000,
+            "id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+            "local_gb": 1028,
+            "local_gb_used": 0,
+            "memory_mb": 8192,
+            "memory_mb_used": 512,
+            "running_vms": 0,
+            "vcpus": 1,
+            "vcpus_used": 0
+        }
+    ]
+}`
+)
+
 var _ = Describe("Onboarding Controller", func() {
 	const (
 		region                = "test-region"
