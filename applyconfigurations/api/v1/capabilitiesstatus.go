@@ -9,7 +9,7 @@ import (
 // CapabilitiesStatusApplyConfiguration represents a declarative configuration of the CapabilitiesStatus type for use
 // with apply.
 type CapabilitiesStatusApplyConfiguration struct {
-	HostCpuArch *string            `json:"cpuArch,omitempty"`
+	HostCpuArch *string            `json:"arch,omitempty"`
 	HostMemory  *resource.Quantity `json:"memory,omitempty"`
 	HostCpus    *resource.Quantity `json:"cpus,omitempty"`
 }

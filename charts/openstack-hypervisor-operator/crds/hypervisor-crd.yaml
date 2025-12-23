@@ -186,7 +186,7 @@ spec:
               capabilities:
                 description: The capabilities of the hypervisors as reported by libvirt.
                 properties:
-                  cpuArch:
+                  arch:
                     default: unknown
                     description: The hosts CPU architecture (not the guests).
                     type: string

@@ -191,10 +191,13 @@ type OperatingSystemStatus struct {
 }
 
 // Current capabilities reported by libvirt.
+//
+// The keys provided here should correspond to the capabilities expected
+// by openstack's flavor extra specs, like 'capabilities:arch'.
 type CapabilitiesStatus struct {
 	// +kubebuilder:default:=unknown
 	// The hosts CPU architecture (not the guests).
-	HostCpuArch string `json:"cpuArch,omitempty"`
+	HostCpuArch string `json:"arch,omitempty"`
 	// Total host memory available as a sum of memory over all numa cells.
 	HostMemory resource.Quantity `json:"memory,omitempty"`
 	// Total host cpus available as a sum of cpus over all numa cells.
