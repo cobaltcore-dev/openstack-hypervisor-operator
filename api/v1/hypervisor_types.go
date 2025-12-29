@@ -210,20 +210,20 @@ type Capabilities struct {
 // Domain capabilities of the hypervisor as reported by libvirt.
 // These details are relevant to check if a VM can be scheduled on the hypervisor.
 type DomainCapabilities struct {
-	// +kubebuilder:default:=unknown
 	// The available domain cpu architecture.
-	Arch string `json:"arch,omitempty"`
 	// +kubebuilder:default:=unknown
+	Arch string `json:"arch,omitempty"`
 	// The supported type of virtualization for domains, such as "ch".
+	// +kubebuilder:default:=unknown
 	HypervisorType string `json:"hypervisorType,omitempty"`
-	// +kubebuilder:default:={}
 	// Supported devices for domains, such as "video".
+	// +kubebuilder:default:={}
 	SupportedDevices []string `json:"supportedDevices,omitempty"`
-	// +kubebuilder:default:={}
 	// Supported cpu modes for domains, such as "host-passthrough".
-	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
 	// +kubebuilder:default:={}
+	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
 	// Supported features for domains, such as "sev" or "sgx".
+	// +kubebuilder:default:={}
 	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
 }
 
@@ -243,21 +243,23 @@ type HypervisorStatus struct {
 	Instances []Instance `json:"instances,omitempty"`
 
 	// Auto-discovered capabilities as reported by libvirt.
+	// +kubebuilder:validation:Optional
 	Capabilities Capabilities `json:"capabilities"`
 
 	// Auto-discovered domain capabilities relevant to check if a VM
 	// can be scheduled on the hypervisor.
+	// +kubebuilder:validation:Optional
 	DomainCapabilities DomainCapabilities `json:"domainCapabilities"`
 
-	// +kubebuilder:default:={}
 	// Auto-discovered capacity available in total on the hypervisor.
 	// The remaining physical capacity can be calculated
 	// as Capacity - Allocation.
+	// +kubebuilder:default:={}
 	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
 
-	// +kubebuilder:default:={}
 	// Auto-discovered capacity currently allocated by instances
 	// on the hypervisor. Note that this does not include reserved capacity.
+	// +kubebuilder:default:={}
 	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
 
 	// +kubebuilder:default:=0
