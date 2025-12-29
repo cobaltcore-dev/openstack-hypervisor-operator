@@ -3,26 +3,30 @@
 package v1
 
 import (
+	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // HypervisorStatusApplyConfiguration represents a declarative configuration of the HypervisorStatus type for use
 // with apply.
 type HypervisorStatusApplyConfiguration struct {
-	LibVirtVersion  *string                                   `json:"libVirtVersion,omitempty"`
-	OperatingSystem *OperatingSystemStatusApplyConfiguration  `json:"operatingSystem,omitempty"`
-	Update          *HyperVisorUpdateStatusApplyConfiguration `json:"updateStatus,omitempty"`
-	Instances       []InstanceApplyConfiguration              `json:"instances,omitempty"`
-	Capabilities    *CapabilitiesStatusApplyConfiguration     `json:"capabilities,omitempty"`
-	NumInstances    *int                                      `json:"numInstances,omitempty"`
-	HypervisorID    *string                                   `json:"hypervisorId,omitempty"`
-	ServiceID       *string                                   `json:"serviceId,omitempty"`
-	Traits          []string                                  `json:"traits,omitempty"`
-	Aggregates      []string                                  `json:"aggregates,omitempty"`
-	InternalIP      *string                                   `json:"internalIp,omitempty"`
-	Evicted         *bool                                     `json:"evicted,omitempty"`
-	Conditions      []metav1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
-	SpecHash        *string                                   `json:"specHash,omitempty"`
+	LibVirtVersion     *string                                   `json:"libVirtVersion,omitempty"`
+	OperatingSystem    *OperatingSystemStatusApplyConfiguration  `json:"operatingSystem,omitempty"`
+	Update             *HyperVisorUpdateStatusApplyConfiguration `json:"updateStatus,omitempty"`
+	Instances          []InstanceApplyConfiguration              `json:"instances,omitempty"`
+	Capabilities       *CapabilitiesApplyConfiguration           `json:"capabilities,omitempty"`
+	DomainCapabilities *DomainCapabilitiesApplyConfiguration     `json:"domainCapabilities,omitempty"`
+	Capacity           map[string]resource.Quantity              `json:"capacity,omitempty"`
+	Allocation         map[string]resource.Quantity              `json:"allocation,omitempty"`
+	NumInstances       *int                                      `json:"numInstances,omitempty"`
+	HypervisorID       *string                                   `json:"hypervisorId,omitempty"`
+	ServiceID          *string                                   `json:"serviceId,omitempty"`
+	Traits             []string                                  `json:"traits,omitempty"`
+	Aggregates         []string                                  `json:"aggregates,omitempty"`
+	InternalIP         *string                                   `json:"internalIp,omitempty"`
+	Evicted            *bool                                     `json:"evicted,omitempty"`
+	Conditions         []metav1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
+	SpecHash           *string                                   `json:"specHash,omitempty"`
 }
 
 // HypervisorStatusApplyConfiguration constructs a declarative configuration of the HypervisorStatus type for use with
@@ -71,8 +75,44 @@ func (b *HypervisorStatusApplyConfiguration) WithInstances(values ...*InstanceAp
 // WithCapabilities sets the Capabilities field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Capabilities field is set to the value of the last call.
-func (b *HypervisorStatusApplyConfiguration) WithCapabilities(value *CapabilitiesStatusApplyConfiguration) *HypervisorStatusApplyConfiguration {
+func (b *HypervisorStatusApplyConfiguration) WithCapabilities(value *CapabilitiesApplyConfiguration) *HypervisorStatusApplyConfiguration {
 	b.Capabilities = value
+	return b
+}
+
+// WithDomainCapabilities sets the DomainCapabilities field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DomainCapabilities field is set to the value of the last call.
+func (b *HypervisorStatusApplyConfiguration) WithDomainCapabilities(value *DomainCapabilitiesApplyConfiguration) *HypervisorStatusApplyConfiguration {
+	b.DomainCapabilities = value
+	return b
+}
+
+// WithCapacity puts the entries into the Capacity field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the Capacity field,
+// overwriting an existing map entries in Capacity field with the same key.
+func (b *HypervisorStatusApplyConfiguration) WithCapacity(entries map[string]resource.Quantity) *HypervisorStatusApplyConfiguration {
+	if b.Capacity == nil && len(entries) > 0 {
+		b.Capacity = make(map[string]resource.Quantity, len(entries))
+	}
+	for k, v := range entries {
+		b.Capacity[k] = v
+	}
+	return b
+}
+
+// WithAllocation puts the entries into the Allocation field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the Allocation field,
+// overwriting an existing map entries in Allocation field with the same key.
+func (b *HypervisorStatusApplyConfiguration) WithAllocation(entries map[string]resource.Quantity) *HypervisorStatusApplyConfiguration {
+	if b.Allocation == nil && len(entries) > 0 {
+		b.Allocation = make(map[string]resource.Quantity, len(entries))
+	}
+	for k, v := range entries {
+		b.Allocation[k] = v
+	}
 	return b
 }
 

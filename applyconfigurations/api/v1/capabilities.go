@@ -6,24 +6,24 @@ import (
 	resource "k8s.io/apimachinery/pkg/api/resource"
 )
 
-// CapabilitiesStatusApplyConfiguration represents a declarative configuration of the CapabilitiesStatus type for use
+// CapabilitiesApplyConfiguration represents a declarative configuration of the Capabilities type for use
 // with apply.
-type CapabilitiesStatusApplyConfiguration struct {
+type CapabilitiesApplyConfiguration struct {
 	HostCpuArch *string            `json:"cpuArch,omitempty"`
 	HostMemory  *resource.Quantity `json:"memory,omitempty"`
 	HostCpus    *resource.Quantity `json:"cpus,omitempty"`
 }
 
-// CapabilitiesStatusApplyConfiguration constructs a declarative configuration of the CapabilitiesStatus type for use with
+// CapabilitiesApplyConfiguration constructs a declarative configuration of the Capabilities type for use with
 // apply.
-func CapabilitiesStatus() *CapabilitiesStatusApplyConfiguration {
-	return &CapabilitiesStatusApplyConfiguration{}
+func Capabilities() *CapabilitiesApplyConfiguration {
+	return &CapabilitiesApplyConfiguration{}
 }
 
 // WithHostCpuArch sets the HostCpuArch field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the HostCpuArch field is set to the value of the last call.
-func (b *CapabilitiesStatusApplyConfiguration) WithHostCpuArch(value string) *CapabilitiesStatusApplyConfiguration {
+func (b *CapabilitiesApplyConfiguration) WithHostCpuArch(value string) *CapabilitiesApplyConfiguration {
 	b.HostCpuArch = &value
 	return b
 }
@@ -31,7 +31,7 @@ func (b *CapabilitiesStatusApplyConfiguration) WithHostCpuArch(value string) *Ca
 // WithHostMemory sets the HostMemory field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the HostMemory field is set to the value of the last call.
-func (b *CapabilitiesStatusApplyConfiguration) WithHostMemory(value resource.Quantity) *CapabilitiesStatusApplyConfiguration {
+func (b *CapabilitiesApplyConfiguration) WithHostMemory(value resource.Quantity) *CapabilitiesApplyConfiguration {
 	b.HostMemory = &value
 	return b
 }
@@ -39,7 +39,7 @@ func (b *CapabilitiesStatusApplyConfiguration) WithHostMemory(value resource.Qua
 // WithHostCpus sets the HostCpus field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the HostCpus field is set to the value of the last call.
-func (b *CapabilitiesStatusApplyConfiguration) WithHostCpus(value resource.Quantity) *CapabilitiesStatusApplyConfiguration {
+func (b *CapabilitiesApplyConfiguration) WithHostCpus(value resource.Quantity) *CapabilitiesApplyConfiguration {
 	b.HostCpus = &value
 	return b
 }

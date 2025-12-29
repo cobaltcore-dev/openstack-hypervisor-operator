@@ -93,6 +93,12 @@ type HypervisorSpec struct {
 	// Aggregates are used to apply aggregates to the hypervisor.
 	Aggregates []string `json:"aggregates"`
 
+	// +kubebuilder:default:={}
+	// AllowedProjects defines which openstack projects are allowed to schedule
+	// instances on this hypervisor. The values of this list should be project
+	// uuids. If left empty, all projects are allowed.
+	AllowedProjects []string `json:"allowedProjects"`
+
 	// +kubebuilder:default:=true
 	// HighAvailability is used to enable the high availability handling of the hypervisor.
 	HighAvailability bool `json:"highAvailability"`
@@ -190,8 +196,8 @@ type OperatingSystemStatus struct {
 	GardenLinuxFeatures []string `json:"gardenLinuxFeatures,omitempty"`
 }
 
-// Current capabilities reported by libvirt.
-type CapabilitiesStatus struct {
+// Capabilities of the hypervisor as reported by libvirt.
+type Capabilities struct {
 	// +kubebuilder:default:=unknown
 	// The hosts CPU architecture (not the guests).
 	HostCpuArch string `json:"cpuArch,omitempty"`
@@ -199,6 +205,26 @@ type CapabilitiesStatus struct {
 	HostMemory resource.Quantity `json:"memory,omitempty"`
 	// Total host cpus available as a sum of cpus over all numa cells.
 	HostCpus resource.Quantity `json:"cpus,omitempty"`
+}
+
+// Domain capabilities of the hypervisor as reported by libvirt.
+// These details are relevant to check if a VM can be scheduled on the hypervisor.
+type DomainCapabilities struct {
+	// +kubebuilder:default:=unknown
+	// The available domain cpu architecture.
+	Arch string `json:"arch,omitempty"`
+	// +kubebuilder:default:=unknown
+	// The supported type of virtualization for domains, such as "ch".
+	HypervisorType string `json:"hypervisorType,omitempty"`
+	// +kubebuilder:default:={}
+	// Supported devices for domains, such as "video".
+	SupportedDevices []string `json:"supportedDevices,omitempty"`
+	// +kubebuilder:default:={}
+	// Supported cpu modes for domains, such as "host-passthrough".
+	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
+	// +kubebuilder:default:={}
+	// Supported features for domains, such as "sev" or "sgx".
+	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor
@@ -216,8 +242,23 @@ type HypervisorStatus struct {
 	// Represents the Hypervisor hosted Virtual Machines
 	Instances []Instance `json:"instances,omitempty"`
 
-	// The capabilities of the hypervisors as reported by libvirt.
-	Capabilities CapabilitiesStatus `json:"capabilities,omitempty"`
+	// Auto-discovered capabilities as reported by libvirt.
+	Capabilities Capabilities `json:"capabilities"`
+
+	// Auto-discovered domain capabilities relevant to check if a VM
+	// can be scheduled on the hypervisor.
+	DomainCapabilities DomainCapabilities `json:"domainCapabilities"`
+
+	// +kubebuilder:default:={}
+	// Auto-discovered capacity available in total on the hypervisor.
+	// The remaining physical capacity can be calculated
+	// as Capacity - Allocation.
+	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
+
+	// +kubebuilder:default:={}
+	// Auto-discovered capacity currently allocated by instances
+	// on the hypervisor. Note that this does not include reserved capacity.
+	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
 
 	// +kubebuilder:default:=0
 	// Represent the num of instances
