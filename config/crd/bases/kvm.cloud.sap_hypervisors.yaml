@@ -194,18 +194,6 @@ spec:
                 items:
                   type: string
                 type: array
-              allocation:
-                additionalProperties:
-                  anyOf:
-                  - type: integer
-                  - type: string
-                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                  x-kubernetes-int-or-string: true
-                default: {}
-                description: |-
-                  Auto-discovered capacity currently allocated by instances
-                  on the hypervisor. Note that this does not include reserved capacity.
-                type: object
               capabilities:
                 description: Auto-discovered capabilities as reported by libvirt.
                 properties:
@@ -221,6 +209,29 @@ spec:
                       numa cells.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  hostTopology:
+                    description: The host's cell topology (a.k.a. numa cells).
+                    items:
+                      description: Cell represents a single cell of the host's topology.
+                      properties:
+                        capacity:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          default: {}
+                          description: The cell's capacity, such as the number of
+                            cpus, memory, and hugepages.
+                          type: object
+                        id:
+                          description: ID is the identifier of the cell.
+                          type: integer
+                      required:
+                      - id
+                      type: object
+                    type: array
                   memory:
                     anyOf:
                     - type: integer
@@ -229,19 +240,6 @@ spec:
                       all numa cells.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
-                type: object
-              capacity:
-                additionalProperties:
-                  anyOf:
-                  - type: integer
-                  - type: string
-                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                  x-kubernetes-int-or-string: true
-                default: {}
-                description: |-
-                  Auto-discovered capacity available in total on the hypervisor.
-                  The remaining physical capacity can be calculated
-                  as Capacity - Allocation.
                 type: object
               conditions:
                 description: Represents the Hypervisor node conditions.
@@ -316,24 +314,97 @@ spec:
                     type: string
                   supportedCpuModes:
                     default: []
-                    description: Supported cpu modes for domains, such as "host-passthrough".
+                    description: |-
+                      Supported cpu modes for domains.
+
+                      The format of this list is cpu mode, and if specified, a specific
+                      submode. For example, the take the following xml domain cpu definition:
+
+                      <mode name='host-passthrough' supported='yes'>
+                        <enum name='hostPassthroughMigratable'/>
+                      </mode>
+
+                      The corresponding entries in this list would be "host-passthrough" and
+                      "host-passthrough/migratable".
                     items:
                       type: string
                     type: array
                   supportedDevices:
                     default: []
-                    description: Supported devices for domains, such as "video".
+                    description: |-
+                      Supported devices for domains.
+
+                      The format of this list is the device type, and if specified, a specific
+                      model. For example, the take the following xml domain device definition:
+
+                      <video supported='yes'>
+                        <enum name='modelType'>
+                          <value>nvidia</value>
+                        </enum>
+                      </video>
+
+                      The corresponding entries in this list would be "video" and "video/nvidia".
                     items:
                       type: string
                     type: array
                   supportedFeatures:
                     default: []
-                    description: Supported features for domains, such as "sev" or
-                      "sgx".
+                    description: |-
+                      Supported features for domains, such as "sev" or "sgx".
+
+                      This is a flat list of supported features, meaning the following xml:
+
+                      <features>
+                        <sev supported='no'/>
+                        <sgx supported='no'/>
+                      </features>
+
+                      Would correspond to the entries "sev" and "sgx" in this list.
                     items:
                       type: string
                     type: array
                 type: object
+              domainInfos:
+                default: []
+                description: Auto-discovered domain infos as reported by libvirt (dumpxml).
+                items:
+                  description: Domain information as reported by libvirt.
+                  properties:
+                    allocation:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: |-
+                        Resource allocation of the domain.
+                        This can include memory, cpu, and other.
+                      type: object
+                    cpuCells:
+                      description: |-
+                        The cpu numa cells of the domain, derived from the numa information
+                        of the cpu mode.
+                      items:
+                        type: integer
+                      type: array
+                    memoryCells:
+                      description: The memory numa cells of the domain, derived from
+                        the numa tune.
+                      items:
+                        type: integer
+                      type: array
+                    name:
+                      description: Name is the name of the domain.
+                      type: string
+                    uuid:
+                      description: UUID is the uuid of the domain.
+                      type: string
+                  required:
+                  - name
+                  - uuid
+                  type: object
+                type: array
               evicted:
                 description: Evicted indicates whether the hypervisor is evicted.
                   (no instances left with active maintenance mode)

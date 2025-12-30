@@ -196,6 +196,15 @@ type OperatingSystemStatus struct {
 	GardenLinuxFeatures []string `json:"gardenLinuxFeatures,omitempty"`
 }
 
+// Cell represents a single cell of the host's topology.
+type Cell struct {
+	// ID is the identifier of the cell.
+	ID int `json:"id"`
+	// The cell's capacity, such as the number of cpus, memory, and hugepages.
+	// +kubebuilder:default:={}
+	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
+}
+
 // Capabilities of the hypervisor as reported by libvirt.
 type Capabilities struct {
 	// +kubebuilder:default:=unknown
@@ -205,6 +214,9 @@ type Capabilities struct {
 	HostMemory resource.Quantity `json:"memory,omitempty"`
 	// Total host cpus available as a sum of cpus over all numa cells.
 	HostCpus resource.Quantity `json:"cpus,omitempty"`
+	// The host's cell topology (a.k.a. numa cells).
+	// +kubebuilder:validation:Optional
+	HostTopology []Cell `json:"hostTopology,omitempty"`
 }
 
 // Domain capabilities of the hypervisor as reported by libvirt.
@@ -213,18 +225,71 @@ type DomainCapabilities struct {
 	// The available domain cpu architecture.
 	// +kubebuilder:default:=unknown
 	Arch string `json:"arch,omitempty"`
+
 	// The supported type of virtualization for domains, such as "ch".
 	// +kubebuilder:default:=unknown
 	HypervisorType string `json:"hypervisorType,omitempty"`
-	// Supported devices for domains, such as "video".
+
+	// Supported devices for domains.
+	//
+	// The format of this list is the device type, and if specified, a specific
+	// model. For example, the take the following xml domain device definition:
+	//
+	// <video supported='yes'>
+	//   <enum name='modelType'>
+	//     <value>nvidia</value>
+	//   </enum>
+	// </video>
+	//
+	// The corresponding entries in this list would be "video" and "video/nvidia".
+	//
 	// +kubebuilder:default:={}
 	SupportedDevices []string `json:"supportedDevices,omitempty"`
-	// Supported cpu modes for domains, such as "host-passthrough".
+
+	// Supported cpu modes for domains.
+	//
+	// The format of this list is cpu mode, and if specified, a specific
+	// submode. For example, the take the following xml domain cpu definition:
+	//
+	// <mode name='host-passthrough' supported='yes'>
+	//   <enum name='hostPassthroughMigratable'/>
+	// </mode>
+	//
+	// The corresponding entries in this list would be "host-passthrough" and
+	// "host-passthrough/migratable".
+	//
 	// +kubebuilder:default:={}
 	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
+
 	// Supported features for domains, such as "sev" or "sgx".
+	//
+	// This is a flat list of supported features, meaning the following xml:
+	//
+	// <features>
+	//   <sev supported='no'/>
+	//   <sgx supported='no'/>
+	// </features>
+	//
+	// Would correspond to the entries "sev" and "sgx" in this list.
+	//
 	// +kubebuilder:default:={}
 	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
+}
+
+// Domain information as reported by libvirt.
+type DomainInfo struct {
+	// Name is the name of the domain.
+	Name string `json:"name"`
+	// UUID is the uuid of the domain.
+	UUID string `json:"uuid"`
+	// Resource allocation of the domain.
+	// This can include memory, cpu, and other.
+	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
+	// The memory numa cells of the domain, derived from the numa tune.
+	MemoryCells []int `json:"memoryCells,omitempty"`
+	// The cpu numa cells of the domain, derived from the numa information
+	// of the cpu mode.
+	CpuCells []int `json:"cpuCells,omitempty"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor
@@ -251,16 +316,9 @@ type HypervisorStatus struct {
 	// +kubebuilder:validation:Optional
 	DomainCapabilities DomainCapabilities `json:"domainCapabilities"`
 
-	// Auto-discovered capacity available in total on the hypervisor.
-	// The remaining physical capacity can be calculated
-	// as Capacity - Allocation.
+	// Auto-discovered domain infos as reported by libvirt (dumpxml).
 	// +kubebuilder:default:={}
-	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
-
-	// Auto-discovered capacity currently allocated by instances
-	// on the hypervisor. Note that this does not include reserved capacity.
-	// +kubebuilder:default:={}
-	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
+	DomainInfos []DomainInfo `json:"domainInfos,omitempty"`
 
 	// +kubebuilder:default:=0
 	// Represent the num of instances

@@ -3,7 +3,6 @@
 package v1
 
 import (
-	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -16,8 +15,7 @@ type HypervisorStatusApplyConfiguration struct {
 	Instances          []InstanceApplyConfiguration              `json:"instances,omitempty"`
 	Capabilities       *CapabilitiesApplyConfiguration           `json:"capabilities,omitempty"`
 	DomainCapabilities *DomainCapabilitiesApplyConfiguration     `json:"domainCapabilities,omitempty"`
-	Capacity           map[string]resource.Quantity              `json:"capacity,omitempty"`
-	Allocation         map[string]resource.Quantity              `json:"allocation,omitempty"`
+	DomainInfos        []DomainInfoApplyConfiguration            `json:"domainInfos,omitempty"`
 	NumInstances       *int                                      `json:"numInstances,omitempty"`
 	HypervisorID       *string                                   `json:"hypervisorId,omitempty"`
 	ServiceID          *string                                   `json:"serviceId,omitempty"`
@@ -88,30 +86,15 @@ func (b *HypervisorStatusApplyConfiguration) WithDomainCapabilities(value *Domai
 	return b
 }
 
-// WithCapacity puts the entries into the Capacity field in the declarative configuration
+// WithDomainInfos adds the given value to the DomainInfos field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, the entries provided by each call will be put on the Capacity field,
-// overwriting an existing map entries in Capacity field with the same key.
-func (b *HypervisorStatusApplyConfiguration) WithCapacity(entries map[string]resource.Quantity) *HypervisorStatusApplyConfiguration {
-	if b.Capacity == nil && len(entries) > 0 {
-		b.Capacity = make(map[string]resource.Quantity, len(entries))
-	}
-	for k, v := range entries {
-		b.Capacity[k] = v
-	}
-	return b
-}
-
-// WithAllocation puts the entries into the Allocation field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, the entries provided by each call will be put on the Allocation field,
-// overwriting an existing map entries in Allocation field with the same key.
-func (b *HypervisorStatusApplyConfiguration) WithAllocation(entries map[string]resource.Quantity) *HypervisorStatusApplyConfiguration {
-	if b.Allocation == nil && len(entries) > 0 {
-		b.Allocation = make(map[string]resource.Quantity, len(entries))
-	}
-	for k, v := range entries {
-		b.Allocation[k] = v
+// If called multiple times, values provided by each call will be appended to the DomainInfos field.
+func (b *HypervisorStatusApplyConfiguration) WithDomainInfos(values ...*DomainInfoApplyConfiguration) *HypervisorStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithDomainInfos")
+		}
+		b.DomainInfos = append(b.DomainInfos, *values[i])
 	}
 	return b
 }
