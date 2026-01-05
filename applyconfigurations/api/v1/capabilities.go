@@ -9,10 +9,9 @@ import (
 // CapabilitiesApplyConfiguration represents a declarative configuration of the Capabilities type for use
 // with apply.
 type CapabilitiesApplyConfiguration struct {
-	HostCpuArch  *string                  `json:"cpuArch,omitempty"`
-	HostMemory   *resource.Quantity       `json:"memory,omitempty"`
-	HostCpus     *resource.Quantity       `json:"cpus,omitempty"`
-	HostTopology []CellApplyConfiguration `json:"hostTopology,omitempty"`
+	HostCpuArch *string            `json:"cpuArch,omitempty"`
+	HostMemory  *resource.Quantity `json:"memory,omitempty"`
+	HostCpus    *resource.Quantity `json:"cpus,omitempty"`
 }
 
 // CapabilitiesApplyConfiguration constructs a declarative configuration of the Capabilities type for use with
@@ -42,18 +41,5 @@ func (b *CapabilitiesApplyConfiguration) WithHostMemory(value resource.Quantity)
 // If called multiple times, the HostCpus field is set to the value of the last call.
 func (b *CapabilitiesApplyConfiguration) WithHostCpus(value resource.Quantity) *CapabilitiesApplyConfiguration {
 	b.HostCpus = &value
-	return b
-}
-
-// WithHostTopology adds the given value to the HostTopology field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the HostTopology field.
-func (b *CapabilitiesApplyConfiguration) WithHostTopology(values ...*CellApplyConfiguration) *CapabilitiesApplyConfiguration {
-	for i := range values {
-		if values[i] == nil {
-			panic("nil value passed to WithHostTopology")
-		}
-		b.HostTopology = append(b.HostTopology, *values[i])
-	}
 	return b
 }

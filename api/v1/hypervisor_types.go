@@ -196,15 +196,6 @@ type OperatingSystemStatus struct {
 	GardenLinuxFeatures []string `json:"gardenLinuxFeatures,omitempty"`
 }
 
-// Cell represents a single cell of the host's topology.
-type Cell struct {
-	// ID is the identifier of the cell.
-	ID int `json:"id"`
-	// The cell's capacity, such as the number of cpus, memory, and hugepages.
-	// +kubebuilder:default:={}
-	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
-}
-
 // Capabilities of the hypervisor as reported by libvirt.
 type Capabilities struct {
 	// +kubebuilder:default:=unknown
@@ -214,9 +205,6 @@ type Capabilities struct {
 	HostMemory resource.Quantity `json:"memory,omitempty"`
 	// Total host cpus available as a sum of cpus over all numa cells.
 	HostCpus resource.Quantity `json:"cpus,omitempty"`
-	// The host's cell topology (a.k.a. numa cells).
-	// +kubebuilder:validation:Optional
-	HostTopology []Cell `json:"hostTopology,omitempty"`
 }
 
 // Domain capabilities of the hypervisor as reported by libvirt.
@@ -276,20 +264,18 @@ type DomainCapabilities struct {
 	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
 }
 
-// Domain information as reported by libvirt.
-type DomainInfo struct {
-	// Name is the name of the domain.
-	Name string `json:"name"`
-	// UUID is the uuid of the domain.
-	UUID string `json:"uuid"`
-	// Resource allocation of the domain.
-	// This can include memory, cpu, and other.
-	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
-	// The memory numa cells of the domain, derived from the numa tune.
-	MemoryCells []int `json:"memoryCells,omitempty"`
-	// The cpu numa cells of the domain, derived from the numa information
-	// of the cpu mode.
-	CpuCells []int `json:"cpuCells,omitempty"`
+// Cell represents a NUMA cell on the hypervisor.
+type Cell struct {
+	// Cell ID.
+	CellID uint64 `json:"cellID"`
+
+	// Auto-discovered resource allocation of all hosted VMs in this cell.
+	// +kubebuilder:validation:Optional
+	Allocation map[string]resource.Quantity `json:"allocation"`
+
+	// Auto-discovered capacity of this cell.
+	// +kubebuilder:validation:Optional
+	Capacity map[string]resource.Quantity `json:"capacity"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor
@@ -316,9 +302,17 @@ type HypervisorStatus struct {
 	// +kubebuilder:validation:Optional
 	DomainCapabilities DomainCapabilities `json:"domainCapabilities"`
 
-	// Auto-discovered domain infos as reported by libvirt (dumpxml).
-	// +kubebuilder:default:={}
-	DomainInfos []DomainInfo `json:"domainInfos,omitempty"`
+	// Auto-discovered resource allocation of all hosted VMs.
+	// +kubebuilder:validation:Optional
+	Allocation map[string]resource.Quantity `json:"allocation"`
+
+	// Auto-discovered capacity of the hypervisor.
+	// +kubebuilder:validation:Optional
+	Capacity map[string]resource.Quantity `json:"capacity"`
+
+	// Auto-discovered cells on this hypervisor.
+	// +kubebuilder:validation:Optional
+	Cells []Cell `json:"cells,omitempty"`
 
 	// +kubebuilder:default:=0
 	// Represent the num of instances
