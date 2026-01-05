@@ -9,8 +9,9 @@ import (
 // CellApplyConfiguration represents a declarative configuration of the Cell type for use
 // with apply.
 type CellApplyConfiguration struct {
-	ID       *int                         `json:"id,omitempty"`
-	Capacity map[string]resource.Quantity `json:"capacity,omitempty"`
+	CellID     *uint64                      `json:"cellID,omitempty"`
+	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
+	Capacity   map[string]resource.Quantity `json:"capacity,omitempty"`
 }
 
 // CellApplyConfiguration constructs a declarative configuration of the Cell type for use with
@@ -19,11 +20,25 @@ func Cell() *CellApplyConfiguration {
 	return &CellApplyConfiguration{}
 }
 
-// WithID sets the ID field in the declarative configuration to the given value
+// WithCellID sets the CellID field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ID field is set to the value of the last call.
-func (b *CellApplyConfiguration) WithID(value int) *CellApplyConfiguration {
-	b.ID = &value
+// If called multiple times, the CellID field is set to the value of the last call.
+func (b *CellApplyConfiguration) WithCellID(value uint64) *CellApplyConfiguration {
+	b.CellID = &value
+	return b
+}
+
+// WithAllocation puts the entries into the Allocation field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the Allocation field,
+// overwriting an existing map entries in Allocation field with the same key.
+func (b *CellApplyConfiguration) WithAllocation(entries map[string]resource.Quantity) *CellApplyConfiguration {
+	if b.Allocation == nil && len(entries) > 0 {
+		b.Allocation = make(map[string]resource.Quantity, len(entries))
+	}
+	for k, v := range entries {
+		b.Allocation[k] = v
+	}
 	return b
 }
 
