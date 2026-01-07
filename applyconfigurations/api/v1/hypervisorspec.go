@@ -12,6 +12,7 @@ type HypervisorSpecApplyConfiguration struct {
 	SkipTests                    *bool    `json:"skipTests,omitempty"`
 	CustomTraits                 []string `json:"customTraits,omitempty"`
 	Aggregates                   []string `json:"aggregates,omitempty"`
+	AllowedProjects              []string `json:"allowedProjects,omitempty"`
 	HighAvailability             *bool    `json:"highAvailability,omitempty"`
 	CreateCertManagerCertificate *bool    `json:"createCertManagerCertificate,omitempty"`
 	InstallCertificate           *bool    `json:"installCertificate,omitempty"`
@@ -80,6 +81,16 @@ func (b *HypervisorSpecApplyConfiguration) WithCustomTraits(values ...string) *H
 func (b *HypervisorSpecApplyConfiguration) WithAggregates(values ...string) *HypervisorSpecApplyConfiguration {
 	for i := range values {
 		b.Aggregates = append(b.Aggregates, values[i])
+	}
+	return b
+}
+
+// WithAllowedProjects adds the given value to the AllowedProjects field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllowedProjects field.
+func (b *HypervisorSpecApplyConfiguration) WithAllowedProjects(values ...string) *HypervisorSpecApplyConfiguration {
+	for i := range values {
+		b.AllowedProjects = append(b.AllowedProjects, values[i])
 	}
 	return b
 }
