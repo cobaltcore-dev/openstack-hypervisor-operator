@@ -135,7 +135,7 @@ var _ = Describe("Decommission Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		When("the hypervisor was set to ready", func() {
+		When("the hypervisor was set to ready and has been evicted", func() {
 			getHypervisorsCalled := 0
 			BeforeEach(func(ctx SpecContext) {
 				hv := &kvmv1.Hypervisor{}
@@ -148,6 +148,12 @@ var _ = Describe("Decommission Controller", func() {
 						Message: "dontcare",
 					},
 				)
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
 				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
