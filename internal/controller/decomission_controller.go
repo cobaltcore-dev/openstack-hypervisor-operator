@@ -78,7 +78,10 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	log.Info("removing host from nova")
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
+		// Either has not evicted yet, or is still evicting VMs, so we have to wait for that to finish
+		return ctrl.Result{}, nil
+	}
 
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
 	if err != nil {
