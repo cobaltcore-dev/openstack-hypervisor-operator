@@ -8,7 +8,7 @@ import (
 	internal "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/internal"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/managedfields"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 )
 
 // ForKind returns an apply configuration type for the given GroupVersionKind, or nil if no
@@ -18,6 +18,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	// Group=kvm.cloud.sap, Version=v1
 	case v1.SchemeGroupVersion.WithKind("Capabilities"):
 		return &apiv1.CapabilitiesApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("Cell"):
+		return &apiv1.CellApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DomainCapabilities"):
+		return &apiv1.DomainCapabilitiesApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Eviction"):
 		return &apiv1.EvictionApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EvictionSpec"):
