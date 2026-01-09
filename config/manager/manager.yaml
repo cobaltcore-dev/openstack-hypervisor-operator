@@ -61,6 +61,7 @@ spec:
       - args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          - --label-selector=${LABEL_SELECTOR}
         env:
           - name: OS_AUTH_URL
           - name: OS_PROJECT_DOMAIN_NAME
@@ -73,6 +74,7 @@ spec:
               secretKeyRef:
                 name: secret
                 key: SERVICE_PASSWORD
+          - name: LABEL_SELECTOR
         image: keppel.eu-de-1.cloud.sap/ccloud/openstack-hypervisor-operator:latest
         name: manager
         securityContext:

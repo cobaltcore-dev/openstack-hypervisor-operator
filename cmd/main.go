@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -162,6 +163,7 @@ func main() {
 		bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
 		bininfo.CommitOr("edge"))
 
+	leaderElectionID := "4c28796a.cloud.sap"
 	var cacheOptions cache.Options
 	if global.LabelSelector != "" {
 		setupLog.Info("setting up cache with label selector", "selector", global.LabelSelector)
@@ -182,6 +184,11 @@ func main() {
 				},
 			},
 		}
+
+		h := sha256.New()
+		h.Write([]byte(leaderElectionID)) // Seed it with something "unique" to the project
+		h.Write([]byte(global.LabelSelector))
+		leaderElectionID = fmt.Sprintf("%x.cloud.sap", h.Sum(nil))
 	}
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -190,7 +197,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "4c28796a.cloud.sap",
+		LeaderElectionID:       leaderElectionID,
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
