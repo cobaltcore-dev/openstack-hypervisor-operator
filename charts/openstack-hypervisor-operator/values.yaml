@@ -4,12 +4,14 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
+    - --label-selector=${LABEL_SELECTOR}
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop:
         - ALL
     env:
+      labelSelector: ""
       osAuthUrl: ""
       osProjectDomainName: ""
       osProjectName: ""
