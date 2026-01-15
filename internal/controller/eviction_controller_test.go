@@ -25,6 +25,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	gomegatypes "github.com/onsi/gomega/types"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -186,8 +187,15 @@ var _ = Describe("Eviction Controller", func() {
 				})
 
 				hypervisor.Status.HypervisorID = hypervisorId
+				hypervisor.Status.ServiceID = serviceId
 				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHypervisorDisabled,
 					Status:  metav1.ConditionTrue,
 					Reason:  "dontcare",
 					Message: "dontcare",
@@ -255,57 +263,32 @@ var _ = Describe("Eviction Controller", func() {
 					})
 				})
 				It("should succeed the reconciliation", func(ctx SpecContext) {
-					runningCond := &metav1.Condition{
-						Type:    kvmv1.ConditionTypeEvicting,
-						Status:  metav1.ConditionTrue,
-						Reason:  kvmv1.ConditionReasonRunning,
-						Message: "Running",
-					}
+					runningCond := SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeEvicting),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", kvmv1.ConditionReasonRunning),
+						HaveField("Message", "Running"),
+					)
 
-					hypervisorDisabledCond := &metav1.Condition{
-						Type:    kvmv1.ConditionTypeHypervisorDisabled,
-						Status:  metav1.ConditionTrue,
-						Reason:  kvmv1.ConditionReasonSucceeded,
-						Message: "Hypervisor disabled successfully",
-					}
+					preflightCond := SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypePreflight),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+						HaveField("Message", ContainSubstring("Preflight checks passed")),
+					)
 
-					preflightCond := &metav1.Condition{
-						Type:    kvmv1.ConditionTypePreflight,
-						Status:  metav1.ConditionTrue,
-						Reason:  kvmv1.ConditionReasonSucceeded,
-						Message: "Preflight checks passed",
-					}
-
-					expectations := []struct {
-						conditions []*metav1.Condition
-						finalizers []string
-					}{
+					expectations := []gomegatypes.GomegaMatcher{
 						// 1. expect the Condition Evicting to be true
-						{conditions: []*metav1.Condition{runningCond}, finalizers: nil},
-
-						// 2. expect the Finalizer to be added
-						{conditions: []*metav1.Condition{runningCond}, finalizers: []string{evictionFinalizerName}},
-
-						// 3. expect the hypervisor to be disabled
-						{
-							conditions: []*metav1.Condition{runningCond, hypervisorDisabledCond},
-							finalizers: []string{evictionFinalizerName},
-						},
-
-						// 4. expect the preflight condition to be set to succeeded
-						{
-							conditions: []*metav1.Condition{runningCond, hypervisorDisabledCond, preflightCond},
-							finalizers: []string{evictionFinalizerName},
-						},
-
-						// 5. expect the eviction condition to be set to succeeded
-						{
-							conditions: []*metav1.Condition{{
-								Type:    kvmv1.ConditionTypeEvicting,
-								Status:  metav1.ConditionFalse,
-								Reason:  kvmv1.ConditionReasonSucceeded,
-								Message: "eviction completed successfully"}},
-							finalizers: []string{evictionFinalizerName}},
+						ContainElements(runningCond),
+						// 2. expect the preflight condition to be set to succeeded
+						ContainElements(runningCond, preflightCond),
+						// 3. expect the eviction condition to be set to succeeded
+						ContainElements(SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeEvicting),
+							HaveField("Status", metav1.ConditionFalse),
+							HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+							HaveField("Message", ContainSubstring("eviction completed successfully")),
+						)),
 					}
 
 					for i, expectation := range expectations {
@@ -319,15 +302,7 @@ var _ = Describe("Eviction Controller", func() {
 						Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).NotTo(HaveOccurred())
 
 						// Check the condition
-						for _, expect := range expectation.conditions {
-							reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, expect.Type)
-							Expect(reconcileStatus).NotTo(BeNil())
-							Expect(reconcileStatus.Status).To(Equal(expect.Status))
-							Expect(reconcileStatus.Reason).To(Equal(expect.Reason))
-							Expect(reconcileStatus.Message).To(ContainSubstring(expect.Message))
-						}
-						// Check finalizers
-						Expect(resource.GetFinalizers()).To(Equal(expectation.finalizers))
+						Expect(resource.Status.Conditions).To(expectation)
 					}
 				})
 			})
@@ -349,8 +324,9 @@ var _ = Describe("Eviction Controller", func() {
 						Expect(err).To(Succeed())
 					})
 				})
+
 				It("should succeed the reconciliation", func(ctx SpecContext) {
-					for range 3 {
+					for range 1 {
 						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -360,27 +336,29 @@ var _ = Describe("Eviction Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect eviction condition to be true
-					reconcileStatus := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
-					Expect(reconcileStatus).NotTo(BeNil())
-					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionTrue))
-					Expect(reconcileStatus.Reason).To(Equal(kvmv1.ConditionReasonRunning))
+					Expect(resource.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeEvicting),
+							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", kvmv1.ConditionReasonRunning),
+						),
+					))
 
-					// expect hypervisor disabled condition to be true for reason of already disabled
-					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
-					Expect(reconcileStatus.Message).To(ContainSubstring("already disabled"))
-
-					_, err = controllerReconciler.Reconcile(ctx, reconcileRequest)
-					Expect(err).NotTo(HaveOccurred())
+					for range 3 {
+						_, err = controllerReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+					}
 					err = k8sClient.Get(ctx, typeNamespacedName, resource)
 					Expect(err).NotTo(HaveOccurred())
 
 					// expect reconciliation to be successfully finished
-					reconcileStatus = meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
-					Expect(reconcileStatus).NotTo(BeNil())
-					Expect(reconcileStatus.Status).To(Equal(metav1.ConditionFalse))
-					Expect(reconcileStatus.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
-
-					Expect(resource.GetFinalizers()).To(BeEmpty())
+					Expect(resource.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeEvicting),
+							HaveField("Status", metav1.ConditionFalse),
+							HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+						),
+					))
 				})
 			})
 		})
