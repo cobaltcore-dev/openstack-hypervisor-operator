@@ -78,7 +78,15 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
+	// Onboarding-condition needs to be either unset or set to false, so that we can continue
+	// The first means, onboarding has never started, the second means it has been aborted or finished
+	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
+		return ctrl.Result{}, nil
+	}
+
+	// If the service id is set, there might be VMs either from onboarding or even from normal operation
+	// In that case we need to wait until those are evicted
+	if hv.Status.ServiceID != "" && !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
 		// Either has not evicted yet, or is still evicting VMs, so we have to wait for that to finish
 		return ctrl.Result{}, nil
 	}

@@ -54,7 +54,6 @@ type HypervisorMaintenanceController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
-
 func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hv := &kvmv1.Hypervisor{}
 	if err := hec.Get(ctx, req.NamespacedName, hv); err != nil {
@@ -62,13 +61,10 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	// is onboarding completed?
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
-		return ctrl.Result{}, nil
-	}
-
-	// ensure serviceId is set
-	if hv.Status.ServiceID == "" {
+	// If onboarding hasn't even started, no value will be set
+	// If it has been started, but not finished yet, we need to wait for it to be aborted
+	// So we can continue, if the condition is either not set at all or false
+	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
 		return ctrl.Result{}, nil
 	}
 
@@ -93,6 +89,12 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.Context, hv *kvmv1.Hypervisor) error {
 	log := logger.FromContext(ctx)
 	serviceId := hv.Status.ServiceID
+
+	// We can only do something here, if there is a service to begin with.
+	// The onboarding should take care of that
+	if serviceId == "" {
+		return nil
+	}
 
 	switch hv.Spec.Maintenance {
 	case kvmv1.MaintenanceUnset:
