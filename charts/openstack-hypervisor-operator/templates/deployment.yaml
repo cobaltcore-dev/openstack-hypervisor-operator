@@ -39,6 +39,8 @@ spec:
             secretKeyRef:
               key: SERVICE_PASSWORD
               name: {{ include "openstack-hypervisor-operator.fullname" . }}-secret
+        - name: CERTIFICATE_ISSUER_NAME
+          value: {{ quote .Values.controllerManager.manager.env.certificateIssuerName }}
         - name: LABEL_SELECTOR
           value: {{ quote .Values.controllerManager.manager.env.labelSelector }}
         - name: KUBERNETES_CLUSTER_DOMAIN
