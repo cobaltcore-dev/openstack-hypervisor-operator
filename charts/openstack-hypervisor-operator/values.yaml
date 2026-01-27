@@ -4,6 +4,7 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
+    - --certificate-issuer-name=${CERTIFICATE_ISSUER_NAME}
     - --label-selector=${LABEL_SELECTOR}
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -11,6 +12,7 @@ controllerManager:
         drop:
         - ALL
     env:
+      certificateIssuerName: ""
       labelSelector: ""
       osAuthUrl: ""
       osProjectDomainName: ""
