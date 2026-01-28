@@ -35,7 +35,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -167,8 +166,7 @@ func main() {
 	var cacheOptions cache.Options
 	if global.LabelSelector != "" {
 		setupLog.Info("setting up cache with label selector", "selector", global.LabelSelector)
-		selector := labels.NewSelector()
-		req, err := labels.NewRequirement(global.LabelSelector, selection.Exists, nil)
+		selector, err := labels.Parse(global.LabelSelector)
 		if err != nil {
 			setupLog.Error(err, "unable to parse label selector")
 			os.Exit(1)
@@ -177,10 +175,10 @@ func main() {
 		cacheOptions = cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
-					Label: selector.Add(*req),
+					Label: selector,
 				},
 				&kvmv1.Hypervisor{}: {
-					Label: selector.Add(*req),
+					Label: selector,
 				},
 			},
 		}
