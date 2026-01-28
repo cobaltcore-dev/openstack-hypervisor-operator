@@ -61,8 +61,8 @@ spec:
       - args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-          - --certificate-issuer-name=${CERTIFICATE_ISSUER_NAME}
-          - --label-selector=${LABEL_SELECTOR}
+          - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
+          - --label-selector=$(LABEL_SELECTOR)
         env:
           - name: OS_AUTH_URL
           - name: OS_PROJECT_DOMAIN_NAME
