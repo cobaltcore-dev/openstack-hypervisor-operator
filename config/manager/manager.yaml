@@ -61,6 +61,7 @@ spec:
       - args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
           - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
           - --label-selector=$(LABEL_SELECTOR)
         env:
@@ -75,7 +76,10 @@ spec:
               secretKeyRef:
                 name: secret
                 key: SERVICE_PASSWORD
+          - name: CERTIFICATE_NAMESPACE
+            value: "monsoon3"
           - name: CERTIFICATE_ISSUER_NAME
+            value: "nova-hypervisor-agents-ca-issuer"
           - name: LABEL_SELECTOR
         image: keppel.eu-de-1.cloud.sap/ccloud/openstack-hypervisor-operator:latest
         name: manager

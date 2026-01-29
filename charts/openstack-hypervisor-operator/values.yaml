@@ -4,6 +4,7 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
+    - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
     - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
     - --label-selector=$(LABEL_SELECTOR)
     containerSecurityContext:
@@ -12,7 +13,8 @@ controllerManager:
         drop:
         - ALL
     env:
-      certificateIssuerName: ""
+      certificateIssuerName: nova-hypervisor-agents-ca-issuer
+      certificateNamespace: monsoon3
       labelSelector: ""
       osAuthUrl: ""
       osProjectDomainName: ""

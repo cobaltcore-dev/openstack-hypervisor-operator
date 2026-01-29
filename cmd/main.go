@@ -20,6 +20,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -99,12 +100,23 @@ func main() {
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
 		"Name of the certificate issuer.")
 
+	if certificateIssuerName == "" {
+		setupLog.Error(errors.New("certificate-issuer-name cannot be empty"), "invalid certificate issuer name")
+		os.Exit(1)
+	}
+
+	if certificateNamespace == "" {
+		setupLog.Error(errors.New("certificate-namespace cannot be empty"), "invalid certificate namespace")
+		os.Exit(1)
+	}
+
 	opts := ctrlzap.Options{
 		Development:     true,
 		TimeEncoder:     zapcore.ISO8601TimeEncoder,
 		Encoder:         logger.NewSanitzeReconcileErrorEncoder(zap.NewDevelopmentEncoderConfig()),
 		StacktraceLevel: zap.DPanicLevel,
 	}
+
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
