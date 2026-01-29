@@ -187,7 +187,14 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 
 	// append the custom label selector from global config
 	if global.LabelSelector != "" {
-		transferLabels = append(transferLabels, global.LabelSelector)
+		requirements, err := labels.ParseToRequirements(global.LabelSelector)
+		if err != nil {
+			return fmt.Errorf("failed to parse global label selector: %w", err)
+		}
+
+		for _, requirement := range requirements {
+			transferLabels = append(transferLabels, requirement.Key())
+		}
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
