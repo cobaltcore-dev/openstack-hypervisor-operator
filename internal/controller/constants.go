@@ -17,7 +17,7 @@ limitations under the License.
 
 package controller
 
-// This should contain consts shared between controllers
+// This should contain constants shared between controllers
 const (
 	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
 	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
