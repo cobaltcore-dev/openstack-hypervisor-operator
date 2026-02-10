@@ -217,6 +217,12 @@ func transportAggregatesAndTraits(node *metav1.ObjectMeta, hypervisor *kvmv1.Hyp
 				}
 			}
 		})
+
+		if zone, found := node.Labels[corev1.LabelTopologyZone]; found {
+			// if zone label is present, add it as aggregate as well, as we follow the convention
+			// to have an aggregate for each zone with the same name as the zone
+			hypervisor.Spec.Aggregates = append(hypervisor.Spec.Aggregates, zone)
+		}
 	}
 
 	// transport custom traits annotation to hypervisor spec
