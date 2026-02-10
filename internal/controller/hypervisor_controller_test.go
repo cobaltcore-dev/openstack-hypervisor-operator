@@ -32,7 +32,12 @@ import (
 
 var _ = Describe("Hypervisor Controller", func() {
 	const (
-		resourceName = "other-node"
+		resourceName     = "other-node"
+		topologyZone     = "test-zone"
+		customTrait      = "test-trait"
+		aggregate1       = "aggregate1"
+		workerGroupLabel = "worker.garden.sapcloud.io/group"
+		workerGroupValue = "test-group"
 	)
 	var (
 		hypervisorController *HypervisorController
@@ -50,34 +55,27 @@ var _ = Describe("Hypervisor Controller", func() {
 			hypervisorController = nil
 		})
 
-		By("creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monsoon3"}}
-		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
 		// pregenerate the resource
 		resource = &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        resourceName,
-				Labels:      map[string]string{corev1.LabelTopologyZone: "test-zone"},
-				Annotations: map[string]string{annotationCustomTraits: "test-trait"},
+				Name:   resourceName,
+				Labels: map[string]string{corev1.LabelTopologyZone: topologyZone},
 			},
 		}
-	})
 
-	AfterEach(func(ctx SpecContext) {
-		By("Cleanup the specific node")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, resource))).To(Succeed())
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			By("Cleanup the specific hypervisor")
+			hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
 
-		hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
-		By("Cleanup the specific hypervisor")
-		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+			By("Cleanup the specific node")
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, resource))).To(Succeed())
+		})
 	})
 
 	Context("When reconciling a node", func() {
-
-		It("should successfully reconcile the node", func(ctx SpecContext) {
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-
+		BeforeEach(func(ctx SpecContext) {
 			By("Reconciling the created resource")
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: resource.Name},
@@ -90,38 +88,195 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			Expect(hypervisor.Name).To(Equal(resource.Name))
 			Expect(hypervisor.Labels).ToNot(BeNil())
-			Expect(hypervisor.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone"))
+			Expect(hypervisor.Labels[corev1.LabelTopologyZone]).To(Equal(topologyZone))
 			Expect(hypervisor.Spec.Maintenance).To(BeEmpty())
+			Expect(hypervisor.Spec.CustomTraits).To(BeEmpty())
+			Expect(hypervisor.Spec.Aggregates).To(BeEmpty())
+			Expect(hypervisor.Spec.LifecycleEnabled).To(BeFalse())
+			Expect(hypervisor.Spec.SkipTests).To(BeFalse()) // Doesn't really matter with lifecycle disabled
+		})
 
-			By("Adding a label annotation to the node and reconciling again")
-			// Add an aggregate annotation to the node
-			labeledResource := resource.DeepCopy()
-			labeledResource.Labels["worker.garden.sapcloud.io/group"] = "new-group"
-			Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+		When("the aggregate annotation is set but empty", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding an empty aggregate annotation to the node and reconciling again")
+				// Add an empty aggregate annotation to the node
+				labeledResource := resource.DeepCopy()
+				if labeledResource.Annotations == nil {
+					labeledResource.Annotations = map[string]string{}
+				}
+				labeledResource.Annotations[annotationAggregates] = ""
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
-			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
 
-			By("should have updated the Hypervisor resource with the aggregate")
-			// Get the Hypervisor resource again
-			updatedHypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
-			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
-			Expect(updatedHypervisor.Spec.CustomTraits).ToNot(BeNil())
-			Expect(updatedHypervisor.Spec.CustomTraits).To(ContainElement("test-trait"))
-			Expect(updatedHypervisor.Labels).To(HaveKeyWithValue("worker.garden.sapcloud.io/group", "new-group"))
-			Expect(updatedHypervisor.Spec.Maintenance).To(BeEmpty())
+			It("should set the AZ and test aggregate on the Hypervisor resource", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.Aggregates).To(ContainElements(topologyZone))
+			})
+		})
+
+		When("the aggregate annotation is set to some value", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding an empty aggregate annotation to the node and reconciling again")
+				// Add an empty aggregate annotation to the node
+				labeledResource := resource.DeepCopy()
+				if labeledResource.Annotations == nil {
+					labeledResource.Annotations = map[string]string{}
+				}
+				labeledResource.Annotations[annotationAggregates] = testAggregateName
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should not set the AZ aggregate on the Hypervisor resource", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.Aggregates).To(ContainElements(topologyZone, testAggregateName))
+			})
+		})
+
+		When("the custom traits annotation is set but empty", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding an empty custom traits annotation to the node and reconciling again")
+				// Add an empty custom traits annotation to the node
+				labeledResource := resource.DeepCopy()
+				if labeledResource.Annotations == nil {
+					labeledResource.Annotations = map[string]string{}
+				}
+				labeledResource.Annotations[annotationCustomTraits] = ""
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should set no custom traits on the Hypervisor resource", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.CustomTraits).To(BeEmpty())
+			})
+		})
+
+		When("the custom traits annotation is set to some value", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding a custom traits annotation to the node and reconciling again")
+				// Add a custom traits annotation to the node
+				labeledResource := resource.DeepCopy()
+				if labeledResource.Annotations == nil {
+					labeledResource.Annotations = map[string]string{}
+				}
+				labeledResource.Annotations[annotationCustomTraits] = customTrait
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should set the custom trait on the Hypervisor resource", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.CustomTraits).To(ContainElements(customTrait))
+			})
+		})
+
+		When("a label is added to the node", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding a label annotation to the node and reconciling again")
+				// Add a label annotation to the node
+				labeledResource := resource.DeepCopy()
+				labeledResource.Labels[workerGroupLabel] = workerGroupValue
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should set the label on the Hypervisor resource", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Labels).To(HaveKeyWithValue(workerGroupLabel, workerGroupValue))
+			})
+		})
+
+		When("the node-hypervisor-lifecycle label is set to true", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding the node-hypervisor-lifecycle label to the node and reconciling again")
+				// Add the node-hypervisor-lifecycle label to the node
+				labeledResource := resource.DeepCopy()
+				labeledResource.Labels[labelLifecycleMode] = "true"
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should reflect that to the Hypervisor spec", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.LifecycleEnabled).To(BeTrue())
+				Expect(hypervisor.Spec.SkipTests).To(BeFalse())
+			})
+		})
+
+		When("the node-hypervisor-lifecycle label is set to skip-tests", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Adding the node-hypervisor-lifecycle label to the node and reconciling again")
+				// Add the node-hypervisor-lifecycle label to the node
+				labeledResource := resource.DeepCopy()
+				labeledResource.Labels[labelLifecycleMode] = "skip-tests"
+				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should reflect that to the Hypervisor spec", func(ctx SpecContext) {
+				// Get the Hypervisor resource again
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.LifecycleEnabled).To(BeTrue())
+				Expect(hypervisor.Spec.SkipTests).To(BeTrue())
+			})
 		})
 	})
 
 	Context("When reconciling a terminating node", func() {
 		It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 			// Mark the node as terminating
-			resource.DeletionTimestamp = &metav1.Time{}
-			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			resource.Finalizers = append(resource.Finalizers, "example.com/test-finalizer")
+			Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				resource.Finalizers = []string{}
+				resource.ResourceVersion = ""
+				Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+			})
 
+			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, resource)).To(Succeed())
 			// Update node condition
 			resource.Status.Conditions = append(resource.Status.Conditions, corev1.NodeCondition{
 				Type:    "Terminating",
