@@ -291,6 +291,60 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 						})
 					})
 
+					When("there is an ongoing eviction", func() {
+						BeforeEach(func(ctx SpecContext) {
+							eviction := &kvmv1.Eviction{
+								ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+								Spec: kvmv1.EvictionSpec{
+									Hypervisor: hypervisorName.Name,
+									Reason:     "test",
+								},
+							}
+							hypervisor := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+							Expect(controllerutil.SetControllerReference(hypervisor, eviction, controller.Scheme)).To(Succeed())
+							Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
+
+							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+							meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+								Type:    kvmv1.ConditionTypeEvicting,
+								Status:  metav1.ConditionTrue,
+								Message: "whatever",
+								Reason:  kvmv1.ConditionReasonRunning,
+							})
+							Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+						})
+
+						It("should reflect it in the hypervisor evicting condition", func(ctx SpecContext) {
+							hypervisor := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+							Expect(hypervisor.Status.Conditions).To(ContainElement(
+								SatisfyAll(
+									HaveField("Type", kvmv1.ConditionTypeEvicting),
+									HaveField("Status", metav1.ConditionTrue),
+									HaveField("Reason", kvmv1.ConditionReasonRunning),
+								),
+							))
+						})
+
+						It("should reflect it in the hypervisor evicted status", func(ctx SpecContext) {
+							hypervisor := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+							Expect(hypervisor.Status.Evicted).To(BeFalse())
+						})
+
+						It("should set the ConditionTypeReady to false and reason to evicting", func(ctx SpecContext) {
+							updated := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+							Expect(updated.Status.Conditions).To(ContainElement(
+								SatisfyAll(
+									HaveField("Type", kvmv1.ConditionTypeReady),
+									HaveField("Status", metav1.ConditionFalse),
+									HaveField("Reason", kvmv1.ConditionReasonReadyEvicting),
+								)))
+						})
+					})
+
 					When("there is a finished eviction", func() {
 						BeforeEach(func(ctx SpecContext) {
 							eviction := &kvmv1.Eviction{

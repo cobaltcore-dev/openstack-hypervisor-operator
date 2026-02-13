@@ -194,10 +194,22 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 			message = "Evicted"
 			reason = kvmv1.ConditionReasonSucceeded
 			hv.Status.Evicted = true
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  kvmv1.ConditionReasonReadyEvicted,
+				Message: "Hypervisor is disabled and evicted",
+			})
 		} else {
 			message = "Evicting"
 			reason = kvmv1.ConditionReasonRunning
 			hv.Status.Evicted = false
+			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  kvmv1.ConditionReasonReadyEvicting,
+				Message: "Hypervisor is disabled and evicting",
+			})
 		}
 
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
@@ -205,13 +217,6 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 			Status:  status,
 			Reason:  reason,
 			Message: message,
-		})
-
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  kvmv1.ConditionReasonReadyEvicted,
-			Message: "Hypervisor is disabled and evicted",
 		})
 
 		return nil
