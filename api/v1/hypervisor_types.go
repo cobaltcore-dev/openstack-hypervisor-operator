@@ -58,6 +58,7 @@ const (
 	ConditionReasonReadyReady       = "Ready"
 	ConditionReasonReadyMaintenance = "Maintenance"
 	ConditionReasonReadyEvicted     = "Evicted"
+	ConditionReasonReadyEvicting    = "Evicting"
 
 	// ConditionTypeOnboarding reasons
 	ConditionReasonInitial    = "Initial"
