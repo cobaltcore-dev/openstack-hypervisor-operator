@@ -270,6 +270,20 @@ var _ = Describe("Onboarding Controller", func() {
 	)
 
 	BeforeEach(func(ctx SpecContext) {
+		By("Setting up the OpenStack http mock server")
+		fakeServer = testhelper.SetupHTTP()
+		DeferCleanup(fakeServer.Teardown)
+
+		// Install default handler to fail unhandled requests
+		fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
+		})
+
+		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
+		DeferCleanup(func() {
+			os.Unsetenv("KVM_HA_SERVICE_URL")
+		})
+
 		By("creating the resource for the Kind Hypervisor")
 		hv := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
@@ -285,18 +299,8 @@ var _ = Describe("Onboarding Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, hv)).To(Succeed())
-
 		DeferCleanup(func(ctx SpecContext) {
-			By("Cleanup the specific hypervisor CRO")
 			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
-		})
-
-		fakeServer = testhelper.SetupHTTP()
-		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
-
-		DeferCleanup(func() {
-			os.Unsetenv("KVM_HA_SERVICE_URL")
-			fakeServer.Teardown()
 		})
 
 		onboardingReconciler = &OnboardingController{

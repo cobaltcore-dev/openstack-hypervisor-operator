@@ -61,7 +61,9 @@ var _ = Describe("Eviction Controller", func() {
 	}
 }`
 	)
+
 	var (
+		evictionReconciler *EvictionReconciler
 		typeNamespacedName = types.NamespacedName{
 			Name:      resourceName,
 			Namespace: namespaceName,
@@ -70,10 +72,27 @@ var _ = Describe("Eviction Controller", func() {
 			Name:      resourceName,
 			Namespace: namespaceName,
 		}
-		reconcileRequest     = ctrl.Request{NamespacedName: typeNamespacedName}
-		controllerReconciler *EvictionReconciler
-		fakeServer           testhelper.FakeServer
+		reconcileRequest = ctrl.Request{NamespacedName: typeNamespacedName}
+		fakeServer       testhelper.FakeServer
 	)
+
+	BeforeEach(func(ctx SpecContext) {
+		By("Setting up the OpenStack http mock server")
+		fakeServer = testhelper.SetupHTTP()
+		DeferCleanup(fakeServer.Teardown)
+
+		// Install default handler to fail unhandled requests
+		fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
+		})
+
+		By("Creating the EvictionReconciler")
+		evictionReconciler = &EvictionReconciler{
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			computeClient: client.ServiceClient(fakeServer),
+		}
+	})
 
 	AfterEach(func(ctx SpecContext) {
 		resource := &kvmv1.Eviction{}
@@ -84,9 +103,9 @@ var _ = Describe("Eviction Controller", func() {
 			}
 		} else {
 			By("Cleanup the specific resource instance Eviction")
-			Expect(controllerReconciler).NotTo(BeNil())
+			Expect(evictionReconciler).NotTo(BeNil())
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-			_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
+			_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).Should(HaveOccurred())
 		}
@@ -147,32 +166,6 @@ var _ = Describe("Eviction Controller", func() {
 	})
 
 	Describe("Reconciliation", func() {
-		BeforeEach(func(ctx SpecContext) {
-			By("Setting up the OpenStack http mock server")
-			fakeServer = testhelper.SetupHTTP()
-
-			DeferCleanup(func(ctx SpecContext) {
-				fakeServer.Teardown()
-			})
-
-			// Install default handler to fail unhandled requests
-			fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
-			})
-
-			By("Creating the EvictionReconciler")
-
-			controllerReconciler = &EvictionReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				computeClient: client.ServiceClient(fakeServer),
-			}
-
-			DeferCleanup(func() {
-				controllerReconciler = nil
-			})
-		})
-
 		Describe("an eviction for an onboarded 'test-hypervisor'", func() {
 			BeforeEach(func(ctx SpecContext) {
 				By("creating the hypervisor resource")
@@ -222,7 +215,7 @@ var _ = Describe("Eviction Controller", func() {
 
 				It("should fail reconciliation", func(ctx SpecContext) {
 					for range 3 {
-						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
 
@@ -294,7 +287,7 @@ var _ = Describe("Eviction Controller", func() {
 					for i, expectation := range expectations {
 						By(fmt.Sprintf("Reconciliation step %d", i+1))
 						// Reconcile the resource
-						result, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
+						result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(result).To(Equal(ctrl.Result{}))
 						Expect(err).NotTo(HaveOccurred())
 
@@ -327,7 +320,7 @@ var _ = Describe("Eviction Controller", func() {
 
 				It("should succeed the reconciliation", func(ctx SpecContext) {
 					for range 1 {
-						_, err := controllerReconciler.Reconcile(ctx, reconcileRequest)
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
 
@@ -345,7 +338,7 @@ var _ = Describe("Eviction Controller", func() {
 					))
 
 					for range 3 {
-						_, err = controllerReconciler.Reconcile(ctx, reconcileRequest)
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
 						Expect(err).NotTo(HaveOccurred())
 					}
 					err = k8sClient.Get(ctx, typeNamespacedName, resource)

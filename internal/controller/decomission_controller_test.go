@@ -36,12 +36,13 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-const (
-	EOF                 = "EOF"
-	serviceId           = "service-1234"
-	hypervisorName      = "node-test"
-	namespaceName       = "namespace-test"
-	AggregateListWithHv = `
+var _ = Describe("Decommission Controller", func() {
+	const (
+		EOF                 = "EOF"
+		serviceId           = "service-1234"
+		hypervisorName      = "node-test"
+		namespaceName       = "namespace-test"
+		AggregateListWithHv = `
 {
     "aggregates": [
 		{
@@ -54,7 +55,7 @@ const (
     ]
 }
 `
-	AggregateRemoveHostBody = `
+		AggregateRemoveHostBody = `
 {
         "aggregate": {
 			"name": "test-aggregate2",
@@ -63,13 +64,12 @@ const (
 			"id": 100001
 		}
 }`
-)
+	)
 
-var _ = Describe("Decommission Controller", func() {
 	var (
-		r            *NodeDecommissionReconciler
-		resourceName = types.NamespacedName{Name: hypervisorName}
-		reconcileReq = ctrl.Request{
+		decommissionReconciler *NodeDecommissionReconciler
+		resourceName           = types.NamespacedName{Name: hypervisorName}
+		reconcileReq           = ctrl.Request{
 			NamespacedName: resourceName,
 		}
 		fakeServer testhelper.FakeServer
@@ -77,14 +77,19 @@ var _ = Describe("Decommission Controller", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		fakeServer = testhelper.SetupHTTP()
-		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
+		DeferCleanup(fakeServer.Teardown)
 
-		DeferCleanup(func() {
-			os.Unsetenv("KVM_HA_SERVICE_URL")
-			fakeServer.Teardown()
+		// Install default handler to fail unhandled requests
+		fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
 		})
 
-		r = &NodeDecommissionReconciler{
+		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
+		DeferCleanup(func() {
+			os.Unsetenv("KVM_HA_SERVICE_URL")
+		})
+
+		decommissionReconciler = &NodeDecommissionReconciler{
 			Client:          k8sClient,
 			Scheme:          k8sClient.Scheme(),
 			computeClient:   client.ServiceClient(fakeServer),
@@ -94,7 +99,6 @@ var _ = Describe("Decommission Controller", func() {
 		By("creating the namespace for the reconciler")
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
 		Expect(k8sclient.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
-
 		DeferCleanup(func(ctx SpecContext) {
 			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
 		})
@@ -116,8 +120,8 @@ var _ = Describe("Decommission Controller", func() {
 
 	Context("When marking the hypervisor terminating", func() {
 		JustBeforeEach(func(ctx SpecContext) {
-			By("reconciling first reconciling the to add the finalizer")
-			_, err := r.Reconcile(ctx, reconcileReq)
+			By("reconciling first to add the finalizer")
+			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
 
 			hypervisor := &kvmv1.Hypervisor{}
@@ -208,11 +212,15 @@ var _ = Describe("Decommission Controller", func() {
 				fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusAccepted)
 				})
+
+				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
 			})
 
 			It("should set the hypervisor ready condition", func(ctx SpecContext) {
 				By("reconciling the created resource")
-				_, err := r.Reconcile(ctx, reconcileReq)
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
@@ -228,7 +236,7 @@ var _ = Describe("Decommission Controller", func() {
 			It("should set the hypervisor offboarded condition", func(ctx SpecContext) {
 				By("reconciling the created resource")
 				for range 3 {
-					_, err := r.Reconcile(ctx, reconcileReq)
+					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
 					Expect(err).NotTo(HaveOccurred())
 				}
 				Expect(getHypervisorsCalled).To(BeNumerically(">", 0))

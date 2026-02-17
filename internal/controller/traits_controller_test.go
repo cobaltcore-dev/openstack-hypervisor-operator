@@ -26,7 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -55,20 +55,23 @@ var _ = Describe("TraitsController", func() {
 	)
 
 	var (
-		tc             *TraitsController
-		fakeServer     testhelper.FakeServer
-		hypervisorName = types.NamespacedName{Name: "hv-test"}
+		traitsController *TraitsController
+		fakeServer       testhelper.FakeServer
+		hypervisorName   = types.NamespacedName{Name: "hv-test"}
 	)
-
-	// Setup and teardown
 
 	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
 
+		// Install default handler to fail unhandled requests
+		fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
+		})
+
 		By("Creating the TraitsController")
-		tc = &TraitsController{
+		traitsController = &TraitsController{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
 			serviceClient: client.ServiceClient(fakeServer),
@@ -76,7 +79,7 @@ var _ = Describe("TraitsController", func() {
 
 		By("Creating a Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: hypervisorName.Name,
 			},
 			Spec: kvmv1.HypervisorSpec{
@@ -85,16 +88,10 @@ var _ = Describe("TraitsController", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
-
 		DeferCleanup(func(ctx SpecContext) {
-			By("Deleting the Hypervisor resource")
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
 		})
 	})
-
-	// Tests
 
 	Context("Reconcile after onboarding before decommissioning", func() {
 		BeforeEach(func(ctx SpecContext) {
@@ -135,9 +132,9 @@ var _ = Describe("TraitsController", func() {
 
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeOnboarding,
-				Status: v1.ConditionFalse,
+				Status: metav1.ConditionFalse,
 				Reason: "UnitTest",
 			})
 			hypervisor.Status.HypervisorID = "1234"
@@ -147,11 +144,11 @@ var _ = Describe("TraitsController", func() {
 
 		It("should update traits and set status condition when traits differ", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
-			_, err := tc.Reconcile(ctx, req)
+			_, err := traitsController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(traitsController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).To(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeTrue())
 		})
@@ -179,11 +176,11 @@ var _ = Describe("TraitsController", func() {
 
 		It("should not update traits", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
-			_, err := tc.Reconcile(ctx, req)
+			_, err := traitsController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(traitsController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeFalse())
 		})
@@ -204,14 +201,14 @@ var _ = Describe("TraitsController", func() {
 
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeOnboarding,
-				Status: v1.ConditionFalse,
+				Status: metav1.ConditionFalse,
 				Reason: "UnitTest",
 			})
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeTerminating,
-				Status: v1.ConditionTrue,
+				Status: metav1.ConditionTrue,
 				Reason: "UnitTest",
 			})
 			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
@@ -222,11 +219,11 @@ var _ = Describe("TraitsController", func() {
 
 		It("should not update traits", func(ctx SpecContext) {
 			req := ctrl.Request{NamespacedName: hypervisorName}
-			_, err := tc.Reconcile(ctx, req)
+			_, err := traitsController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(traitsController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Traits).NotTo(ContainElements("CUSTOM_FOO", "CUSTOM_BAR", "HW_CPU_X86_VMX"))
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeFalse())
 		})
