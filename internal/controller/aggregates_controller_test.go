@@ -26,7 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -98,19 +98,23 @@ var _ = Describe("AggregatesController", func() {
 	)
 
 	var (
-		tc             *AggregatesController
-		fakeServer     testhelper.FakeServer
-		hypervisorName = types.NamespacedName{Name: "hv-test"}
+		aggregatesController *AggregatesController
+		fakeServer           testhelper.FakeServer
+		hypervisorName       = types.NamespacedName{Name: "hv-test"}
 	)
-	// Setup and teardown
 
 	BeforeEach(func(ctx SpecContext) {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
 
+		// Install default handler to fail unhandled requests
+		fakeServer.Mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
+		})
+
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: hypervisorName.Name,
 			},
 			Spec: kvmv1.HypervisorSpec{
@@ -118,29 +122,29 @@ var _ = Describe("AggregatesController", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+		})
+
 		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  v1.ConditionFalse,
+			Status:  metav1.ConditionFalse,
 			Reason:  "dontcare",
 			Message: "dontcare",
 		})
 		Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
 		By("Creating the AggregatesController")
-		tc = &AggregatesController{
+		aggregatesController = &AggregatesController{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
 			computeClient: client.ServiceClient(fakeServer),
 		}
-
-		DeferCleanup(func(ctx SpecContext) {
-			Expect(tc.Client.Delete(ctx, hypervisor)).To(Succeed())
-		})
 	})
 
 	JustBeforeEach(func(ctx SpecContext) {
-		_, err := tc.Reconcile(ctx, ctrl.Request{NamespacedName: hypervisorName})
+		_, err := aggregatesController.Reconcile(ctx, ctrl.Request{NamespacedName: hypervisorName})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -190,7 +194,7 @@ var _ = Describe("AggregatesController", func() {
 
 		It("should update Aggregates and set status condition as Aggregates differ", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(ContainElements("test-aggregate1"))
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 		})
@@ -234,7 +238,7 @@ var _ = Describe("AggregatesController", func() {
 
 		It("should update Aggregates and set status condition when Aggregates differ", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 		})
@@ -245,13 +249,13 @@ var _ = Describe("AggregatesController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// Remove the onboarding condition
-			hypervisor.Status.Conditions = []v1.Condition{}
+			hypervisor.Status.Conditions = []metav1.Condition{}
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
 		It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
 		})
@@ -262,9 +266,9 @@ var _ = Describe("AggregatesController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// Remove the onboarding condition
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, v1.Condition{
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeTerminating,
-				Status:  v1.ConditionTrue,
+				Status:  metav1.ConditionTrue,
 				Reason:  "dontcare",
 				Message: "dontcare",
 			})
@@ -273,7 +277,7 @@ var _ = Describe("AggregatesController", func() {
 
 		It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
 			updated := &kvmv1.Hypervisor{}
-			Expect(tc.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Status.Aggregates).To(BeEmpty())
 			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
 		})
