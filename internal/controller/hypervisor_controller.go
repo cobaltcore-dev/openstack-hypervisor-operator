@@ -112,12 +112,18 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
 		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
 			// Node might be terminating, propagate condition to hypervisor
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeReady,
-				Status:  metav1.ConditionFalse,
-				Reason:  nodeTerminationCondition.Reason,
-				Message: nodeTerminationCondition.Message,
-			})
+
+			if readyCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeReady); readyCondition == nil || readyCondition.Status == metav1.ConditionTrue {
+				// Only set Terminating condition if Ready is still True, otherwise we might overwrite other controllers that already set Ready to False
+				// In particular if the hypervisor is evicting
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  nodeTerminationCondition.Reason,
+					Message: nodeTerminationCondition.Message,
+				})
+			}
+
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeTerminating,
 				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),

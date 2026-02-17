@@ -32,12 +32,13 @@ import (
 
 var _ = Describe("Hypervisor Controller", func() {
 	const (
-		resourceName     = "other-node"
-		topologyZone     = "test-zone"
-		customTrait      = "test-trait"
-		aggregate1       = "aggregate1"
-		workerGroupLabel = "worker.garden.sapcloud.io/group"
-		workerGroupValue = "test-group"
+		resourceName      = "other-node"
+		topologyZone      = "test-zone"
+		customTrait       = "test-trait"
+		aggregate1        = "aggregate1"
+		workerGroupLabel  = "worker.garden.sapcloud.io/group"
+		workerGroupValue  = "test-group"
+		terminatingReason = "ScaleDown"
 	)
 	var (
 		hypervisorController *HypervisorController
@@ -264,7 +265,7 @@ var _ = Describe("Hypervisor Controller", func() {
 	})
 
 	Context("When reconciling a terminating node", func() {
-		It("should successfully reconcile the terminating node", func(ctx SpecContext) {
+		BeforeEach(func(ctx SpecContext) {
 			// Mark the node as terminating
 			resource.Finalizers = append(resource.Finalizers, "example.com/test-finalizer")
 			Expect(k8sClient.Update(ctx, resource)).To(Succeed())
@@ -281,42 +282,128 @@ var _ = Describe("Hypervisor Controller", func() {
 			resource.Status.Conditions = append(resource.Status.Conditions, corev1.NodeCondition{
 				Type:    "Terminating",
 				Status:  corev1.ConditionTrue,
-				Reason:  "Terminating",
+				Reason:  terminatingReason,
 				Message: "Node is terminating",
 			})
 			Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
 
-			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Spec.Maintenance).To(Equal(kvmv1.MaintenanceTermination))
+		})
 
-			By("Reconciling the created resource")
-			for range 2 {
+		Context("and the Hypervisor resource does not exists", func() {
+			It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
 					NamespacedName: types.NamespacedName{Name: resource.Name},
 				})
 				Expect(err).NotTo(HaveOccurred())
-			}
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Spec.Maintenance).To(Equal(kvmv1.MaintenanceTermination))
 
-			By("should have set the terminating condition on the Hypervisor resource")
-			// Get the Hypervisor resource
-			updatedHypervisor := &kvmv1.Hypervisor{}
-			Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
-			Expect(updatedHypervisor.Name).To(Equal(resource.Name))
-			Expect(updatedHypervisor.Status.Conditions).ToNot(BeNil())
-			condition := meta.FindStatusCondition(updatedHypervisor.Status.Conditions, kvmv1.ConditionTypeReady)
-			Expect(condition).ToNot(BeNil())
-			Expect(condition.Reason).To(Equal("Terminating"))
-			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+				By("Reconciling the created resource")
+				for range 2 {
+					_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+						NamespacedName: types.NamespacedName{Name: resource.Name},
+					})
+					Expect(err).NotTo(HaveOccurred())
+				}
 
-			condition = meta.FindStatusCondition(updatedHypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
-			Expect(condition).ToNot(BeNil())
-			Expect(condition.Reason).To(Equal("Terminating"))
-			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+				By("should have set the terminating condition on the Hypervisor resource")
+				// Get the Hypervisor resource
+				updatedHypervisor := &kvmv1.Hypervisor{}
+				Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+				Expect(updatedHypervisor.Status.Conditions).To(ContainElements(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeReady),
+						HaveField("Reason", terminatingReason),
+						HaveField("Status", metav1.ConditionFalse),
+					),
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeTerminating),
+						HaveField("Reason", terminatingReason),
+						HaveField("Status", metav1.ConditionTrue),
+					),
+				))
+			})
+		})
+
+		Context("and the Hypervisor resource does exists", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: resource.Name,
+					},
+					Spec: kvmv1.HypervisorSpec{
+						Maintenance: kvmv1.MaintenanceUnset,
+					},
+				}
+				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+				DeferCleanup(func(ctx SpecContext) {
+					Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+				})
+			})
+
+			Context("and the Hypervisor resource already has a Ready Condition set to false", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:   kvmv1.ConditionTypeReady,
+						Status: metav1.ConditionFalse,
+						Reason: "SomeOtherReason",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should not update the existing Ready Condition with the new reason", func(ctx SpecContext) {
+					for range 2 {
+						_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+							NamespacedName: types.NamespacedName{Name: resource.Name},
+						})
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					// Get the Hypervisor resource again
+					updatedHypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+					Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Reason", "SomeOtherReason"),
+							HaveField("Status", metav1.ConditionFalse),
+						),
+					))
+				})
+			})
+
+			It("should successfully reconcile the terminating node", func(ctx SpecContext) {
+				By("Reconciling the created resource")
+				for range 2 {
+					_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+						NamespacedName: types.NamespacedName{Name: resource.Name},
+					})
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				By("should have set the terminating condition on the Hypervisor resource")
+				// Get the Hypervisor resource
+				updatedHypervisor := &kvmv1.Hypervisor{}
+				Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
+				// Not sure, if that is a good idea, but that is the current behaviour
+				// We expect another operator to set the Maintenance field to Termination
+				Expect(updatedHypervisor.Spec.Maintenance).NotTo(Equal(kvmv1.MaintenanceTermination))
+				Expect(updatedHypervisor.Status.Conditions).To(ContainElements(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeReady),
+						HaveField("Reason", terminatingReason),
+						HaveField("Status", metav1.ConditionFalse),
+					),
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeTerminating),
+						HaveField("Reason", terminatingReason),
+						HaveField("Status", metav1.ConditionTrue),
+					),
+				))
+			})
 		})
 	})
 })
