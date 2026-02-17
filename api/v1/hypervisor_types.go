@@ -2,7 +2,7 @@
 SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
 SPDX-License-Identifier: Apache-2.0
 
-Licensed under the Apache License, LibVirtVersion 2.0 (the "License");
+Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
@@ -287,6 +287,10 @@ type HypervisorStatus struct {
 	// +kubebuilder:default:=unknown
 	// Represents the LibVirt version.
 	LibVirtVersion string `json:"libVirtVersion,omitempty"`
+
+	// +kubebuilder:default:=unknown
+	// Represents the Hypervisor version
+	HypervisorVersion string `json:"hypervisorVersion,omitempty"`
 
 	// Represents the Operating System status.
 	OperatingSystem OperatingSystemStatus `json:"operatingSystem,omitempty"`
