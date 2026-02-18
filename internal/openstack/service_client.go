@@ -36,7 +36,7 @@ func GetServiceClient(ctx context.Context, serviceType string, authInfo *clientc
 
 	if osPWCmd := os.Getenv("OS_PW_CMD"); osPWCmd != "" {
 		// run external command to get password
-		cmd := exec.Command("sh", "-c", osPWCmd)
+		cmd := exec.Command("sh", "-c", osPWCmd) // #nosec G702 -- OS_PW_CMD is set by operator/admin, not user input
 		out, err := cmd.Output()
 		if err != nil {
 			return nil, err
