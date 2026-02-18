@@ -402,4 +402,62 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			}
 		})
 	}) // Context Onboarded Hypervisor
+
+	Context("Non-existent Hypervisor", func() {
+		It("should handle gracefully with IgnoreNotFound", func(ctx SpecContext) {
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "non-existent-hv"}}
+			_, err := controller.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("Hypervisor still onboarding", func() {
+		BeforeEach(func(ctx SpecContext) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions,
+				metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  "InProgress",
+					Message: "Still onboarding",
+				},
+			)
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should return early without error", func(ctx SpecContext) {
+			// JustBeforeEach already called Reconcile, just verify no errors occurred
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			// Verify onboarding condition is still true (not modified)
+			Expect(meta.IsStatusConditionTrue(hypervisor.Status.Conditions, kvmv1.ConditionTypeOnboarding)).To(BeTrue())
+		})
+	})
+
+	Context("Hypervisor with empty ServiceID", func() {
+		BeforeEach(func(ctx SpecContext) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Status.ServiceID = ""
+			hypervisor.Spec.Maintenance = "auto"
+			meta.SetStatusCondition(&hypervisor.Status.Conditions,
+				metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  metav1.StatusSuccess,
+					Message: "Onboarded",
+				},
+			)
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should skip reconcileComputeService without error", func(ctx SpecContext) {
+			// JustBeforeEach already called Reconcile
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			// ServiceID should still be empty
+			Expect(hypervisor.Status.ServiceID).To(BeEmpty())
+		})
+	})
 })
