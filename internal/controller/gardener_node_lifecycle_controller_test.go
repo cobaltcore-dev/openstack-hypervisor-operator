@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -71,7 +72,8 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+			err := k8sClient.Delete(ctx, hypervisor)
+			Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
 		})
 	})
 
@@ -134,5 +136,75 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			})
 		})
 
+	})
+
+	Context("When hypervisor does not exist", func() {
+		It("should succeed without error", func(ctx SpecContext) {
+			// Delete the hypervisor - controller should handle this gracefully with IgnoreNotFound
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
+
+			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When lifecycle is not enabled", func() {
+		BeforeEach(func(ctx SpecContext) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			hypervisor.Spec.LifecycleEnabled = false
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should return early without error", func(ctx SpecContext) {
+			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When node is terminating and offboarded", func() {
+		BeforeEach(func(ctx SpecContext) {
+			// Set node as terminating and add required labels for disableInstanceHA
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
+			node.Labels = map[string]string{
+				corev1.LabelHostname:          nodeName,
+				"topology.kubernetes.io/zone": "test-zone",
+			}
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:   "Terminating",
+				Status: corev1.ConditionTrue,
+			})
+			Expect(k8sClient.Update(ctx, node)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
+
+			// Set hypervisor as onboarded and offboarded
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeOnboarding,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Onboarded",
+				Message: "Onboarding completed",
+			})
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeOffboarded,
+				Status:  metav1.ConditionTrue,
+				Reason:  "Offboarded",
+				Message: "Offboarding successful",
+			})
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should allow pod eviction by setting the PDB to minAvailable 0", func(ctx SpecContext) {
+			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+
+			pdb := &policyv1.PodDisruptionBudget{}
+			Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+			Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+		})
 	})
 })
