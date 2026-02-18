@@ -100,4 +100,94 @@ var _ = Describe("Node Certificate Controller", func() {
 			Expect(certificate.Spec.DNSNames).To(ContainElement(nodeName))
 		})
 	})
+
+	Context("When reconciling a node with various address types", func() {
+		BeforeEach(func(ctx SpecContext) {
+			By("Updating node with different address types")
+			node := &corev1.Node{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
+			node.Status.Addresses = []corev1.NodeAddress{
+				{Type: corev1.NodeHostName, Address: "hostname.example.com"},
+				{Type: corev1.NodeInternalDNS, Address: "internal.example.com"},
+				{Type: corev1.NodeExternalDNS, Address: "external.example.com"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+				{Type: corev1.NodeExternalIP, Address: "203.0.113.1"},
+				{Type: corev1.NodeHostName, Address: ""}, // Empty address should be skipped
+			}
+			Expect(fakeClient.Status().Update(ctx, node)).To(Succeed())
+		})
+
+		It("should create certificate with all DNS names and IP addresses", func(ctx SpecContext) {
+			By("Reconciling the node")
+			req := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			}
+			_, err := nodeCertificateController.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking if the certificate includes all addresses")
+			_, certName := getSecretAndCertName(nodeName)
+			certificate := &cmapi.Certificate{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, certificate)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Check DNS names
+			Expect(certificate.Spec.DNSNames).To(ContainElements(
+				nodeName,
+				"hostname.example.com",
+				"internal.example.com",
+				"external.example.com",
+			))
+
+			// Check IP addresses
+			Expect(certificate.Spec.IPAddresses).To(ContainElements(
+				"10.0.0.1",
+				"203.0.113.1",
+			))
+		})
+	})
+
+	Context("When reconciling a node without nova virt label", func() {
+		BeforeEach(func(ctx SpecContext) {
+			By("Creating a node without the hypervisor label")
+			nodeWithoutLabel := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-without-label",
+				},
+			}
+			Expect(fakeClient.Create(ctx, nodeWithoutLabel)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				Expect(fakeClient.Delete(ctx, nodeWithoutLabel)).To(Succeed())
+			})
+		})
+
+		It("should still create certificate when Reconcile is called directly", func(ctx SpecContext) {
+			// Note: The label filter is enforced by the controller predicate in SetupWithManager,
+			// not in the Reconcile method itself. When testing Reconcile directly, it will still
+			// create the certificate even without the label.
+			By("Reconciling the node without label")
+			req := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "node-without-label"},
+			}
+			_, err := nodeCertificateController.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying certificate was created despite missing label")
+			_, certName := getSecretAndCertName("node-without-label")
+			certificate := &cmapi.Certificate{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, certificate)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When reconciling a non-existent node", func() {
+		It("should return without error", func(ctx SpecContext) {
+			By("Reconciling a non-existent node")
+			req := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "non-existent-node"},
+			}
+			_, err := nodeCertificateController.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
