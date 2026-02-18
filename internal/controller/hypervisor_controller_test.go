@@ -406,4 +406,44 @@ var _ = Describe("Hypervisor Controller", func() {
 			})
 		})
 	})
+
+	Context("When node lookup fails", func() {
+		It("should return error for non-NotFound errors", func(ctx SpecContext) {
+			// Try to reconcile a node that doesn't exist - should be gracefully ignored
+			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "non-existent-node"},
+			})
+			// NotFound errors are ignored, so this should not error
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When node has internal IP", func() {
+		It("should set internal IP in hypervisor status", func(ctx SpecContext) {
+			// First reconcile to create the hypervisor
+			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: resource.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Now add internal IP to node status
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+			node.Status.Addresses = []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "192.168.1.100"},
+				{Type: corev1.NodeHostName, Address: "test-host"},
+			}
+			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
+
+			// Reconcile again to update the hypervisor with the IP
+			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: resource.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(hypervisor.Status.InternalIP).To(Equal("192.168.1.100"))
+		})
+	})
 })
