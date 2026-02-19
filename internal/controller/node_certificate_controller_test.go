@@ -70,14 +70,14 @@ var _ = Describe("Node Certificate Controller", func() {
 			},
 		}
 		Expect(fakeClient.Create(ctx, resource)).To(Succeed())
-	})
 
-	AfterEach(func(ctx SpecContext) {
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		By("Cleanup the specific node")
-		Expect(client.IgnoreAlreadyExists(fakeClient.Delete(ctx, node))).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			By("Cleanup the specific node")
+			Expect(client.IgnoreAlreadyExists(fakeClient.Delete(ctx, node))).To(Succeed())
 
-		By("Cleaning up the test environment")
+			By("Cleaning up the test environment")
+		})
 	})
 
 	// Tests
