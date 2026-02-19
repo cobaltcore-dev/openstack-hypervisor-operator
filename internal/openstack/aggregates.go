@@ -16,6 +16,7 @@ package openstack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -102,6 +103,68 @@ func RemoveFromAggregate(ctx context.Context, serviceClient *gophercloud.Service
 	}
 	aggs[name] = result
 	log.Info("removed host from aggregate", "host", host, "name", name)
+
+	return nil
+}
+
+// ApplyAggregates ensures a host is in exactly the specified aggregates.
+// It adds the host to missing aggregates and removes it from extra ones.
+// Pass an empty list to remove the host from all aggregates.
+// Aggregates must already exist - this function will not create them.
+func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClient, host string, desiredAggregates []string) error {
+	log := logger.FromContext(ctx)
+
+	aggs, err := GetAggregatesByName(ctx, serviceClient)
+	if err != nil {
+		return fmt.Errorf("failed to get aggregates: %w", err)
+	}
+
+	// Build desired set for O(1) lookups
+	desiredSet := make(map[string]bool, len(desiredAggregates))
+	for _, name := range desiredAggregates {
+		desiredSet[name] = true
+	}
+
+	// We need to add the host to aggregates first, because if we first drop
+	// an aggregate with a filter criterion and then add a new one, we leave the host
+	// open for a period of time. Still, this may fail due to a conflict of aggregates
+	// with different availability zones, so we collect all the errors and return them
+	// so it hopefully will converge eventually.
+	var errs []error
+	var toRemove []string
+
+	// First, add to any desired aggregates (including creating them if needed)
+	for _, name := range desiredAggregates {
+		aggregate, exists := aggs[name]
+		if !exists || !slices.Contains(aggregate.Hosts, host) {
+			// Aggregate doesn't exist or host not in it - add immediately
+			log.Info("Adding to aggregate", "aggregate", name, "host", host)
+			if err := AddToAggregate(ctx, serviceClient, aggs, host, name, ""); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	// Second, collect aggregates to remove from (host is in but shouldn't be)
+	for name, aggregate := range aggs {
+		if slices.Contains(aggregate.Hosts, host) && !desiredSet[name] {
+			toRemove = append(toRemove, name)
+		}
+	}
+
+	// Remove after all additions are complete
+	if len(toRemove) > 0 {
+		log.Info("Removing from aggregates", "aggregates", toRemove, "host", host)
+		for _, name := range toRemove {
+			if err := RemoveFromAggregate(ctx, serviceClient, aggs, host, name); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("encountered errors during aggregate update: %w", errors.Join(errs...))
+	}
 
 	return nil
 }

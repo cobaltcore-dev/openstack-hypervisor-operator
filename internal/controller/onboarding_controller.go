@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -197,34 +196,10 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
-	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
-	if err != nil {
-		return fmt.Errorf("cannot list aggregates %w", err)
-	}
-
-	if err = openstack.AddToAggregate(ctx, r.computeClient, aggs, host, zone, zone); err != nil {
-		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
-	}
-
-	err = openstack.AddToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
-	if err != nil {
-		return fmt.Errorf("failed to agg to test aggregate %w", err)
-	}
-
-	var errs []error
-	for aggregateName, aggregate := range aggs {
-		if aggregateName == testAggregateName || aggregateName == zone {
-			continue
-		}
-		if slices.Contains(aggregate.Hosts, host) {
-			if err := openstack.RemoveFromAggregate(ctx, r.computeClient, aggs, host, aggregateName); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("failed to remove host %v from aggregates due to %w", host, errors.Join(errs...))
+	// Apply the desired aggregate state (zone and test aggregate only)
+	desiredAggregates := []string{zone, testAggregateName}
+	if err := openstack.ApplyAggregates(ctx, r.computeClient, host, desiredAggregates); err != nil {
+		return fmt.Errorf("failed to apply aggregates: %w", err)
 	}
 
 	// The service may be forced down previously due to an HA event,
@@ -345,14 +320,15 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		return ctrl.Result{}, err
 	}
 
-	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
+	zone, found := hv.Labels[corev1.LabelTopologyZone]
+	if !found || zone == "" {
+		return ctrl.Result{}, fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
-	err = openstack.RemoveFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
+	// Remove host from test aggregate by only keeping the zone aggregate
+	desiredAggregates := []string{zone}
+	if err := openstack.ApplyAggregates(ctx, r.computeClient, host, desiredAggregates); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to apply aggregates: %w", err)
 	}
 	log.Info("removed from test-aggregate", "name", testAggregateName)
 

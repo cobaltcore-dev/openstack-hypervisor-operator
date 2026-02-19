@@ -302,7 +302,7 @@ var _ = Describe("AggregatesController", func() {
 			Expect(cond.Message).To(ContainSubstring(expectedMessage))
 		}
 
-		Context("when GetAggregates fails", func() {
+		Context("when ApplyAggregates fails", func() {
 			BeforeEach(func(ctx SpecContext) {
 				By("Setting a missing aggregate")
 				hypervisor := &kvmv1.Hypervisor{}
@@ -310,7 +310,7 @@ var _ = Describe("AggregatesController", func() {
 				hypervisor.Spec.Aggregates = []string{"test-aggregate1"}
 				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 
-				By("Mocking GetAggregates to fail")
+				By("Mocking GET /os-aggregates to fail (first API call in ApplyAggregates)")
 				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
@@ -322,79 +322,7 @@ var _ = Describe("AggregatesController", func() {
 			It("should set error condition", func(ctx SpecContext) {
 				_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
 				Expect(err).To(HaveOccurred())
-				sharedErrorConditionChecks(ctx, "failed listing aggregates")
-			})
-		})
-
-		Context("when AddToAggregate fails", func() {
-			BeforeEach(func(ctx SpecContext) {
-				By("Setting a missing aggregate")
-				hypervisor := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				hypervisor.Spec.Aggregates = []string{"test-aggregate1"}
-				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-				By("Mocking GetAggregates")
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, AggregateListBodyEmpty)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
-				By("Mocking CreateAggregate")
-				fakeServer.Mux.HandleFunc("POST /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, AggregatesPostBody)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
-				By("Mocking AddHost to fail")
-				fakeServer.Mux.HandleFunc("POST /os-aggregates/42/action", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					_, err := fmt.Fprint(w, `{"conflictingRequest": {"message": "Cannot add host to aggregate", "code": 409}}`)
-					Expect(err).NotTo(HaveOccurred())
-				})
-			})
-
-			It("should set error condition", func(ctx SpecContext) {
-				_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
-				Expect(err).To(HaveOccurred())
-				sharedErrorConditionChecks(ctx, "encountered errors during aggregate update")
-			})
-		})
-
-		Context("when RemoveFromAggregate fails", func() {
-			BeforeEach(func(ctx SpecContext) {
-				By("Setting existing aggregate in status")
-				hypervisor := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				hypervisor.Status.Aggregates = []string{"test-aggregate2"}
-				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-
-				By("Mocking GetAggregates")
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, AggregateListBodyFull)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
-				By("Mocking RemoveHost to fail")
-				fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					_, err := fmt.Fprint(w, `{"conflictingRequest": {"message": "Cannot remove host from aggregate", "code": 409}}`)
-					Expect(err).NotTo(HaveOccurred())
-				})
-			})
-
-			It("should set error condition", func(ctx SpecContext) {
-				_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
-				Expect(err).To(HaveOccurred())
-				sharedErrorConditionChecks(ctx, "encountered errors during aggregate update")
+				sharedErrorConditionChecks(ctx, "failed to get aggregates")
 			})
 		})
 

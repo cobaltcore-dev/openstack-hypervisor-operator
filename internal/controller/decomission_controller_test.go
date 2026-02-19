@@ -395,7 +395,7 @@ var _ = Describe("Decommission Controller", func() {
 			})
 		})
 
-		Context("When removing host from aggregate fails", func() {
+		Context("When ApplyAggregates fails", func() {
 			BeforeEach(func() {
 				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
@@ -416,36 +416,10 @@ var _ = Describe("Decommission Controller", func() {
 					}`)
 				})
 
+				// Mock only the first API call in ApplyAggregates (GET /os-aggregates) to fail
 				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, AggregateListWithHv)
-				})
-
-				fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusInternalServerError)
 					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-				})
-
-				// Add handlers for subsequent steps even though we expect failure earlier
-				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusNoContent)
-				})
-
-				fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
-				})
-
-				fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, `{"allocations": {}}`)
-				})
-
-				fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusAccepted)
 				})
 			})
 

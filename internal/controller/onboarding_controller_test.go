@@ -455,6 +455,8 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 			Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
+			// Mock for ApplyAggregates during completeOnboarding
+			// Returns aggregates with host in both test-az and tenant_filter_tests
 			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -490,10 +492,20 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
+			// Mock for removing host from test aggregate (ApplyAggregates will call this)
 			fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, addedHostToTestBody)
+				// Return aggregate without the host after removal
+				_, err := fmt.Fprint(w, `{
+					"aggregate": {
+						"name": "tenant_filter_tests",
+						"availability_zone": "",
+						"deleted": false,
+						"hosts": [],
+						"id": 99
+					}
+				}`)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
