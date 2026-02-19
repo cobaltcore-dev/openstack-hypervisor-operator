@@ -52,7 +52,6 @@ type AggregatesController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
 
 func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logger.FromContext(ctx)
 	hv := &kvmv1.Hypervisor{}
 	if err := ac.Get(ctx, req.NamespacedName, hv); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
@@ -69,44 +68,9 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	aggs, err := openstack.GetAggregatesByName(ctx, ac.computeClient)
+	err := openstack.ApplyAggregates(ctx, ac.computeClient, hv.Name, hv.Spec.Aggregates)
 	if err != nil {
-		err = fmt.Errorf("failed listing aggregates: %w", err)
-		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
-			return ctrl.Result{}, errors.Join(err, err2)
-		}
-		return ctrl.Result{}, err
-	}
-
-	toAdd := Difference(hv.Status.Aggregates, hv.Spec.Aggregates)
-	toRemove := Difference(hv.Spec.Aggregates, hv.Status.Aggregates)
-
-	// We need to add first the host to the aggregates, because if we first drop
-	// an aggregate with a filter criterion and then add a new one, we leave the host
-	// open for period of time. Still, this may fail due to a conflict of aggregates
-	// with different availability zones, so we collect all the errors and return them
-	// so it hopefully will converge eventually.
-	var errs []error
-	if len(toAdd) > 0 {
-		log.Info("Adding", "aggregates", toAdd)
-		for item := range slices.Values(toAdd) {
-			if err = openstack.AddToAggregate(ctx, ac.computeClient, aggs, hv.Name, item, ""); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if len(toRemove) > 0 {
-		log.Info("Removing", "aggregates", toRemove)
-		for item := range slices.Values(toRemove) {
-			if err = openstack.RemoveFromAggregate(ctx, ac.computeClient, aggs, hv.Name, item); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if errs != nil {
-		err = fmt.Errorf("encountered errors during aggregate update: %w", errors.Join(errs...))
+		err = fmt.Errorf("failed to apply aggregates: %w", err)
 		if err2 := ac.setErrorCondition(ctx, hv, err.Error()); err2 != nil {
 			return ctrl.Result{}, errors.Join(err, err2)
 		}
