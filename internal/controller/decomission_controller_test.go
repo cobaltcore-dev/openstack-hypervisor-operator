@@ -69,13 +69,12 @@ var _ = Describe("Decommission Controller", func() {
 	var (
 		decommissionReconciler *NodeDecommissionReconciler
 		resourceName           = types.NamespacedName{Name: hypervisorName}
-		reconcileReq           = ctrl.Request{
-			NamespacedName: resourceName,
-		}
-		fakeServer testhelper.FakeServer
+		reconcileReq           = ctrl.Request{NamespacedName: resourceName}
+		fakeServer             testhelper.FakeServer
 	)
 
 	BeforeEach(func(ctx SpecContext) {
+		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
 
@@ -84,11 +83,13 @@ var _ = Describe("Decommission Controller", func() {
 			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
 		})
 
+		By("Setting KVM_HA_SERVICE_URL environment variable")
 		os.Setenv("KVM_HA_SERVICE_URL", fakeServer.Endpoint()+"instance-ha")
 		DeferCleanup(func() {
 			os.Unsetenv("KVM_HA_SERVICE_URL")
 		})
 
+		By("Creating the NodeDecommissionReconciler")
 		decommissionReconciler = &NodeDecommissionReconciler{
 			Client:          k8sClient,
 			Scheme:          k8sClient.Scheme(),
@@ -96,14 +97,14 @@ var _ = Describe("Decommission Controller", func() {
 			placementClient: client.ServiceClient(fakeServer),
 		}
 
-		By("creating the namespace for the reconciler")
+		By("Creating the namespace for the reconciler")
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
 		Expect(k8sclient.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
 			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
 		})
 
-		By("Create the hypervisor resource with lifecycle enabled")
+		By("Creating the hypervisor resource with lifecycle enabled")
 		hypervisor := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: resourceName.Name,
@@ -118,568 +119,497 @@ var _ = Describe("Decommission Controller", func() {
 		})
 	})
 
-	Context("When marking the hypervisor terminating", func() {
-		JustBeforeEach(func(ctx SpecContext) {
-			By("reconciling first to add the finalizer")
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
+	Context("Happy Path", func() {
+		Context("When marking the hypervisor terminating", func() {
+			JustBeforeEach(func(ctx SpecContext) {
+				By("Reconciling first to add the finalizer")
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
 
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				By("Marking the hypervisor for termination")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 
-			By("and then marking the hypervisor terminating")
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeTerminating,
-				Status:  metav1.ConditionTrue,
-				Reason:  "dontcare",
-				Message: "dontcare",
+				By("Setting terminating condition")
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeTerminating,
+					Status:  metav1.ConditionTrue,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 			})
-			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-		})
 
-		When("the hypervisor was set to ready and has been evicted", func() {
-			getHypervisorsCalled := 0
-			BeforeEach(func(ctx SpecContext) {
-				hv := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, resourceName, hv)).To(Succeed())
-				meta.SetStatusCondition(&hv.Status.Conditions,
-					metav1.Condition{
+			Context("when the hypervisor was set to ready and has been evicted", func() {
+				var getHypervisorsCalled int
+
+				BeforeEach(func(ctx SpecContext) {
+					getHypervisorsCalled = 0
+
+					By("Setting hypervisor to ready and evicted")
+					hv := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hv)).To(Succeed())
+					meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 						Type:    kvmv1.ConditionTypeReady,
 						Status:  metav1.ConditionTrue,
 						Reason:  "dontcare",
 						Message: "dontcare",
-					},
-				)
-				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeEvicting,
-					Status:  metav1.ConditionFalse,
-					Reason:  "dontcare",
-					Message: "dontcare",
+					})
+					meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeEvicting,
+						Status:  metav1.ConditionFalse,
+						Reason:  "dontcare",
+						Message: "dontcare",
+					})
+					Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+					By("Mocking OpenStack API endpoints")
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						getHypervisorsCalled++
+						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, AggregateListWithHv)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
+						Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
+						expectedBody := `{"remove_host":{"host":"node-test"}}`
+						body := make([]byte, r.ContentLength)
+						_, err := r.Body.Read(body)
+						Expect(err == nil || err.Error() == EOF).To(BeTrue())
+						Expect(string(body)).To(MatchJSON(expectedBody))
+
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err = fmt.Fprint(w, AggregateRemoveHostBody)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					// c48f6247-abe4-4a24-824e-ea39e108874f comes from the HypervisorWithServers const
+					fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"allocations": {}}}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusAccepted)
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusNoContent)
+					})
 				})
-				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				It("should set the hypervisor ready condition", func(ctx SpecContext) {
+					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					Expect(hypervisor.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Status", metav1.ConditionFalse),
+							HaveField("Reason", "Decommissioning"),
+						),
+					))
+				})
+
+				It("should set the hypervisor offboarded condition", func(ctx SpecContext) {
+					for range 3 {
+						_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+						Expect(err).NotTo(HaveOccurred())
+					}
+					Expect(getHypervisorsCalled).To(BeNumerically(">", 0))
+
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					Expect(hypervisor.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeOffboarded),
+							HaveField("Status", metav1.ConditionTrue),
+						),
+					))
+				})
+			})
+		})
+	})
+
+	Context("Guard Conditions", func() {
+		JustBeforeEach(func(ctx SpecContext) {
+			result, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+		})
+
+		Context("When lifecycle is not enabled, but maintenance is set to termination", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+				hypervisor.Spec.LifecycleEnabled = false
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should not reconcile", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(BeEmpty())
+			})
+		})
+
+		Context("When maintenance is not set to termination", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceManual
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should not reconcile", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(BeEmpty())
+			})
+		})
+	})
+
+	Context("Failure Modes", func() {
+		var sharedDecommissioningErrorCheck = func(ctx SpecContext, expectedMessageSubstring string) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+			Expect(hypervisor.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", kvmv1.ConditionTypeReady),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", "Decommissioning"),
+					HaveField("Message", ContainSubstring(expectedMessageSubstring)),
+				),
+			))
+		}
+
+		BeforeEach(func(ctx SpecContext) {
+			By("Setting hypervisor to maintenance termination mode")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		Context("When getting hypervisor by name fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+				})
+			})
+
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "")
+			})
+		})
+
+		Context("When hypervisor still has running VMs", func() {
+			BeforeEach(func() {
+				hvResponse := `{
+					"hypervisors": [{
+						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+						"hypervisor_hostname": "node-test",
+						"hypervisor_version": 2002000,
+						"state": "up",
+						"status": "enabled",
+						"running_vms": 2,
+						"service": {
+							"id": "service-1234",
+							"host": "node-test",
+							"disabled_reason": ""
+						}
+					}]
+				}`
 
 				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					getHypervisorsCalled++
-					Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
+					fmt.Fprint(w, hvResponse)
+				})
+			})
+
+			It("should set decommissioning condition about running VMs", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "still has 2 running VMs")
+			})
+		})
+
+		Context("When listing aggregates fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
+				})
+
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+				})
+			})
+
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "cannot list aggregates")
+			})
+		})
+
+		Context("When removing host from aggregate fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
 				})
 
 				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-
-					_, err := fmt.Fprint(w, AggregateListWithHv)
-					Expect(err).NotTo(HaveOccurred())
+					fmt.Fprint(w, AggregateListWithHv)
 				})
 
 				fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
-					// parse request
-					Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
-					expectedBody := `{"remove_host":{"host":"node-test"}}`
-					body := make([]byte, r.ContentLength)
-					_, err := r.Body.Read(body)
-					Expect(err == nil || err.Error() == EOF).To(BeTrue())
-					Expect(string(body)).To(MatchJSON(expectedBody))
-
-					// send response
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-
-					_, err = fmt.Fprint(w, AggregateRemoveHostBody)
-					Expect(err).NotTo(HaveOccurred())
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
 				})
 
-				// c48f6247-abe4-4a24-824e-ea39e108874f comes from the HypervisorWithServers const
+				// Add handlers for subsequent steps even though we expect failure earlier
+				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
+
 				fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-
-					_, err := fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
-					Expect(err).NotTo(HaveOccurred())
+					fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
 				})
 
 				fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-
-					_, err := fmt.Fprint(w, `{"allocations": {}}}`)
-					Expect(err).NotTo(HaveOccurred())
-
+					fmt.Fprint(w, `{"allocations": {}}`)
 				})
+
 				fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusAccepted)
 				})
-
-				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusNoContent)
-				})
 			})
 
-			It("should set the hypervisor ready condition", func(ctx SpecContext) {
-				By("reconciling the created resource")
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
 				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
+
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+
 				Expect(hypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeReady),
 						HaveField("Status", metav1.ConditionFalse),
 						HaveField("Reason", "Decommissioning"),
+						HaveField("Message", ContainSubstring("failed to remove host")),
 					),
 				))
-			})
 
-			It("should set the hypervisor offboarded condition", func(ctx SpecContext) {
-				By("reconciling the created resource")
-				for range 3 {
-					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-					Expect(err).NotTo(HaveOccurred())
-				}
-				Expect(getHypervisorsCalled).To(BeNumerically(">", 0))
-
-				hypervisor := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-				Expect(hypervisor.Status.Conditions).To(ContainElement(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeOffboarded),
-						HaveField("Status", metav1.ConditionTrue),
-					),
+				// Should NOT be offboarded yet
+				Expect(hypervisor.Status.Conditions).NotTo(ContainElement(
+					HaveField("Type", kvmv1.ConditionTypeOffboarded),
 				))
 			})
 		})
 
-	})
+		Context("When deleting service fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
+				})
 
-	Context("When lifecycle is not enabled", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.LifecycleEnabled = false
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-		})
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregates": []}`)
+				})
 
-		It("should not reconcile", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
+				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+				})
+			})
 
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(BeEmpty())
-		})
-	})
-
-	Context("When maintenance is not set to termination", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceManual
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-		})
-
-		It("should not reconcile", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(BeEmpty())
-		})
-	})
-
-	Context("When getting hypervisor by name fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "cannot delete service")
 			})
 		})
 
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
+		Context("When getting resource provider fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
+				})
 
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-				),
-			))
-		})
-	})
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregates": []}`)
+				})
 
-	Context("When hypervisor still has running VMs", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
 
-			hvResponse := `{
-				"hypervisors": [{
-					"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-					"hypervisor_hostname": "node-test",
-					"hypervisor_version": 2002000,
-					"state": "up",
-					"status": "enabled",
-					"running_vms": 2,
-					"service": {
-						"id": "service-1234",
-						"host": "node-test",
-						"disabled_reason": ""
-					}
-				}]
-			}`
+				fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+				})
+			})
 
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, hvResponse)
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "cannot get resource provider")
 			})
 		})
 
-		It("should set decommissioning condition about running VMs", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
+		Context("When cleaning up resource provider fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
+				})
 
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("still has 2 running VMs")),
-				),
-			))
-		})
-	})
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregates": []}`)
+				})
 
-	Context("When listing aggregates fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
 
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{
-					"hypervisors": [{
-						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-						"hypervisor_hostname": "node-test",
-						"hypervisor_version": 2002000,
-						"state": "up",
-						"status": "enabled",
-						"running_vms": 0,
-						"service": {
-							"id": "service-1234",
-							"host": "node-test"
-						}
-					}]
-				}`)
+				fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
+				})
+
+				fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"allocations": {}}`)
+				})
+
+				fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+				})
 			})
 
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+			It("should set decommissioning condition with error", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "cannot clean up resource provider")
 			})
-		})
-
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("cannot list aggregates")),
-				),
-			))
-		})
-	})
-
-	Context("When removing host from aggregate fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{
-					"hypervisors": [{
-						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-						"hypervisor_hostname": "node-test",
-						"hypervisor_version": 2002000,
-						"state": "up",
-						"status": "enabled",
-						"running_vms": 0,
-						"service": {
-							"id": "service-1234",
-							"host": "node-test"
-						}
-					}]
-				}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, AggregateListWithHv)
-			})
-
-			fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-			})
-
-			// Need to add handlers for subsequent steps even though we expect failure earlier
-			fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"allocations": {}}`)
-			})
-
-			fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusAccepted)
-			})
-		})
-
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-
-			// Should have Ready=False condition with error message
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("failed to remove host")),
-				),
-			))
-
-			// Should NOT be offboarded yet
-			Expect(hypervisor.Status.Conditions).NotTo(ContainElement(
-				HaveField("Type", kvmv1.ConditionTypeOffboarded),
-			))
-		})
-	})
-
-	Context("When deleting service fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{
-					"hypervisors": [{
-						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-						"hypervisor_hostname": "node-test",
-						"hypervisor_version": 2002000,
-						"state": "up",
-						"status": "enabled",
-						"running_vms": 0,
-						"service": {
-							"id": "service-1234",
-							"host": "node-test"
-						}
-					}]
-				}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"aggregates": []}`)
-			})
-
-			fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-			})
-		})
-
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("cannot delete service")),
-				),
-			))
-		})
-	})
-
-	Context("When getting resource provider fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{
-					"hypervisors": [{
-						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-						"hypervisor_hostname": "node-test",
-						"hypervisor_version": 2002000,
-						"state": "up",
-						"status": "enabled",
-						"running_vms": 0,
-						"service": {
-							"id": "service-1234",
-							"host": "node-test"
-						}
-					}]
-				}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"aggregates": []}`)
-			})
-
-			fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-			})
-		})
-
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("cannot get resource provider")),
-				),
-			))
-		})
-	})
-
-	Context("When cleaning up resource provider fails", func() {
-		BeforeEach(func(ctx SpecContext) {
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
-			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-
-			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{
-					"hypervisors": [{
-						"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-						"hypervisor_hostname": "node-test",
-						"hypervisor_version": 2002000,
-						"state": "up",
-						"status": "enabled",
-						"running_vms": 0,
-						"service": {
-							"id": "service-1234",
-							"host": "node-test"
-						}
-					}]
-				}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"aggregates": []}`)
-			})
-
-			fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
-			})
-
-			fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"allocations": {}}`)
-			})
-
-			fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-			})
-		})
-
-		It("should set decommissioning condition with error", func(ctx SpecContext) {
-			_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
-
-			hypervisor := &kvmv1.Hypervisor{}
-			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-			Expect(hypervisor.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
-					HaveField("Message", ContainSubstring("cannot clean up resource provider")),
-				),
-			))
 		})
 	})
 })
