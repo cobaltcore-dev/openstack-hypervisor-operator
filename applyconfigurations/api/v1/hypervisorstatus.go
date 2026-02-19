@@ -11,6 +11,7 @@ import (
 // with apply.
 type HypervisorStatusApplyConfiguration struct {
 	LibVirtVersion     *string                                   `json:"libVirtVersion,omitempty"`
+	HypervisorVersion  *string                                   `json:"hypervisorVersion,omitempty"`
 	OperatingSystem    *OperatingSystemStatusApplyConfiguration  `json:"operatingSystem,omitempty"`
 	Update             *HyperVisorUpdateStatusApplyConfiguration `json:"updateStatus,omitempty"`
 	Instances          []InstanceApplyConfiguration              `json:"instances,omitempty"`
@@ -41,6 +42,14 @@ func HypervisorStatus() *HypervisorStatusApplyConfiguration {
 // If called multiple times, the LibVirtVersion field is set to the value of the last call.
 func (b *HypervisorStatusApplyConfiguration) WithLibVirtVersion(value string) *HypervisorStatusApplyConfiguration {
 	b.LibVirtVersion = &value
+	return b
+}
+
+// WithHypervisorVersion sets the HypervisorVersion field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the HypervisorVersion field is set to the value of the last call.
+func (b *HypervisorStatusApplyConfiguration) WithHypervisorVersion(value string) *HypervisorStatusApplyConfiguration {
+	b.HypervisorVersion = &value
 	return b
 }
 

@@ -399,6 +399,10 @@ spec:
                 description: HypervisorID is the unique identifier of the hypervisor
                   in OpenStack.
                 type: string
+              hypervisorVersion:
+                default: unknown
+                description: Represents the Hypervisor version.
+                type: string
               instances:
                 description: Represents the Hypervisor hosted Virtual Machines
                 items:
