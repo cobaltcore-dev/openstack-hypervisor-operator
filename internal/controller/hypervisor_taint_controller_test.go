@@ -95,4 +95,34 @@ var _ = Describe("Hypervisor Taint Controller", func() {
 				)))
 		})
 	})
+
+	Context("When reconciling a non-existent hypervisor", func() {
+		It("should return without error", func(ctx SpecContext) {
+			nonExistentReq := ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "non-existent-hv"},
+			}
+			_, err := controller.Reconcile(ctx, nonExistentReq)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When no changes are needed", func() {
+		It("should return early without updating status", func(ctx SpecContext) {
+			// First reconcile to set initial condition
+			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Second reconcile without any changes - should return early without error
+			_, err = controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify the condition is still correct
+			Expect(k8sClient.Get(ctx, namespacedName, resource)).To(Succeed())
+			Expect(resource.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", kvmv1.ConditionTypeTainted),
+					HaveField("Status", metav1.ConditionFalse),
+				)))
+		})
+	})
 })
