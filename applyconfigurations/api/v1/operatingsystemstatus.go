@@ -15,6 +15,7 @@ type OperatingSystemStatusApplyConfiguration struct {
 	KernelName          *string      `json:"kernelName,omitempty"`
 	KernelRelease       *string      `json:"kernelRelease,omitempty"`
 	KernelVersion       *string      `json:"kernelVersion,omitempty"`
+	KernelCommandLine   *string      `json:"kernelCommandLine,omitempty"`
 	HardwareVendor      *string      `json:"hardwareVendor,omitempty"`
 	HardwareModel       *string      `json:"hardwareModel,omitempty"`
 	HardwareSerial      *string      `json:"hardwareSerial,omitempty"`
@@ -76,6 +77,14 @@ func (b *OperatingSystemStatusApplyConfiguration) WithKernelRelease(value string
 // If called multiple times, the KernelVersion field is set to the value of the last call.
 func (b *OperatingSystemStatusApplyConfiguration) WithKernelVersion(value string) *OperatingSystemStatusApplyConfiguration {
 	b.KernelVersion = &value
+	return b
+}
+
+// WithKernelCommandLine sets the KernelCommandLine field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KernelCommandLine field is set to the value of the last call.
+func (b *OperatingSystemStatusApplyConfiguration) WithKernelCommandLine(value string) *OperatingSystemStatusApplyConfiguration {
+	b.KernelCommandLine = &value
 	return b
 }
 
