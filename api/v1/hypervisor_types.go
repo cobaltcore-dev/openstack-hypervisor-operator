@@ -175,6 +175,9 @@ type OperatingSystemStatus struct {
 	// KernelVersion
 	KernelVersion string `json:"kernelVersion,omitempty"`
 
+	// KernelCommandLine contains the raw kernel boot parameters from /proc/cmdline.
+	KernelCommandLine string `json:"kernelCommandLine,omitempty"`
+
 	// HardwareVendor
 	HardwareVendor string `json:"hardwareVendor,omitempty"`
 
