@@ -113,11 +113,10 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
-	// Before removing the service, first take the node out of all aggregates,
-	// so when the node comes back, it doesn't end up with the old associations
-	host := hv.Name
-	if err := openstack.ApplyAggregates(ctx, r.computeClient, host, []string{}); err != nil {
-		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("failed to remove host from aggregates: %v", err))
+	// Wait for aggregates controller to remove from all aggregates
+	if len(hv.Status.Aggregates) > 0 {
+		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", hv.Status.Aggregates)
+		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
 	// Deleting and evicted, so better delete the service

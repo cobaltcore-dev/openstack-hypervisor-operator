@@ -37,6 +37,7 @@ var _ = Describe("ApplyAggregates", func() {
 					"availability_zone": "az1",
 					"deleted": false,
 					"id": 1,
+					"uuid": "uuid-agg1",
 					"hosts": ["test-host"]
 				},
 				{
@@ -44,6 +45,7 @@ var _ = Describe("ApplyAggregates", func() {
 					"availability_zone": "az2",
 					"deleted": false,
 					"id": 2,
+					"uuid": "uuid-agg2",
 					"hosts": ["test-host"]
 				},
 				{
@@ -51,6 +53,7 @@ var _ = Describe("ApplyAggregates", func() {
 					"availability_zone": "az3",
 					"deleted": false,
 					"id": 3,
+					"uuid": "uuid-agg3",
 					"hosts": []
 				}
 			]
@@ -62,6 +65,7 @@ var _ = Describe("ApplyAggregates", func() {
 				"availability_zone": "az3",
 				"deleted": false,
 				"id": 3,
+				"uuid": "uuid-agg3",
 				"hosts": ["test-host"]
 			}
 		}`
@@ -72,6 +76,7 @@ var _ = Describe("ApplyAggregates", func() {
 				"availability_zone": "az1",
 				"deleted": false,
 				"id": 1,
+				"uuid": "uuid-agg1",
 				"hosts": []
 			}
 		}`
@@ -108,8 +113,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should add host to agg3", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(uuids).To(ConsistOf("uuid-agg1", "uuid-agg2", "uuid-agg3"))
 		})
 	})
 
@@ -130,8 +136,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should remove host from agg1", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(uuids).To(ConsistOf("uuid-agg2"))
 		})
 	})
 
@@ -158,15 +165,16 @@ var _ = Describe("ApplyAggregates", func() {
 				removeCalls++
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"aggregate": {"name": "agg2", "id": 2, "hosts": []}}`)
+				fmt.Fprint(w, `{"aggregate": {"name": "agg2", "id": 2, "uuid": "uuid-agg2", "hosts": []}}`)
 			})
 		})
 
 		It("should remove host from all aggregates", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(removeCalls).To(Equal(2))
+			Expect(uuids).To(BeEmpty())
 		})
 	})
 
@@ -181,8 +189,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should not make any changes", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2"})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(uuids).To(ConsistOf("uuid-agg1", "uuid-agg2"))
 		})
 	})
 
@@ -209,8 +218,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should replace agg1 with agg3", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(uuids).To(ConsistOf("uuid-agg2", "uuid-agg3"))
 		})
 	})
 
@@ -224,9 +234,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should return an error", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1"})
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1"})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to get aggregates"))
+			Expect(err.Error()).To(ContainSubstring("failed to list aggregates"))
 		})
 	})
 
@@ -246,9 +256,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should return an error", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("encountered errors during aggregate update"))
+			Expect(err.Error()).To(ContainSubstring("failed to add host"))
 		})
 	})
 
@@ -268,9 +278,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should return an error", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("encountered errors during aggregate update"))
+			Expect(err.Error()).To(ContainSubstring("failed to remove host"))
 		})
 	})
 
@@ -291,8 +301,9 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should add new host to aggregate", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "new-host", []string{"agg3"})
+			uuids, err := ApplyAggregates(ctx, serviceClient, "new-host", []string{"agg3"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(uuids).To(ConsistOf("uuid-agg3"))
 		})
 	})
 
@@ -319,11 +330,49 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should return combined errors", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("encountered errors during aggregate update"))
 			// Verify it's a joined error with multiple failures
-			Expect(err.Error()).To(Or(ContainSubstring("Cannot add"), ContainSubstring("Cannot remove")))
+			Expect(err.Error()).To(And(ContainSubstring("failed to add host"), ContainSubstring("failed to remove host")))
+		})
+	})
+
+	Context("when desired aggregate does not exist", func() {
+		BeforeEach(func() {
+			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, aggregateListWithHost)
+			})
+		})
+
+		It("should return an error about missing aggregate", func() {
+			serviceClient := client.ServiceClient(fakeServer)
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg4"})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregates not found"))
+			Expect(err.Error()).To(ContainSubstring("agg4"))
+		})
+	})
+
+	Context("when multiple desired aggregates do not exist", func() {
+		BeforeEach(func() {
+			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, aggregateListWithHost)
+			})
+		})
+
+		It("should return an error listing all missing aggregates", func() {
+			serviceClient := client.ServiceClient(fakeServer)
+			_, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg4", "agg5", "agg6"})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregates not found"))
+			// Check that all missing aggregates are mentioned in the error
+			Expect(err.Error()).To(ContainSubstring("agg4"))
+			Expect(err.Error()).To(ContainSubstring("agg5"))
+			Expect(err.Error()).To(ContainSubstring("agg6"))
 		})
 	})
 })
