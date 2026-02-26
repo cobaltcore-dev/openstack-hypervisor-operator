@@ -25,6 +25,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -50,6 +51,7 @@ var _ = Describe("AggregatesController", func() {
 			"availability_zone": "",
 			"deleted": false,
 			"id": 100001,
+			"uuid": "uuid-100001",
 			"hosts": ["hv-test"]
 		},
 		{
@@ -57,21 +59,12 @@ var _ = Describe("AggregatesController", func() {
 			"availability_zone": "",
 			"deleted": false,
 			"id": 99,
+			"uuid": "uuid-99",
 			"hosts": ["hv-test"]
 		}
     ]
 }
 `
-
-		AggregatesPostBody = `
-{
-    "aggregate": {
-		"name": "test-aggregate1",
-        "availability_zone": "",
-        "deleted": false,
-        "id": 42
-    }
-}`
 
 		AggregateRemoveHostBody = `
 {
@@ -79,7 +72,8 @@ var _ = Describe("AggregatesController", func() {
 			"name": "test-aggregate3",
 			"availability_zone": "",
 			"deleted": false,
-			"id": 99
+			"id": 99,
+			"uuid": "uuid-99"
 		}
 }`
 
@@ -92,7 +86,8 @@ var _ = Describe("AggregatesController", func() {
             "hosts": [
                 "hv-test"
             ],
-            "id": 42
+            "id": 42,
+            "uuid": "uuid-42"
         }
 }`
 	)
@@ -118,6 +113,9 @@ var _ = Describe("AggregatesController", func() {
 		hypervisor := &kvmv1.Hypervisor{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: hypervisorName.Name,
+				Labels: map[string]string{
+					corev1.LabelTopologyZone: "zone-a",
+				},
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
@@ -138,6 +136,12 @@ var _ = Describe("AggregatesController", func() {
 		})
 		Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
+		By("Setting HypervisorID and ServiceID in status")
+		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+		hypervisor.Status.HypervisorID = "test-hypervisor-id"
+		hypervisor.Status.ServiceID = "test-service-id"
+		Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
 		By("Creating the AggregatesController")
 		aggregatesController = &AggregatesController{
 			Client:        k8sClient,
@@ -153,27 +157,205 @@ var _ = Describe("AggregatesController", func() {
 			Expect(result).To(Equal(ctrl.Result{}))
 		})
 
-		Context("Adding new Aggregate", func() {
+		Context("During onboarding phase", func() {
 			BeforeEach(func(ctx SpecContext) {
-				By("Setting a missing aggregate")
+				By("Setting onboarding condition to true")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Testing",
+					Message: "Onboarding in progress",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				By("Setting desired aggregates including test aggregate")
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Aggregates = []string{"zone-a"}
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+				By("Mocking GetAggregates to return aggregates without host")
+				aggregateList := `{
+					"aggregates": [
+						{
+							"name": "zone-a",
+							"availability_zone": "zone-a",
+							"deleted": false,
+							"id": 1,
+							"uuid": "uuid-zone-a",
+							"hosts": []
+						},
+						{
+							"name": "tenant_filter_tests",
+							"availability_zone": "",
+							"deleted": false,
+							"id": 99,
+							"uuid": "uuid-test",
+							"hosts": []
+						}
+					]
+				}`
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, aggregateList)
+				})
+
+				By("Mocking AddHost for both aggregates")
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/1/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "zone-a", "id": 1, "uuid": "uuid-zone-a", "hosts": ["hv-test"]}}`)
+				})
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "tenant_filter_tests", "id": 99, "uuid": "uuid-test", "hosts": ["hv-test"]}}`)
+				})
+			})
+
+			It("should add host to both specified aggregates and test aggregate", func(ctx SpecContext) {
+				updated := &kvmv1.Hypervisor{}
+				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+				Expect(updated.Status.Aggregates).To(ConsistOf("zone-a", testAggregateName))
+				Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-test"))
+
+				// During onboarding with test aggregate, condition should be False with TestAggregates reason
+				Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+				cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonTestAggregates))
+				Expect(cond.Message).To(ContainSubstring("Test aggregate applied during onboarding"))
+			})
+		})
+
+		Context("During normal operations", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Setting desired aggregates")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Aggregates = []string{"zone-a", "zone-b"}
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+				By("Mocking GetAggregates")
+				aggregateList := `{
+					"aggregates": [
+						{
+							"name": "zone-a",
+							"availability_zone": "zone-a",
+							"deleted": false,
+							"id": 1,
+							"uuid": "uuid-zone-a",
+							"hosts": []
+						},
+						{
+							"name": "zone-b",
+							"availability_zone": "zone-b",
+							"deleted": false,
+							"id": 2,
+							"uuid": "uuid-zone-b",
+							"hosts": []
+						}
+					]
+				}`
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, aggregateList)
+				})
+
+				By("Mocking AddHost for both aggregates")
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/1/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "zone-a", "id": 1, "uuid": "uuid-zone-a", "hosts": ["hv-test"]}}`)
+				})
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/2/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "zone-b", "id": 2, "uuid": "uuid-zone-b", "hosts": ["hv-test"]}}`)
+				})
+			})
+
+			It("should add host to specified aggregates without test aggregate", func(ctx SpecContext) {
+				updated := &kvmv1.Hypervisor{}
+				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+				Expect(updated.Status.Aggregates).To(ConsistOf("zone-a", "zone-b"))
+				Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-zone-b"))
+				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+			})
+		})
+
+		Context("When Spec.Aggregates matches Status.Aggregates", func() {
+			Context("but condition is not set", func() {
+				BeforeEach(func(ctx SpecContext) {
+					By("Setting matching aggregates in spec and status")
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					hypervisor.Spec.Aggregates = []string{"zone-a"}
+					hypervisor.Status.Aggregates = []string{"zone-a"}
+					hypervisor.Status.AggregateUUIDs = []string{"uuid-zone-a"}
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+					By("Mocking GetAggregates to show host already in aggregate")
+					aggregateList := `{
+						"aggregates": [
+							{
+								"name": "zone-a",
+								"availability_zone": "zone-a",
+								"deleted": false,
+								"id": 1,
+								"uuid": "uuid-zone-a",
+								"hosts": ["hv-test"]
+							}
+						]
+					}`
+					fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, aggregateList)
+					})
+				})
+
+				It("should proceed to update and set the condition", func(ctx SpecContext) {
+					updated := &kvmv1.Hypervisor{}
+					Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(updated.Status.Aggregates).To(ConsistOf("zone-a"))
+					Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a"))
+					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+					cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+					Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
+				})
+			})
+		})
+
+		Context("Adding to existing Aggregate", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Setting a desired aggregate")
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 				hypervisor.Spec.Aggregates = []string{"test-aggregate1"}
 				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 
-				By("Mocking GetAggregates to return empty list")
+				By("Mocking GetAggregates to return aggregate without host")
+				aggregateList := `{
+					"aggregates": [
+						{
+							"name": "test-aggregate1",
+							"availability_zone": "",
+							"deleted": false,
+							"id": 42,
+							"uuid": "uuid-42",
+							"hosts": []
+						}
+					]
+				}`
 				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, AggregateListBodyEmpty)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
-				By("Mocking CreateAggregate")
-				fakeServer.Mux.HandleFunc("POST /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, AggregatesPostBody)
+					_, err := fmt.Fprint(w, aggregateList)
 					Expect(err).NotTo(HaveOccurred())
 				})
 
@@ -197,6 +379,7 @@ var _ = Describe("AggregatesController", func() {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 				Expect(updated.Status.Aggregates).To(ContainElements("test-aggregate1"))
+				Expect(updated.Status.AggregateUUIDs).To(ContainElements("uuid-42"))
 				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 			})
 		})
@@ -239,6 +422,7 @@ var _ = Describe("AggregatesController", func() {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 				Expect(updated.Status.Aggregates).To(BeEmpty())
+				Expect(updated.Status.AggregateUUIDs).To(BeEmpty())
 				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 			})
 		})
@@ -251,20 +435,21 @@ var _ = Describe("AggregatesController", func() {
 			Expect(result).To(Equal(ctrl.Result{}))
 		})
 
-		Context("before onboarding", func() {
+		Context("before onboarding (missing HypervisorID and ServiceID)", func() {
 			BeforeEach(func(ctx SpecContext) {
-				By("Removing the onboarding condition")
+				By("Removing HypervisorID and ServiceID from status")
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				hypervisor.Status.Conditions = []metav1.Condition{}
+				hypervisor.Status.HypervisorID = ""
+				hypervisor.Status.ServiceID = ""
 				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 			})
 
-			It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
+			It("should return early without updating aggregates or setting condition", func(ctx SpecContext) {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 				Expect(updated.Status.Aggregates).To(BeEmpty())
-				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
+				Expect(meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeNil())
 			})
 		})
 
@@ -280,13 +465,25 @@ var _ = Describe("AggregatesController", func() {
 					Message: "dontcare",
 				})
 				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				By("Pre-setting the EvictionInProgress condition to match what controller will determine")
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonEvictionInProgress,
+					Message: "Aggregates unchanged while terminating and eviction in progress",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 			})
 
 			It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 				Expect(updated.Status.Aggregates).To(BeEmpty())
-				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeFalse())
+				Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+				cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonEvictionInProgress))
 			})
 		})
 	})
@@ -322,7 +519,7 @@ var _ = Describe("AggregatesController", func() {
 			It("should set error condition", func(ctx SpecContext) {
 				_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
 				Expect(err).To(HaveOccurred())
-				sharedErrorConditionChecks(ctx, "failed to get aggregates")
+				sharedErrorConditionChecks(ctx, "failed to list aggregates")
 			})
 		})
 

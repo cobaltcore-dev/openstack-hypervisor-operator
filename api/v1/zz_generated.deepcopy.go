@@ -351,6 +351,11 @@ func (in *HypervisorStatus) DeepCopyInto(out *HypervisorStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.AggregateUUIDs != nil {
+		in, out := &in.AggregateUUIDs, &out.AggregateUUIDs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

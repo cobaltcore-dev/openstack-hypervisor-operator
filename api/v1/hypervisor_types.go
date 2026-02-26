@@ -64,7 +64,14 @@ const (
 	ConditionReasonInitial    = "Initial"
 	ConditionReasonOnboarding = "Onboarding"
 	ConditionReasonTesting    = "Testing"
+	ConditionReasonHandover   = "Handover" // Indicates that the onboarding is almost completed, save for other controllers doing their part
 	ConditionReasonAborted    = "Aborted"
+
+	// ConditionTypeAggregatesUpdated reasons
+	// Note: ConditionReasonSucceeded and ConditionReasonFailed are shared with eviction_types.go
+	ConditionReasonTestAggregates     = "TestAggregates"
+	ConditionReasonTerminating        = "Terminating"
+	ConditionReasonEvictionInProgress = "EvictionInProgress"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
@@ -346,6 +353,10 @@ type HypervisorStatus struct {
 
 	// Aggregates are the applied aggregates of the hypervisor.
 	Aggregates []string `json:"aggregates,omitempty"`
+
+	// +kubebuilder:default:={}
+	// The UUIDs of the aggregates are used to apply aggregates to the hypervisor.
+	AggregateUUIDs []string `json:"aggregateUUIDs,omitempty"`
 
 	// InternalIP is the internal IP address of the hypervisor.
 	InternalIP string `json:"internalIp,omitempty"`
