@@ -97,21 +97,20 @@ func (r ListAllocationsResult) Extract() (*ConsumerAllocations, error) {
 }
 
 // List Allocations for a certain consumer
-func ListAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
-	resp, err := client.Get(ctx, getAllocationsURL(client, consumerID), nil, &gophercloud.RequestOpts{ //nolint:bodyclose
+func listAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
+	resp, err := client.Get(ctx, getAllocationsURL(client, consumerID), &r.Body, &gophercloud.RequestOpts{ //nolint:bodyclose
 		OkCodes: []int{200},
 	})
 	if err != nil {
 		r.Err = err
 		return
 	}
-
 	_, r.Header, r.Err = gophercloud.ParseResponse(resp, err)
 	return
 }
 
 // Delete all Allocations for a certain consumer
-func DeleteConsumerAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
+func deleteConsumerAllocations(ctx context.Context, client *gophercloud.ServiceClient, consumerID string) (r ListAllocationsResult) {
 	resp, err := client.Delete(ctx, getAllocationsURL(client, consumerID), &gophercloud.RequestOpts{ //nolint:bodyclose
 		OkCodes: []int{204, 404},
 	})
@@ -140,7 +139,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 	for consumerID := range providerAllocations.Allocations {
 		// Allocations of the consumer mapped by the resource provider, so the
 		// "reverse" of what we got before
-		result := ListAllocations(ctx, client, consumerID)
+		result := listAllocations(ctx, client, consumerID)
 		consumerAllocations, err := result.Extract()
 		if err != nil {
 			return err
@@ -152,7 +151,7 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 
 		// The consumer actually doesn't have *any* allocations, so it is just
 		// inconsistent, and we can drop them all
-		DeleteConsumerAllocations(ctx, client, consumerID)
+		deleteConsumerAllocations(ctx, client, consumerID)
 	}
 
 	// We are done, let's clean it up
