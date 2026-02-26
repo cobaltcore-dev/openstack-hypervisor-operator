@@ -38,32 +38,10 @@ import (
 
 var _ = Describe("Decommission Controller", func() {
 	const (
-		EOF                 = "EOF"
-		serviceId           = "service-1234"
-		hypervisorName      = "node-test"
-		namespaceName       = "namespace-test"
-		AggregateListWithHv = `
-{
-    "aggregates": [
-		{
-			"name": "test-aggregate2",
-			"availability_zone": "",
-			"deleted": false,
-			"id": 100001,
-			"hosts": ["node-test"]
-		}
-    ]
-}
-`
-		AggregateRemoveHostBody = `
-{
-        "aggregate": {
-			"name": "test-aggregate2",
-			"availability_zone": "",
-			"deleted": false,
-			"id": 100001
-		}
-}`
+		EOF            = "EOF"
+		serviceId      = "service-1234"
+		hypervisorName = "node-test"
+		namespaceName  = "namespace-test"
 	)
 
 	var (
@@ -173,27 +151,6 @@ var _ = Describe("Decommission Controller", func() {
 						Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "some reason", hypervisorName)).ToNot(BeNil())
 					})
 
-					fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						_, err := fmt.Fprint(w, AggregateListWithHv)
-						Expect(err).NotTo(HaveOccurred())
-					})
-
-					fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
-						Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
-						expectedBody := `{"remove_host":{"host":"node-test"}}`
-						body := make([]byte, r.ContentLength)
-						_, err := r.Body.Read(body)
-						Expect(err == nil || err.Error() == EOF).To(BeTrue())
-						Expect(string(body)).To(MatchJSON(expectedBody))
-
-						w.Header().Add("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						_, err = fmt.Fprint(w, AggregateRemoveHostBody)
-						Expect(err).NotTo(HaveOccurred())
-					})
-
 					// c48f6247-abe4-4a24-824e-ea39e108874f comes from the HypervisorWithServers const
 					fakeServer.Mux.HandleFunc("GET /resource_providers/c48f6247-abe4-4a24-824e-ea39e108874f", func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Add("Content-Type", "application/json")
@@ -248,6 +205,36 @@ var _ = Describe("Decommission Controller", func() {
 							HaveField("Status", metav1.ConditionTrue),
 						),
 					))
+				})
+
+				It("should clear Status.Aggregates when removing from all aggregates", func(ctx SpecContext) {
+					By("Setting initial aggregates and IDs in status")
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					hypervisor.Status.Aggregates = []string{"zone-a", "test-aggregate"}
+					hypervisor.Status.ServiceID = serviceId
+					hypervisor.Status.HypervisorID = "c48f6247-abe4-4a24-824e-ea39e108874f"
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+					By("Reconciling - decommission controller will wait for aggregates to be cleared")
+					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+
+					By("Simulating aggregates controller clearing aggregates")
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					hypervisor.Status.Aggregates = []string{}
+					hypervisor.Status.AggregateUUIDs = []string{}
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+					By("Reconciling again after aggregates are cleared")
+					for range 3 {
+						_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					By("Verifying Status.Aggregates is empty")
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					Expect(hypervisor.Status.Aggregates).To(BeEmpty(), "Status.Aggregates should be cleared after decommissioning")
 				})
 			})
 		})
@@ -361,8 +348,8 @@ var _ = Describe("Decommission Controller", func() {
 			})
 		})
 
-		Context("When listing aggregates fails", func() {
-			BeforeEach(func() {
+		Context("When aggregates are not empty", func() {
+			BeforeEach(func(ctx SpecContext) {
 				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Add("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
@@ -382,67 +369,17 @@ var _ = Describe("Decommission Controller", func() {
 					}`)
 				})
 
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusInternalServerError)
-					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-				})
-			})
-
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "cannot list aggregates")
-			})
-		})
-
-		Context("When ApplyAggregates fails", func() {
-			BeforeEach(func() {
-				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprintf(w, `{
-						"hypervisors": [{
-							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
-							"hypervisor_hostname": "node-test",
-							"hypervisor_version": 2002000,
-							"state": "up",
-							"status": "enabled",
-							"running_vms": 0,
-							"service": {
-								"id": "service-1234",
-								"host": "node-test"
-							}
-						}]
-					}`)
-				})
-
-				// Mock only the first API call in ApplyAggregates (GET /os-aggregates) to fail
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusInternalServerError)
-					fmt.Fprint(w, `{"error": "Internal Server Error"}`)
-				})
-			})
-
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
-
+				// Simulate aggregates controller hasn't cleared aggregates yet
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				hypervisor.Status.Aggregates = []string{"zone-a", "test-aggregate"}
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
 
-				Expect(hypervisor.Status.Conditions).To(ContainElement(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Status", metav1.ConditionFalse),
-						HaveField("Reason", "Decommissioning"),
-						HaveField("Message", ContainSubstring("failed to remove host")),
-					),
-				))
-
-				// Should NOT be offboarded yet
-				Expect(hypervisor.Status.Conditions).NotTo(ContainElement(
-					HaveField("Type", kvmv1.ConditionTypeOffboarded),
-				))
+			It("should wait for aggregates to be cleared", func(ctx SpecContext) {
+				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedDecommissioningErrorCheck(ctx, "Waiting for aggregates to be removed")
 			})
 		})
 
@@ -465,12 +402,6 @@ var _ = Describe("Decommission Controller", func() {
 							}
 						}]
 					}`)
-				})
-
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, `{"aggregates": []}`)
 				})
 
 				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
@@ -505,12 +436,6 @@ var _ = Describe("Decommission Controller", func() {
 							}
 						}]
 					}`)
-				})
-
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, `{"aggregates": []}`)
 				})
 
 				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
@@ -549,12 +474,6 @@ var _ = Describe("Decommission Controller", func() {
 							}
 						}]
 					}`)
-				})
-
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, `{"aggregates": []}`)
 				})
 
 				fakeServer.Mux.HandleFunc("DELETE /os-services/service-1234", func(w http.ResponseWriter, r *http.Request) {
