@@ -401,7 +401,7 @@ spec:
                 type: string
               hypervisorVersion:
                 default: unknown
-                description: Represents the Hypervisor version.
+                description: Represents the Hypervisor version
                 type: string
               instances:
                 description: Represents the Hypervisor hosted Virtual Machines

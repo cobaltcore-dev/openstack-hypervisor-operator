@@ -398,6 +398,10 @@ spec:
                 description: HypervisorID is the unique identifier of the hypervisor
                   in OpenStack.
                 type: string
+              hypervisorVersion:
+                default: unknown
+                description: Represents the Hypervisor version
+                type: string
               instances:
                 description: Represents the Hypervisor hosted Virtual Machines
                 items:
@@ -457,6 +461,10 @@ spec:
                     type: string
                   hardwareVendor:
                     description: HardwareVendor
+                    type: string
+                  kernelCommandLine:
+                    description: KernelCommandLine contains the raw kernel boot parameters
+                      from /proc/cmdline.
                     type: string
                   kernelName:
                     description: KernelName
