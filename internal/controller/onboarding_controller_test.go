@@ -83,97 +83,11 @@ const (
 
 var _ = Describe("Onboarding Controller", func() {
 	const (
-		region                = "test-region"
-		availabilityZone      = "test-az"
-		hypervisorName        = "test-host"
-		serviceId             = "service-id"
-		hypervisorId          = "c48f6247-abe4-4a24-824e-ea39e108874f"
-		aggregatesBodyInitial = `{
-	"aggregates": [
-		{
-			"name": "test-az",
-			"availability_zone": "test-az",
-			"deleted": false,
-			"id": 100001,
-			"hosts": []
-		},
-		{
-			"name": "tenant_filter_tests",
-			"availability_zone": "",
-			"deleted": false,
-			"id": 99,
-			"hosts": []
-		}
-	]
-}`
-
-		aggregatesBodyUnexpected = `{
-	"aggregates": [
-		{
-			"name": "test-az",
-			"availability_zone": "test-az",
-			"deleted": false,
-			"id": 100001,
-			"hosts": []
-		},
-		{
-			"name": "tenant_filter_tests",
-			"availability_zone": "",
-			"deleted": false,
-			"id": 99,
-			"hosts": []
-		},
-		{
-			"name": "unexpected",
-			"availability_zone": "",
-			"deleted": false,
-			"id": -1,
-			"hosts": ["test-host"]
-		}
-	]
-}`
-
-		aggregatesBodySetup = `{
-    "aggregates": [
-		{
-			"name": "test-az",
-			"availability_zone": "test-az",
-			"deleted": false,
-			"id": 100001,
-			"hosts": ["test-host"]
-		},
-		{
-			"name": "tenant_filter_tests",
-			"availability_zone": "",
-			"deleted": false,
-			"id": 99,
-			"hosts": ["test-host"]
-		}
-    ]
-}`
-		addedHostToAzBody = `{
-    "aggregate": {
-            "name": "test-az",
-            "availability_zone": "test-az",
-            "deleted": false,
-            "hosts": [
-                "test-host"
-            ],
-            "id": 100001
-        }
-}`
-
-		addedHostToTestBody = `{
-	"aggregate": {
-		"name": "tenant_filter_tests",
-		"availability_zone": "",
-		"deleted": false,
-		"hosts": [
-			"test-host"
-		],
-		"id": 99
-	}
-}`
+		region           = "test-region"
+		availabilityZone = "test-az"
+		hypervisorName   = "test-host"
+		serviceId        = "service-id"
+		hypervisorId     = "c48f6247-abe4-4a24-824e-ea39e108874f"
 
 		flavorDetailsBody = `{
     "flavors": [
@@ -325,20 +239,6 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)).ToNot(BeNil())
 			})
 
-			fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, addedHostToAzBody)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, addedHostToTestBody)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
 			fakeServer.Mux.HandleFunc("PUT /os-services/service-id", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -348,15 +248,6 @@ var _ = Describe("Onboarding Controller", func() {
 		})
 
 		When("it is a clean setup", func() {
-			BeforeEach(func() {
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, aggregatesBodyInitial)
-					Expect(err).NotTo(HaveOccurred())
-				})
-			})
-
 			It("should set the Service- and HypervisorId from Nova", func(ctx SpecContext) {
 				By("Reconciling the created resource")
 				err := reconcileLoop(ctx, 1)
@@ -368,10 +259,20 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 
 			It("should update the status accordingly", func(ctx SpecContext) {
-				By("Reconciling the created resource")
-				err := reconcileLoop(ctx, 2)
+				By("Reconciling the created resource to set IDs")
+				err := reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
+
+				By("Simulating aggregates controller setting aggregates")
 				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Reconciling again to process onboarding")
+				err = reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				Expect(hv.Status.Conditions).To(ContainElements(
 					SatisfyAll(
@@ -389,22 +290,6 @@ var _ = Describe("Onboarding Controller", func() {
 		})
 
 		When("it the host is already in an unexpected aggregate", func() {
-			BeforeEach(func() {
-				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, aggregatesBodyUnexpected)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
-				fakeServer.Mux.HandleFunc("POST /os-aggregates/-1/action", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Add("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, err := fmt.Fprint(w, addedHostToTestBody)
-					Expect(err).NotTo(HaveOccurred())
-				})
-			})
-
 			It("should set the Service- and HypervisorId from Nova", func(ctx SpecContext) {
 				By("Reconciling the created resource")
 				err := reconcileLoop(ctx, 1)
@@ -416,10 +301,20 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 
 			It("should update the status accordingly", func(ctx SpecContext) {
-				By("Reconciling the created resource")
-				err := reconcileLoop(ctx, 2)
+				By("Reconciling the created resource to set IDs")
+				err := reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
+
+				By("Simulating aggregates controller setting aggregates")
 				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Reconciling again to process onboarding")
+				err = reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				Expect(hv.Status.Conditions).To(ContainElements(
 					SatisfyAll(
@@ -455,20 +350,6 @@ var _ = Describe("Onboarding Controller", func() {
 			})
 			Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
-			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, aggregatesBodySetup)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			fakeServer.Mux.HandleFunc("PUT /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, aggregatesBodySetup)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
 			fakeServer.Mux.HandleFunc("PUT /os-services/service-id", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -487,13 +368,6 @@ var _ = Describe("Onboarding Controller", func() {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprint(w, emptyServersBody)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, addedHostToTestBody)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -551,13 +425,43 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = true
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
+
+				// Simulate aggregates being set by aggregates controller
+				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 			})
 
 			It("should update the conditions", func(ctx SpecContext) {
-				By("Reconciling the created resource")
-				err := reconcileLoop(ctx, 3)
+				By("Reconciling to move from Initial to Testing state")
+				err := reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
+
+				By("Reconciling again to call completeOnboarding and set RemovingTestAggregate")
+				err = reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying onboarding is in RemovingTestAggregate state")
 				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(onboardingCond).NotTo(BeNil())
+				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonRemovingTestAggregate))
+
+				By("Simulating aggregates controller updating aggregates and setting condition")
+				hv.Status.Aggregates = []string{availabilityZone}
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Aggregates updated successfully",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Reconciling once more to complete onboarding and set Ready")
+				err = reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying final state")
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				Expect(hv.Status.Conditions).To(ContainElements(
 					SatisfyAll(
@@ -578,13 +482,37 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Spec.SkipTests = false
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
+
+				// Simulate aggregates being set by aggregates controller
+				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 			})
 
 			It("should update the conditions", func(ctx SpecContext) {
-				By("Reconciling the created resource")
-				err := reconcileLoop(ctx, 3)
+				By("Reconciling to run tests")
+				err := reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
+
+				By("Reconciling again after server is active")
+				err = reconcileLoop(ctx, 1)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Simulating aggregates controller setting condition after removing test aggregate")
 				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Status.Aggregates = []string{availabilityZone}
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Aggregates updated successfully",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Reconciling to complete onboarding after aggregates condition is set")
+				err = reconcileLoop(ctx, 5)
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				Expect(hv.Status.Conditions).To(ContainElements(
 					SatisfyAll(

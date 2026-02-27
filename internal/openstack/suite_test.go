@@ -1,5 +1,5 @@
 /*
-SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+SPDX-FileCopyrightText: Copyright 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +15,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package openstack
 
-// This should contain constants shared between controllers
-const (
-	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
-	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
-	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
-	testAggregateName     = "tenant_filter_tests"
+import (
+	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
+
+func TestOpenstack(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Openstack Suite")
+}

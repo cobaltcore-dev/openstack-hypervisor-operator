@@ -189,6 +189,13 @@ spec:
           status:
             description: HypervisorStatus defines the observed state of Hypervisor
             properties:
+              aggregateUUIDs:
+                default: []
+                description: The UUIDs of the aggregates are used to apply aggregates
+                  to the hypervisor.
+                items:
+                  type: string
+                type: array
               aggregates:
                 description: Aggregates are the applied aggregates of the hypervisor.
                 items:

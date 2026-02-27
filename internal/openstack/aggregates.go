@@ -16,6 +16,7 @@ package openstack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -25,83 +26,98 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 )
 
-// GetAggregatesByName retrieves all aggregates from nova and returns them as a map keyed by name.
-func GetAggregatesByName(ctx context.Context, serviceClient *gophercloud.ServiceClient) (map[string]*aggregates.Aggregate, error) {
+// ApplyAggregates ensures a host is in exactly the specified aggregates.
+//
+// The function performs a two-phase operation to maintain security:
+// 1. First, adds the host to all desired aggregates (if not already present)
+// 2. Then, removes the host from any aggregates it shouldn't be in
+//
+// This ordering prevents leaving the host unprotected between operations when
+// aggregates have filter criteria. However, conflicts may still occur with
+// aggregates in different availability zones, in which case errors are collected
+// and returned together for eventual convergence.
+//
+// All specified aggregates must already exist in OpenStack. If any desired
+// aggregate is not found, an error is returned listing the missing aggregates.
+//
+// Pass an empty list to remove the host from all aggregates.
+func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClient, host string, desiredAggregates []string) ([]string, error) {
+	log := logger.FromContext(ctx)
+
+	oldMicroVersion := serviceClient.Microversion
+	serviceClient.Microversion = "2.93" // Something bigger than 2.41 for UUIDs
+	defer func() {
+		serviceClient.Microversion = oldMicroVersion
+	}()
+
+	// Fetch all aggregates
 	pages, err := aggregates.List(serviceClient).AllPages(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
+		return nil, fmt.Errorf("failed to list aggregates: %w", err)
 	}
 
-	aggs, err := aggregates.ExtractAggregates(pages)
+	allAggregates, err := aggregates.ExtractAggregates(pages)
 	if err != nil {
-		return nil, fmt.Errorf("cannot list aggregates due to %w", err)
+		return nil, fmt.Errorf("failed to extract aggregates: %w", err)
 	}
 
-	aggregateMap := make(map[string]*aggregates.Aggregate, len(aggs))
-	for _, aggregate := range aggs {
-		aggregateMap[aggregate.Name] = &aggregate
-	}
-	return aggregateMap, nil
-}
-
-// AddToAggregate adds the given host to the named aggregate, creating the aggregate if it does not yet exist.
-func AddToAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name, zone string) (err error) {
-	aggregate, found := aggs[name]
-	log := logger.FromContext(ctx)
-	if !found {
-		aggregate, err = aggregates.Create(ctx, serviceClient,
-			aggregates.CreateOpts{
-				Name:             name,
-				AvailabilityZone: zone,
-			}).Extract()
-		if err != nil {
-			return fmt.Errorf("failed to create aggregate %v due to %w", name, err)
-		}
-		aggs[name] = aggregate
+	// Build desired set for lookups
+	desiredSet := make(map[string]bool, len(desiredAggregates))
+	for _, name := range desiredAggregates {
+		desiredSet[name] = true
 	}
 
-	if slices.Contains(aggregate.Hosts, host) {
-		log.Info("Found host in aggregate", "host", host, "name", name)
-		return nil
-	}
+	var uuids []string
+	var errs []error
+	var toRemove []aggregates.Aggregate
 
-	result, err := aggregates.AddHost(ctx, serviceClient, aggregate.ID, aggregates.AddHostOpts{Host: host}).Extract()
-	if err != nil {
-		return fmt.Errorf("failed to add host %v to aggregate %v due to %w", host, name, err)
-	}
-	log.Info("Added host to aggregate", "host", host, "name", name)
-	aggs[name] = result
+	// Single pass: handle adds immediately, collect removes for later
+	for _, agg := range allAggregates {
+		hostInAggregate := slices.Contains(agg.Hosts, host)
+		aggregateDesired := desiredSet[agg.Name]
 
-	return nil
-}
+		if aggregateDesired {
+			// Mark as found
+			delete(desiredSet, agg.Name)
+			uuids = append(uuids, agg.UUID)
 
-// RemoveFromAggregate removes the given host from the named aggregate.
-func RemoveFromAggregate(ctx context.Context, serviceClient *gophercloud.ServiceClient, aggs map[string]*aggregates.Aggregate, host, name string) error {
-	aggregate, found := aggs[name]
-	log := logger.FromContext(ctx)
-	if !found {
-		log.Info("cannot find aggregate", "name", name)
-		return nil
-	}
-
-	found = false
-	for _, aggHost := range aggregate.Hosts {
-		if aggHost == host {
-			found = true
+			if !hostInAggregate {
+				// Add host to this aggregate
+				log.Info("Adding to aggregate", "aggregate", agg.Name, "host", host)
+				_, err := aggregates.AddHost(ctx, serviceClient, agg.ID, aggregates.AddHostOpts{Host: host}).Extract()
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to add host %v to aggregate %v: %w", host, agg.Name, err))
+				}
+			}
+		} else if hostInAggregate {
+			// Collect for removal (after all adds complete)
+			toRemove = append(toRemove, agg)
 		}
 	}
 
-	if !found {
-		log.Info("cannot find host in aggregate", "host", host, "name", name)
-		return nil
+	// Error if any desired aggregates don't exist
+	if len(desiredSet) > 0 {
+		var missing []string
+		for name := range desiredSet {
+			missing = append(missing, name)
+		}
+		errs = append(errs, fmt.Errorf("aggregates not found: %v", missing))
 	}
 
-	result, err := aggregates.RemoveHost(ctx, serviceClient, aggregate.ID, aggregates.RemoveHostOpts{Host: host}).Extract()
-	if err != nil {
-		return fmt.Errorf("failed to add host %v to aggregate %v due to %w", host, name, err)
+	// Remove host from unwanted aggregates (after all adds complete)
+	if len(toRemove) > 0 {
+		for _, agg := range toRemove {
+			log.Info("Removing from aggregate", "aggregate", agg.Name, "host", host)
+			_, err := aggregates.RemoveHost(ctx, serviceClient, agg.ID, aggregates.RemoveHostOpts{Host: host}).Extract()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to remove host %v from aggregate %v: %w", host, agg.Name, err))
+			}
+		}
 	}
-	aggs[name] = result
-	log.Info("removed host from aggregate", "host", host, "name", name)
 
-	return nil
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	} else {
+		return uuids, nil
+	}
 }

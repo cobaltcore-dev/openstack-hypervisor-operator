@@ -22,10 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 
 	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -115,22 +113,10 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
-	// Before removing the service, first take the node out of the aggregates,
-	// so when the node comes back, it doesn't up with the old associations
-	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
-	if err != nil {
-		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot list aggregates due to %v", err))
-	}
-
-	host := hv.Name
-	for name, aggregate := range aggs {
-		if slices.Contains(aggregate.Hosts, host) {
-			opts := aggregates.RemoveHostOpts{Host: host}
-			if err = aggregates.RemoveHost(ctx, r.computeClient, aggregate.ID, opts).Err; err != nil {
-				msg := fmt.Sprintf("failed to remove host %v from aggregate %v due to %v", name, host, err)
-				return r.setDecommissioningCondition(ctx, hv, msg)
-			}
-		}
+	// Wait for aggregates controller to remove from all aggregates
+	if len(hv.Status.Aggregates) > 0 {
+		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", hv.Status.Aggregates)
+		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 
 	// Deleting and evicted, so better delete the service

@@ -53,7 +53,6 @@ var errRequeue = errors.New("requeue requested")
 
 const (
 	defaultWaitTime          = 1 * time.Minute
-	testAggregateName        = "tenant_filter_tests"
 	testProjectName          = "test"
 	testDomainName           = "cc3test"
 	testImageName            = "cirros-d240801-kvm"
@@ -127,13 +126,15 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	switch status.Reason {
 	case kvmv1.ConditionReasonInitial:
-		return ctrl.Result{}, r.initialOnboarding(ctx, hv, computeHost)
+		return ctrl.Result{}, r.initialOnboarding(ctx, hv)
 	case kvmv1.ConditionReasonTesting:
 		if hv.Spec.SkipTests {
 			return r.completeOnboarding(ctx, computeHost, hv)
 		} else {
 			return r.smokeTest(ctx, hv, computeHost)
 		}
+	case kvmv1.ConditionReasonRemovingTestAggregate:
+		return r.completeOnboarding(ctx, computeHost, hv)
 	default:
 		// Nothing to be done
 		return ctrl.Result{}, nil
@@ -191,40 +192,17 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	return r.patchStatus(ctx, hv, base)
 }
 
-func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, host string) error {
+func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor) error {
 	zone, found := hv.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
 	}
 
-	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
-	if err != nil {
-		return fmt.Errorf("cannot list aggregates %w", err)
-	}
-
-	if err = openstack.AddToAggregate(ctx, r.computeClient, aggs, host, zone, zone); err != nil {
-		return fmt.Errorf("failed to agg to availability-zone aggregate %w", err)
-	}
-
-	err = openstack.AddToAggregate(ctx, r.computeClient, aggs, host, testAggregateName, "")
-	if err != nil {
-		return fmt.Errorf("failed to agg to test aggregate %w", err)
-	}
-
-	var errs []error
-	for aggregateName, aggregate := range aggs {
-		if aggregateName == testAggregateName || aggregateName == zone {
-			continue
-		}
-		if slices.Contains(aggregate.Hosts, host) {
-			if err := openstack.RemoveFromAggregate(ctx, r.computeClient, aggs, host, aggregateName); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("failed to remove host %v from aggregates due to %w", host, errors.Join(errs...))
+	// Wait for aggregates controller to apply the desired state (zone and test aggregate)
+	expectedAggregates := []string{zone, testAggregateName}
+	if !slices.Equal(hv.Status.Aggregates, expectedAggregates) {
+		// Aggregates not yet applied, requeue
+		return errRequeue
 	}
 
 	// The service may be forced down previously due to an HA event,
@@ -330,6 +308,37 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 
+	// Check if we're in the RemovingTestAggregate phase
+	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonRemovingTestAggregate {
+		// We're waiting for aggregates controller to sync
+		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated) {
+			log.Info("waiting for aggregates to be updated", "condition", kvmv1.ConditionTypeAggregatesUpdated)
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		}
+
+		// Aggregates have been synced, mark onboarding as complete
+		log.Info("aggregates updated successfully", "aggregates", hv.Status.Aggregates)
+		base := hv.DeepCopy()
+
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeOnboarding,
+			Status:  metav1.ConditionFalse,
+			Reason:  kvmv1.ConditionReasonSucceeded,
+			Message: "Onboarding completed",
+		})
+
+		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  kvmv1.ConditionReasonReadyReady,
+			Message: "Hypervisor is ready",
+		})
+
+		return ctrl.Result{}, r.patchStatus(ctx, hv, base)
+	}
+
+	// First time in completeOnboarding - clean up and prepare for aggregate sync
 	err := r.deleteTestServers(ctx, host)
 	if err != nil {
 		base := hv.DeepCopy()
@@ -345,17 +354,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		return ctrl.Result{}, err
 	}
 
-	aggs, err := openstack.GetAggregatesByName(ctx, r.computeClient)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get aggregates %w", err)
-	}
-
-	err = openstack.RemoveFromAggregate(ctx, r.computeClient, aggs, host, testAggregateName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to remove from test aggregate %w", err)
-	}
-	log.Info("removed from test-aggregate", "name", testAggregateName)
-
+	// Enable HA service before marking onboarding complete
 	err = enableInstanceHA(hv)
 	log.Info("enabled instance-ha")
 	if err != nil {
@@ -363,21 +362,16 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	}
 
 	base := hv.DeepCopy()
-	// Set hypervisor ready condition
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeReady,
-		Status:  metav1.ConditionTrue,
-		Reason:  kvmv1.ConditionReasonReadyReady,
-		Message: "Hypervisor is ready",
-	})
 
-	// set onboarding condition completed
+	// Mark onboarding as removing test aggregate - signals aggregates controller to use Spec.Aggregates
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionFalse,
-		Reason:  kvmv1.ConditionReasonSucceeded,
-		Message: "Onboarding completed",
+		Status:  metav1.ConditionTrue,
+		Reason:  kvmv1.ConditionReasonRemovingTestAggregate,
+		Message: "Removing test aggregate",
 	})
+
+	// Patch status to signal aggregates controller
 	return ctrl.Result{}, r.patchStatus(ctx, hv, base)
 }
 
