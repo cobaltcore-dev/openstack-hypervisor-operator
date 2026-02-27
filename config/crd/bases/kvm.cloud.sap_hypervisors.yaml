@@ -186,6 +186,11 @@ spec:
             - reboot
             - skipTests
             type: object
+            x-kubernetes-validations:
+            - message: spec is immutable when maintenance is 'termination'; can only
+                change maintenance to 'ha'
+              rule: '!has(oldSelf.maintenance) || oldSelf.maintenance != ''termination''
+                || self.maintenance == ''ha'' || self == oldSelf'
           status:
             description: HypervisorStatus defines the observed state of Hypervisor
             properties:

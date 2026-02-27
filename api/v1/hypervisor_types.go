@@ -68,6 +68,7 @@ const (
 )
 
 // HypervisorSpec defines the desired state of Hypervisor
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.maintenance) || oldSelf.maintenance != 'termination' || self.maintenance == 'ha' || self == oldSelf",message="spec is immutable when maintenance is 'termination'; can only change maintenance to 'ha'"
 type HypervisorSpec struct {
 	// +kubebuilder:validation:Optional
 	// OperatingSystemVersion represents the desired operating system version.
