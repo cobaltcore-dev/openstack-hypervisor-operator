@@ -51,6 +51,7 @@ var _ = Describe("Hypervisor Spec CEL Validation", func() {
 				EvacuateOnReboot:       true,
 				InstallCertificate:     true,
 				Maintenance:            MaintenanceManual,
+				MaintenanceReason:      "Test maintenance reason",
 			},
 		}
 
@@ -202,5 +203,196 @@ var _ = Describe("Maintenance Constants", func() {
 		Expect(MaintenanceAuto).To(Equal("auto"))
 		Expect(MaintenanceHA).To(Equal("ha"))
 		Expect(MaintenanceTermination).To(Equal("termination"))
+	})
+})
+
+// TestMaintenanceReasonValidation tests the CEL validation rule for MaintenanceReason
+// The rule: !has(self.maintenance) || self.maintenance != 'manual' || (has(self.maintenanceReason) && self.maintenanceReason != ”)
+// This ensures that when maintenance is set to 'manual', maintenanceReason must be non-empty
+var _ = Describe("MaintenanceReason CEL Validation", func() {
+	var (
+		hypervisor     *Hypervisor
+		hypervisorName types.NamespacedName
+	)
+
+	Context("When creating a new Hypervisor", func() {
+		AfterEach(func(ctx SpecContext) {
+			if hypervisor != nil {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+			}
+		})
+
+		It("should allow creation with maintenance='manual' and a non-empty maintenanceReason", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-hypervisor-manual-with-reason",
+				},
+				Spec: HypervisorSpec{
+					OperatingSystemVersion: "1.0",
+					LifecycleEnabled:       true,
+					Maintenance:            MaintenanceManual,
+					MaintenanceReason:      "Hardware upgrade required",
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+
+			created := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisor.Name}, created)).To(Succeed())
+			Expect(created.Spec.Maintenance).To(Equal(MaintenanceManual))
+			Expect(created.Spec.MaintenanceReason).To(Equal("Hardware upgrade required"))
+		})
+
+		It("should reject creation with maintenance='manual' but empty maintenanceReason", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-hypervisor-manual-empty-reason",
+				},
+				Spec: HypervisorSpec{
+					Maintenance:       MaintenanceManual,
+					MaintenanceReason: "",
+				},
+			}
+
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("maintenanceReason must be non-empty when maintenance is 'manual'"))
+		})
+
+		It("should reject creation with maintenance='manual' but missing maintenanceReason", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-hypervisor-manual-no-reason",
+				},
+				Spec: HypervisorSpec{
+					Maintenance: MaintenanceManual,
+				},
+			}
+
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("maintenanceReason must be non-empty when maintenance is 'manual'"))
+		})
+
+		It("should allow creation with non-manual maintenance modes without maintenanceReason", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-hypervisor-auto-no-reason",
+				},
+				Spec: HypervisorSpec{
+					Maintenance: MaintenanceAuto,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+
+			created := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisor.Name}, created)).To(Succeed())
+			Expect(created.Spec.Maintenance).To(Equal(MaintenanceAuto))
+		})
+
+		It("should allow creation with empty maintenance and no maintenanceReason", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-hypervisor-no-maintenance",
+				},
+				Spec: HypervisorSpec{
+					LifecycleEnabled: true,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+
+			created := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisor.Name}, created)).To(Succeed())
+			Expect(created.Spec.Maintenance).To(Equal(""))
+		})
+	})
+
+	Context("When updating an existing Hypervisor", func() {
+		BeforeEach(func(ctx SpecContext) {
+			hypervisorName = types.NamespacedName{
+				Name: "test-hypervisor-update",
+			}
+
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: hypervisorName.Name,
+				},
+				Spec: HypervisorSpec{
+					LifecycleEnabled: true,
+					Maintenance:      MaintenanceAuto,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		AfterEach(func(ctx SpecContext) {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+		})
+
+		It("should allow updating to maintenance='manual' with a non-empty maintenanceReason", func(ctx SpecContext) {
+			hypervisor.Spec.Maintenance = MaintenanceManual
+			hypervisor.Spec.MaintenanceReason = "Planned maintenance window"
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			updated := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Spec.Maintenance).To(Equal(MaintenanceManual))
+			Expect(updated.Spec.MaintenanceReason).To(Equal("Planned maintenance window"))
+		})
+
+		It("should reject updating to maintenance='manual' without maintenanceReason", func(ctx SpecContext) {
+			hypervisor.Spec.Maintenance = MaintenanceManual
+			err := k8sClient.Update(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("maintenanceReason must be non-empty when maintenance is 'manual'"))
+		})
+
+		It("should reject updating to maintenance='manual' with empty maintenanceReason", func(ctx SpecContext) {
+			hypervisor.Spec.Maintenance = MaintenanceManual
+			hypervisor.Spec.MaintenanceReason = ""
+			err := k8sClient.Update(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("maintenanceReason must be non-empty when maintenance is 'manual'"))
+		})
+
+		It("should allow updating from manual to another maintenance mode", func(ctx SpecContext) {
+			// First set to manual with reason
+			hypervisor.Spec.Maintenance = MaintenanceManual
+			hypervisor.Spec.MaintenanceReason = "Initial reason"
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			// Refresh hypervisor
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+			// Update to auto (reason becomes optional and can be cleared)
+			hypervisor.Spec.Maintenance = MaintenanceAuto
+			hypervisor.Spec.MaintenanceReason = ""
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			updated := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Spec.Maintenance).To(Equal(MaintenanceAuto))
+		})
+
+		It("should allow updating maintenanceReason when maintenance is already 'manual'", func(ctx SpecContext) {
+			// First set to manual with reason
+			hypervisor.Spec.Maintenance = MaintenanceManual
+			hypervisor.Spec.MaintenanceReason = "Initial reason"
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			// Refresh hypervisor
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+			// Update the reason
+			hypervisor.Spec.MaintenanceReason = "Updated reason"
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			updated := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Spec.MaintenanceReason).To(Equal("Updated reason"))
+		})
 	})
 })

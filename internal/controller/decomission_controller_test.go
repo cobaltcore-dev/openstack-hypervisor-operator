@@ -281,6 +281,7 @@ var _ = Describe("Decommission Controller", func() {
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
 				hypervisor.Spec.Maintenance = kvmv1.MaintenanceManual
+				hypervisor.Spec.MaintenanceReason = "Test maintenance reason"
 				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 			})
 
