@@ -69,6 +69,7 @@ const (
 
 // HypervisorSpec defines the desired state of Hypervisor
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.maintenance) || oldSelf.maintenance != 'termination' || self.maintenance == 'ha' || self == oldSelf",message="spec is immutable when maintenance is 'termination'; can only change maintenance to 'ha'"
+// +kubebuilder:validation:XValidation:rule="!has(self.maintenance) || self.maintenance != 'manual' || (has(self.maintenanceReason) && self.maintenanceReason.size() > 0)",message="maintenanceReason must be non-empty when maintenance is 'manual'"
 type HypervisorSpec struct {
 	// +kubebuilder:validation:Optional
 	// OperatingSystemVersion represents the desired operating system version.
@@ -121,6 +122,10 @@ type HypervisorSpec struct {
 	// +kubebuilder:validation:Enum:="";manual;auto;ha;termination
 	// Maintenance indicates whether the hypervisor is in maintenance mode.
 	Maintenance string `json:"maintenance,omitempty"`
+
+	// +kubebuilder:optional
+	// MaintenanceReason provides the reason for manual maintenance mode.
+	MaintenanceReason string `json:"maintenanceReason,omitempty"`
 }
 
 const (

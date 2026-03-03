@@ -160,6 +160,10 @@ spec:
                 - ha
                 - termination
                 type: string
+              maintenanceReason:
+                description: MaintenanceReason provides the reason for manual maintenance
+                  mode.
+                type: string
               reboot:
                 default: false
                 description: Reboot request an reboot after successful installation
@@ -190,6 +194,9 @@ spec:
                 change maintenance to 'ha'
               rule: '!has(oldSelf.maintenance) || oldSelf.maintenance != ''termination''
                 || self.maintenance == ''ha'' || self == oldSelf'
+            - message: maintenanceReason must be non-empty when maintenance is 'manual'
+              rule: '!has(self.maintenance) || self.maintenance != ''manual'' || (has(self.maintenanceReason)
+                && self.maintenanceReason.size() > 0)'
           status:
             description: HypervisorStatus defines the observed state of Hypervisor
             properties:

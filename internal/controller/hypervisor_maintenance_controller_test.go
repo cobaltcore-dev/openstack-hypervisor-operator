@@ -176,6 +176,9 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = mode
+					if mode == "manual" {
+						hypervisor.Spec.MaintenanceReason = "Test maintenance reason"
+					}
 					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 					expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
 					mockServiceUpdate(expectedBody)
@@ -261,6 +264,9 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 						hypervisor := &kvmv1.Hypervisor{}
 						Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 						hypervisor.Spec.Maintenance = mode
+						if mode == "manual" {
+							hypervisor.Spec.MaintenanceReason = "Test maintenance reason"
+						}
 						Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 						expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
 						mockServiceUpdate(expectedBody)
