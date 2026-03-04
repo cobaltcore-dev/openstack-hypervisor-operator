@@ -242,10 +242,18 @@ var _ = Describe("Decommission Controller", func() {
 
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-					Expect(hypervisor.Status.Conditions).To(ContainElement(
+					Expect(hypervisor.Status.Conditions).To(ContainElements(
 						SatisfyAll(
 							HaveField("Type", kvmv1.ConditionTypeOffboarded),
 							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", "Offboarded"),
+							HaveField("Message", "Offboarding successful"),
+						),
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Status", metav1.ConditionFalse),
+							HaveField("Reason", "Offboarded"),
+							HaveField("Message", "Offboarding successful"),
 						),
 					))
 				})
