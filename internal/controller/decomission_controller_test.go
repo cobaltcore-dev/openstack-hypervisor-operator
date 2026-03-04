@@ -211,7 +211,10 @@ var _ = Describe("Decommission Controller", func() {
 					By("Setting initial aggregates and IDs in status")
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-					hypervisor.Status.Aggregates = []string{"zone-a", "test-aggregate"}
+					hypervisor.Status.Aggregates = []kvmv1.Aggregate{
+						{Name: "zone-a", UUID: "uuid-zone-a"},
+						{Name: "test-aggregate", UUID: "uuid-test"},
+					}
 					hypervisor.Status.ServiceID = serviceId
 					hypervisor.Status.HypervisorID = "c48f6247-abe4-4a24-824e-ea39e108874f"
 					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
@@ -222,8 +225,7 @@ var _ = Describe("Decommission Controller", func() {
 
 					By("Simulating aggregates controller clearing aggregates")
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-					hypervisor.Status.Aggregates = []string{}
-					hypervisor.Status.AggregateUUIDs = []string{}
+					hypervisor.Status.Aggregates = []kvmv1.Aggregate{}
 					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
 					By("Reconciling again after aggregates are cleared")
@@ -373,7 +375,10 @@ var _ = Describe("Decommission Controller", func() {
 				// Simulate aggregates controller hasn't cleared aggregates yet
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-				hypervisor.Status.Aggregates = []string{"zone-a", "test-aggregate"}
+				hypervisor.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: "zone-a", UUID: "uuid-zone-a"},
+					{Name: "test-aggregate", UUID: "uuid-test"},
+				}
 				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 			})
 

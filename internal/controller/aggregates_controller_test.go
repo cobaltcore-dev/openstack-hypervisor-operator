@@ -218,8 +218,17 @@ var _ = Describe("AggregatesController", func() {
 			It("should add host to both specified aggregates and test aggregate", func(ctx SpecContext) {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
-				Expect(updated.Status.Aggregates).To(ConsistOf("zone-a", testAggregateName))
-				Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-test"))
+
+				// Extract aggregate names and UUIDs for comparison
+				aggregateNames := make([]string, len(updated.Status.Aggregates))
+				aggregateUUIDs := make([]string, len(updated.Status.Aggregates))
+				for i, agg := range updated.Status.Aggregates {
+					aggregateNames[i] = agg.Name
+					aggregateUUIDs[i] = agg.UUID
+				}
+
+				Expect(aggregateNames).To(ConsistOf("zone-a", testAggregateName))
+				Expect(aggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-test"))
 
 				// During onboarding with test aggregate, condition should be False with TestAggregates reason
 				Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
@@ -281,8 +290,17 @@ var _ = Describe("AggregatesController", func() {
 			It("should add host to specified aggregates without test aggregate", func(ctx SpecContext) {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
-				Expect(updated.Status.Aggregates).To(ConsistOf("zone-a", "zone-b"))
-				Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-zone-b"))
+
+				// Extract aggregate names and UUIDs for comparison
+				aggregateNames := make([]string, len(updated.Status.Aggregates))
+				aggregateUUIDs := make([]string, len(updated.Status.Aggregates))
+				for i, agg := range updated.Status.Aggregates {
+					aggregateNames[i] = agg.Name
+					aggregateUUIDs[i] = agg.UUID
+				}
+
+				Expect(aggregateNames).To(ConsistOf("zone-a", "zone-b"))
+				Expect(aggregateUUIDs).To(ConsistOf("uuid-zone-a", "uuid-zone-b"))
 				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 			})
 		})
@@ -294,8 +312,9 @@ var _ = Describe("AggregatesController", func() {
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Aggregates = []string{"zone-a"}
-					hypervisor.Status.Aggregates = []string{"zone-a"}
-					hypervisor.Status.AggregateUUIDs = []string{"uuid-zone-a"}
+					hypervisor.Status.Aggregates = []kvmv1.Aggregate{
+						{Name: "zone-a", UUID: "uuid-zone-a"},
+					}
 					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
@@ -322,8 +341,17 @@ var _ = Describe("AggregatesController", func() {
 				It("should proceed to update and set the condition", func(ctx SpecContext) {
 					updated := &kvmv1.Hypervisor{}
 					Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(updated.Status.Aggregates).To(ConsistOf("zone-a"))
-					Expect(updated.Status.AggregateUUIDs).To(ConsistOf("uuid-zone-a"))
+
+					// Extract aggregate names and UUIDs for comparison
+					aggregateNames := make([]string, len(updated.Status.Aggregates))
+					aggregateUUIDs := make([]string, len(updated.Status.Aggregates))
+					for i, agg := range updated.Status.Aggregates {
+						aggregateNames[i] = agg.Name
+						aggregateUUIDs[i] = agg.UUID
+					}
+
+					Expect(aggregateNames).To(ConsistOf("zone-a"))
+					Expect(aggregateUUIDs).To(ConsistOf("uuid-zone-a"))
 					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 					cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
 					Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
@@ -378,8 +406,17 @@ var _ = Describe("AggregatesController", func() {
 			It("should update Aggregates and set status condition as Aggregates differ", func(ctx SpecContext) {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
-				Expect(updated.Status.Aggregates).To(ContainElements("test-aggregate1"))
-				Expect(updated.Status.AggregateUUIDs).To(ContainElements("uuid-42"))
+
+				// Extract aggregate names and UUIDs for comparison
+				aggregateNames := make([]string, len(updated.Status.Aggregates))
+				aggregateUUIDs := make([]string, len(updated.Status.Aggregates))
+				for i, agg := range updated.Status.Aggregates {
+					aggregateNames[i] = agg.Name
+					aggregateUUIDs[i] = agg.UUID
+				}
+
+				Expect(aggregateNames).To(ContainElements("test-aggregate1"))
+				Expect(aggregateUUIDs).To(ContainElements("uuid-42"))
 				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 			})
 		})
@@ -389,7 +426,10 @@ var _ = Describe("AggregatesController", func() {
 				By("Setting existing aggregates in status")
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				hypervisor.Status.Aggregates = []string{"test-aggregate2", "test-aggregate3"}
+				hypervisor.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: "test-aggregate2", UUID: "uuid-100001"},
+					{Name: "test-aggregate3", UUID: "uuid-99"},
+				}
 				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
 				By("Mocking GetAggregates to return full list")
@@ -422,7 +462,6 @@ var _ = Describe("AggregatesController", func() {
 				updated := &kvmv1.Hypervisor{}
 				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
 				Expect(updated.Status.Aggregates).To(BeEmpty())
-				Expect(updated.Status.AggregateUUIDs).To(BeEmpty())
 				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
 			})
 		})

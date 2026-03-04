@@ -266,7 +266,10 @@ var _ = Describe("Onboarding Controller", func() {
 				By("Simulating aggregates controller setting aggregates")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
 				By("Reconciling again to process onboarding")
@@ -308,7 +311,10 @@ var _ = Describe("Onboarding Controller", func() {
 				By("Simulating aggregates controller setting aggregates")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
 				By("Reconciling again to process onboarding")
@@ -427,7 +433,10 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 
 				// Simulate aggregates being set by aggregates controller
-				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 			})
 
@@ -448,7 +457,9 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonHandover))
 
 				By("Simulating aggregates controller updating aggregates and setting condition")
-				hv.Status.Aggregates = []string{availabilityZone}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+				}
 				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 					Type:    kvmv1.ConditionTypeAggregatesUpdated,
 					Status:  metav1.ConditionTrue,
@@ -484,7 +495,10 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
 
 				// Simulate aggregates being set by aggregates controller
-				hv.Status.Aggregates = []string{availabilityZone, testAggregateName}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 			})
 
@@ -500,7 +514,9 @@ var _ = Describe("Onboarding Controller", func() {
 				By("Simulating aggregates controller setting condition after removing test aggregate")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				hv.Status.Aggregates = []string{availabilityZone}
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+				}
 				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 					Type:    kvmv1.ConditionTypeAggregatesUpdated,
 					Status:  metav1.ConditionTrue,

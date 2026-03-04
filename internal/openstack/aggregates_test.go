@@ -113,8 +113,17 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should add host to agg3", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2", "agg3"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(aggregates).To(HaveLen(3))
+			// Check we have the right aggregates by name and UUID
+			names := make([]string, len(aggregates))
+			uuids := make([]string, len(aggregates))
+			for i, agg := range aggregates {
+				names[i] = agg.Name
+				uuids[i] = agg.UUID
+			}
+			Expect(names).To(ConsistOf("agg1", "agg2", "agg3"))
 			Expect(uuids).To(ConsistOf("uuid-agg1", "uuid-agg2", "uuid-agg3"))
 		})
 	})
@@ -136,9 +145,11 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should remove host from agg1", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(uuids).To(ConsistOf("uuid-agg2"))
+			Expect(aggregates).To(HaveLen(1))
+			Expect(aggregates[0].Name).To(Equal("agg2"))
+			Expect(aggregates[0].UUID).To(Equal("uuid-agg2"))
 		})
 	})
 
@@ -171,10 +182,10 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should remove host from all aggregates", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(removeCalls).To(Equal(2))
-			Expect(uuids).To(BeEmpty())
+			Expect(aggregates).To(BeEmpty())
 		})
 	})
 
@@ -189,8 +200,16 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should not make any changes", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2"})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg1", "agg2"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(aggregates).To(HaveLen(2))
+			names := make([]string, len(aggregates))
+			uuids := make([]string, len(aggregates))
+			for i, agg := range aggregates {
+				names[i] = agg.Name
+				uuids[i] = agg.UUID
+			}
+			Expect(names).To(ConsistOf("agg1", "agg2"))
 			Expect(uuids).To(ConsistOf("uuid-agg1", "uuid-agg2"))
 		})
 	})
@@ -218,8 +237,16 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should replace agg1 with agg3", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "test-host", []string{"agg2", "agg3"})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(aggregates).To(HaveLen(2))
+			names := make([]string, len(aggregates))
+			uuids := make([]string, len(aggregates))
+			for i, agg := range aggregates {
+				names[i] = agg.Name
+				uuids[i] = agg.UUID
+			}
+			Expect(names).To(ConsistOf("agg2", "agg3"))
 			Expect(uuids).To(ConsistOf("uuid-agg2", "uuid-agg3"))
 		})
 	})
@@ -301,9 +328,11 @@ var _ = Describe("ApplyAggregates", func() {
 
 		It("should add new host to aggregate", func() {
 			serviceClient := client.ServiceClient(fakeServer)
-			uuids, err := ApplyAggregates(ctx, serviceClient, "new-host", []string{"agg3"})
+			aggregates, err := ApplyAggregates(ctx, serviceClient, "new-host", []string{"agg3"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(uuids).To(ConsistOf("uuid-agg3"))
+			Expect(aggregates).To(HaveLen(1))
+			Expect(aggregates[0].Name).To(Equal("agg3"))
+			Expect(aggregates[0].UUID).To(Equal("uuid-agg3"))
 		})
 	})
 

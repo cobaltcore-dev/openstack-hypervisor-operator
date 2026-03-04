@@ -16,6 +16,8 @@ import (
 func ForKind(kind schema.GroupVersionKind) interface{} {
 	switch kind {
 	// Group=kvm.cloud.sap, Version=v1
+	case v1.SchemeGroupVersion.WithKind("Aggregate"):
+		return &apiv1.AggregateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Capabilities"):
 		return &apiv1.CapabilitiesApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Cell"):

@@ -201,17 +201,23 @@ spec:
           status:
             description: HypervisorStatus defines the observed state of Hypervisor
             properties:
-              aggregateUUIDs:
-                default: []
-                description: The UUIDs of the aggregates are used to apply aggregates
-                  to the hypervisor.
-                items:
-                  type: string
-                type: array
               aggregates:
-                description: Aggregates are the applied aggregates of the hypervisor.
+                description: Aggregates are the applied aggregates of the hypervisor
+                  with their names and UUIDs.
                 items:
-                  type: string
+                  description: Aggregate represents an OpenStack aggregate with its
+                    name and UUID.
+                  properties:
+                    name:
+                      description: Name is the name of the aggregate.
+                      type: string
+                    uuid:
+                      description: UUID is the unique identifier of the aggregate.
+                      type: string
+                  required:
+                  - name
+                  - uuid
+                  type: object
                 type: array
               allocation:
                 additionalProperties:

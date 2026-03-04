@@ -155,6 +155,15 @@ type Instance struct {
 	Active bool `json:"active"`
 }
 
+// Aggregate represents an OpenStack aggregate with its name and UUID.
+type Aggregate struct {
+	// Name is the name of the aggregate.
+	Name string `json:"name"`
+
+	// UUID is the unique identifier of the aggregate.
+	UUID string `json:"uuid"`
+}
+
 type HyperVisorUpdateStatus struct {
 	// +kubebuilder:default:=false
 	// Represents a running Operating System update.
@@ -351,12 +360,8 @@ type HypervisorStatus struct {
 	// Traits are the applied traits of the hypervisor.
 	Traits []string `json:"traits,omitempty"`
 
-	// Aggregates are the applied aggregates of the hypervisor.
-	Aggregates []string `json:"aggregates,omitempty"`
-
-	// +kubebuilder:default:={}
-	// The UUIDs of the aggregates are used to apply aggregates to the hypervisor.
-	AggregateUUIDs []string `json:"aggregateUUIDs,omitempty"`
+	// Aggregates are the applied aggregates of the hypervisor with their names and UUIDs.
+	Aggregates []Aggregate `json:"aggregates,omitempty"`
 
 	// InternalIP is the internal IP address of the hypervisor.
 	InternalIP string `json:"internalIp,omitempty"`

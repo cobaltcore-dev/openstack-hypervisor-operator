@@ -199,8 +199,13 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 	}
 
 	// Wait for aggregates controller to apply the desired state (zone and test aggregate)
+	// Extract aggregate names for comparison
+	currentAggregateNames := make([]string, len(hv.Status.Aggregates))
+	for i, agg := range hv.Status.Aggregates {
+		currentAggregateNames[i] = agg.Name
+	}
 	expectedAggregates := []string{zone, testAggregateName}
-	if !slices.Equal(hv.Status.Aggregates, expectedAggregates) {
+	if !slices.Equal(currentAggregateNames, expectedAggregates) {
 		// Aggregates not yet applied, requeue
 		return errRequeue
 	}
