@@ -24,8 +24,7 @@ type HypervisorStatusApplyConfiguration struct {
 	HypervisorID       *string                                   `json:"hypervisorId,omitempty"`
 	ServiceID          *string                                   `json:"serviceId,omitempty"`
 	Traits             []string                                  `json:"traits,omitempty"`
-	Aggregates         []string                                  `json:"aggregates,omitempty"`
-	AggregateUUIDs     []string                                  `json:"aggregateUUIDs,omitempty"`
+	Aggregates         []AggregateApplyConfiguration             `json:"aggregates,omitempty"`
 	InternalIP         *string                                   `json:"internalIp,omitempty"`
 	Evicted            *bool                                     `json:"evicted,omitempty"`
 	Conditions         []metav1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
@@ -177,19 +176,12 @@ func (b *HypervisorStatusApplyConfiguration) WithTraits(values ...string) *Hyper
 // WithAggregates adds the given value to the Aggregates field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the Aggregates field.
-func (b *HypervisorStatusApplyConfiguration) WithAggregates(values ...string) *HypervisorStatusApplyConfiguration {
+func (b *HypervisorStatusApplyConfiguration) WithAggregates(values ...*AggregateApplyConfiguration) *HypervisorStatusApplyConfiguration {
 	for i := range values {
-		b.Aggregates = append(b.Aggregates, values[i])
-	}
-	return b
-}
-
-// WithAggregateUUIDs adds the given value to the AggregateUUIDs field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the AggregateUUIDs field.
-func (b *HypervisorStatusApplyConfiguration) WithAggregateUUIDs(values ...string) *HypervisorStatusApplyConfiguration {
-	for i := range values {
-		b.AggregateUUIDs = append(b.AggregateUUIDs, values[i])
+		if values[i] == nil {
+			panic("nil value passed to WithAggregates")
+		}
+		b.Aggregates = append(b.Aggregates, *values[i])
 	}
 	return b
 }

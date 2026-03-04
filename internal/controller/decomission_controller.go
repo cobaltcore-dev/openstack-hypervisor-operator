@@ -115,7 +115,11 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Wait for aggregates controller to remove from all aggregates
 	if len(hv.Status.Aggregates) > 0 {
-		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", hv.Status.Aggregates)
+		aggregateNames := make([]string, len(hv.Status.Aggregates))
+		for i, agg := range hv.Status.Aggregates {
+			aggregateNames[i] = agg.Name
+		}
+		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", aggregateNames)
 		return r.setDecommissioningCondition(ctx, hv, msg)
 	}
 

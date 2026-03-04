@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -66,11 +65,17 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	base := hv.DeepCopy()
-	desiredAggregates, desiredCondition := ac.determineDesiredState(hv)
+	desiredAggregateNames, desiredCondition := ac.determineDesiredState(hv)
 
-	if !slices.Equal(desiredAggregates, hv.Status.Aggregates) {
+	// Extract current aggregate names for comparison
+	currentAggregateNames := make([]string, len(hv.Status.Aggregates))
+	for i, agg := range hv.Status.Aggregates {
+		currentAggregateNames[i] = agg.Name
+	}
+
+	if !slicesEqualUnordered(desiredAggregateNames, currentAggregateNames) {
 		// Apply aggregates to OpenStack and update status
-		uuids, err := openstack.ApplyAggregates(ctx, ac.computeClient, hv.Name, desiredAggregates)
+		aggregates, err := openstack.ApplyAggregates(ctx, ac.computeClient, hv.Name, desiredAggregateNames)
 		if err != nil {
 			// Set error condition
 			condition := metav1.Condition{
@@ -89,8 +94,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		hv.Status.Aggregates = desiredAggregates
-		hv.Status.AggregateUUIDs = uuids
+		hv.Status.Aggregates = aggregates
 	}
 
 	// Set the condition based on the determined desired state
@@ -123,8 +127,12 @@ func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]s
 				Message: "Aggregates cleared due to termination after eviction",
 			}
 		}
-		// Still evicting or eviction not started - keep current aggregates
-		return hv.Status.Aggregates, metav1.Condition{
+		// Still evicting or eviction not started - keep current aggregate names
+		currentAggregateNames := make([]string, len(hv.Status.Aggregates))
+		for i, agg := range hv.Status.Aggregates {
+			currentAggregateNames[i] = agg.Name
+		}
+		return currentAggregateNames, metav1.Condition{
 			Type:    kvmv1.ConditionTypeAggregatesUpdated,
 			Status:  metav1.ConditionFalse,
 			Reason:  kvmv1.ConditionReasonEvictionInProgress,
@@ -164,6 +172,30 @@ func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]s
 		Reason:  kvmv1.ConditionReasonSucceeded,
 		Message: "Aggregates from spec applied successfully",
 	}
+}
+
+// slicesEqualUnordered compares two string slices without considering order.
+// Returns true if both slices contain the same elements, regardless of order.
+func slicesEqualUnordered(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create a map to count occurrences in slice a
+	counts := make(map[string]int)
+	for _, s := range a {
+		counts[s]++
+	}
+
+	// Verify all elements in b exist in a with correct counts
+	for _, s := range b {
+		counts[s]--
+		if counts[s] < 0 {
+			return false
+		}
+	}
+
+	return true
 }
 
 // SetupWithManager sets up the controller with the Manager.

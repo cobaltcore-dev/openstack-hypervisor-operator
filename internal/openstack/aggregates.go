@@ -24,6 +24,8 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
+
+	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
 // ApplyAggregates ensures a host is in exactly the specified aggregates.
@@ -42,7 +44,7 @@ import (
 // aggregate is not found, an error is returned listing the missing aggregates.
 //
 // Pass an empty list to remove the host from all aggregates.
-func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClient, host string, desiredAggregates []string) ([]string, error) {
+func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClient, host string, desiredAggregates []string) ([]kvmv1.Aggregate, error) {
 	log := logger.FromContext(ctx)
 
 	oldMicroVersion := serviceClient.Microversion
@@ -93,7 +95,7 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 	// with different availability zones, so we collect all the errors and return them
 	// so it hopefully will converge eventually.
 	var errs []error
-	var uuids []string
+	var result []kvmv1.Aggregate
 
 	if len(toAdd) > 0 {
 		log.Info("Adding to aggregates", "aggregates", toAdd, "host", host)
@@ -117,17 +119,20 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 		}
 	}
 
-	// Collect UUIDs of desired aggregates
+	// Collect aggregates with names and UUIDs
 	for _, name := range desiredAggregates {
 		if agg, exists := aggregateMap[name]; exists {
-			uuids = append(uuids, agg.UUID)
+			result = append(result, kvmv1.Aggregate{
+				Name: agg.Name,
+				UUID: agg.UUID,
+			})
 		}
 	}
 
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
-	return uuids, nil
+	return result, nil
 }
 
 // difference returns all elements in s2 that are not in s1
