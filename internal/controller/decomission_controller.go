@@ -175,6 +175,12 @@ func (r *NodeDecommissionReconciler) markOffboarded(ctx context.Context, hv *kvm
 		Reason:  "Offboarded",
 		Message: "Offboarding successful",
 	})
+	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+		Type:    kvmv1.ConditionTypeReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  "Offboarded",
+		Message: "Offboarding successful",
+	})
 	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
 		return fmt.Errorf("cannot update hypervisor status due to %w", err)
