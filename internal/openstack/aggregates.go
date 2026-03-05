@@ -119,19 +119,19 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 		}
 	}
 
-	// Collect aggregates with names and UUIDs
-	for _, name := range desiredAggregates {
-		if agg, exists := aggregateMap[name]; exists {
-			result = append(result, kvmv1.Aggregate{
-				Name: agg.Name,
-				UUID: agg.UUID,
-			})
-		}
-	}
-
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
+
+	// Collect aggregates with names and UUIDs
+	for _, name := range desiredAggregates {
+		agg := aggregateMap[name] // exists as per "Verify all desired aggregates exist" check
+		result = append(result, kvmv1.Aggregate{
+			Name: agg.Name,
+			UUID: agg.UUID,
+		})
+	}
+
 	return result, nil
 }
 
