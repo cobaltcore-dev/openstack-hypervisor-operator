@@ -132,8 +132,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			hypervisor.Status.ServiceID = "1234"
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
 				metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionFalse,
+					Type:    kvmv1.ConditionTypeOnboarded,
+					Status:  metav1.ConditionTrue,
 					Reason:  metav1.StatusSuccess,
 					Message: "random text",
 				},
@@ -423,8 +423,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
 				metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionTrue,
+					Type:    kvmv1.ConditionTypeOnboarded,
+					Status:  metav1.ConditionFalse,
 					Reason:  "InProgress",
 					Message: "Still onboarding",
 				},
@@ -436,8 +436,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			// JustBeforeEach already called Reconcile, just verify no errors occurred
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-			// Verify onboarding condition is still true (not modified)
-			Expect(meta.IsStatusConditionTrue(hypervisor.Status.Conditions, kvmv1.ConditionTypeOnboarding)).To(BeTrue())
+			// Verify onboarded condition is still false (not modified)
+			Expect(meta.IsStatusConditionFalse(hypervisor.Status.Conditions, kvmv1.ConditionTypeOnboarded)).To(BeTrue())
 		})
 	})
 
@@ -449,8 +449,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			hypervisor.Spec.Maintenance = "auto"
 			meta.SetStatusCondition(&hypervisor.Status.Conditions,
 				metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionFalse,
+					Type:    kvmv1.ConditionTypeOnboarded,
+					Status:  metav1.ConditionTrue,
 					Reason:  metav1.StatusSuccess,
 					Message: "Onboarded",
 				},

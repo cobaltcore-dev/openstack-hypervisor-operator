@@ -100,8 +100,8 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
 				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionFalse,
+					Type:    kvmv1.ConditionTypeOnboarded,
+					Status:  metav1.ConditionTrue,
 					Reason:  "dontcare",
 					Message: "dontcare",
 				})
@@ -184,8 +184,8 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionFalse,
+				Type:    kvmv1.ConditionTypeOnboarded,
+				Status:  metav1.ConditionTrue,
 				Reason:  "Onboarded",
 				Message: "Onboarding completed",
 			})

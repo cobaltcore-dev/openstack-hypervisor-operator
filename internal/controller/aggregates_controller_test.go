@@ -126,11 +126,11 @@ var _ = Describe("AggregatesController", func() {
 			Expect(k8sClient.Delete(ctx, hypervisor)).To(Succeed())
 		})
 
-		By("Setting onboarding condition to false")
+		By("Setting onboarded condition to true")
 		Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionFalse,
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionTrue,
 			Reason:  "dontcare",
 			Message: "dontcare",
 		})
@@ -159,12 +159,12 @@ var _ = Describe("AggregatesController", func() {
 
 		Context("During onboarding phase", func() {
 			BeforeEach(func(ctx SpecContext) {
-				By("Setting onboarding condition to true")
+				By("Setting onboarded condition to false (still onboarding)")
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionTrue,
+					Type:    kvmv1.ConditionTypeOnboarded,
+					Status:  metav1.ConditionFalse,
 					Reason:  "Testing",
 					Message: "Onboarding in progress",
 				})

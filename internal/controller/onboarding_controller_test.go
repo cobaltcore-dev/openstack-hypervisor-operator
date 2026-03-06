@@ -284,8 +284,8 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Reason", kvmv1.ConditionReasonOnboarding),
 					),
 					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeOnboarding),
-						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Type", kvmv1.ConditionTypeOnboarded),
+						HaveField("Status", metav1.ConditionFalse),
 						HaveField("Reason", kvmv1.ConditionReasonTesting),
 					),
 				))
@@ -329,8 +329,8 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Reason", kvmv1.ConditionReasonOnboarding),
 					),
 					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeOnboarding),
-						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Type", kvmv1.ConditionTypeOnboarded),
+						HaveField("Status", metav1.ConditionFalse),
 						HaveField("Reason", kvmv1.ConditionReasonTesting),
 					),
 				))
@@ -350,8 +350,8 @@ var _ = Describe("Onboarding Controller", func() {
 				Reason: kvmv1.ConditionReasonOnboarding,
 			})
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:   kvmv1.ConditionTypeOnboarding,
-				Status: metav1.ConditionTrue,
+				Type:   kvmv1.ConditionTypeOnboarded,
+				Status: metav1.ConditionFalse,
 				Reason: kvmv1.ConditionReasonInitial,
 			})
 			Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
@@ -452,7 +452,7 @@ var _ = Describe("Onboarding Controller", func() {
 				By("Verifying onboarding is in RemovingTestAggregate state")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
 				Expect(onboardingCond).NotTo(BeNil())
 				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonHandover))
 
@@ -480,8 +480,8 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Status", metav1.ConditionTrue),
 					),
 					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeOnboarding),
-						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Type", kvmv1.ConditionTypeOnboarded),
+						HaveField("Status", metav1.ConditionTrue),
 						HaveField("Reason", kvmv1.ConditionReasonSucceeded),
 					),
 				))
@@ -536,8 +536,8 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Status", metav1.ConditionTrue),
 					),
 					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeOnboarding),
-						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Type", kvmv1.ConditionTypeOnboarded),
+						HaveField("Status", metav1.ConditionTrue),
 						HaveField("Reason", kvmv1.ConditionReasonSucceeded),
 					),
 				))

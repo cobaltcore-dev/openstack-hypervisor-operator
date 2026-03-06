@@ -69,7 +69,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) ||
+	if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded) ||
 		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
 		return ctrl.Result{}, nil
 	}

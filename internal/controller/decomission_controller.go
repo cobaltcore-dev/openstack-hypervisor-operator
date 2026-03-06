@@ -76,9 +76,9 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Onboarding-condition needs to be either unset or set to false, so that we can continue
-	// The first means, onboarding has never started, the second means it has been aborted or finished
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
+	// Onboarded-condition needs to be either unset or set to true, so that we can continue
+	// The first means, onboarding has never started, the second means it has completed
+	if meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded) {
 		return ctrl.Result{}, nil
 	}
 
