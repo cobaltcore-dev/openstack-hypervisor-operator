@@ -55,7 +55,7 @@ const (
 	defaultWaitTime          = 1 * time.Minute
 	testProjectName          = "test"
 	testDomainName           = "cc3test"
-	testImageName            = "cirros-d240801-kvm"
+	testImageName            = "cirros-kvm"
 	testPrefixName           = "ohooc-"
 	testVolumeType           = "kvm-pilot"
 	OnboardingControllerName = "onboarding"
@@ -236,7 +236,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 	zone := hv.Labels[corev1.LabelTopologyZone]
 	server, err := r.createOrGetTestServer(ctx, zone, host, hv.UID)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance: %w", err)
 	}
 
 	switch server.Status {
@@ -504,7 +504,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 
 	imageRef, err := r.findTestImage(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not list networks due to %w", err)
+		return nil, fmt.Errorf("could not list networks: %w", err)
 	}
 
 	networkRef, err := r.findTestNetwork(ctx)
@@ -580,7 +580,7 @@ func (r *OnboardingController) findTestImage(ctx context.Context) (string, error
 		}
 	}
 
-	return "", errors.New("couldn't find image")
+	return "", fmt.Errorf("couldn't find image with name %v", testImageName)
 }
 
 func (r *OnboardingController) findTestFlavor(ctx context.Context) (string, error) {
