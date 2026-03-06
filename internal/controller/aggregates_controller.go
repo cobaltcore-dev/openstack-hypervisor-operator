@@ -141,9 +141,9 @@ func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]s
 	}
 
 	// If onboarding is in progress (Initial or Testing), add test aggregate
-	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-	if onboardingCondition != nil && onboardingCondition.Status == metav1.ConditionTrue {
-		if onboardingCondition.Reason == kvmv1.ConditionReasonInitial || onboardingCondition.Reason == kvmv1.ConditionReasonTesting {
+	onboardedCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
+	if onboardedCondition != nil && onboardedCondition.Status == metav1.ConditionFalse {
+		if onboardedCondition.Reason == kvmv1.ConditionReasonInitial || onboardedCondition.Reason == kvmv1.ConditionReasonTesting {
 			zone := hv.Labels[corev1.LabelTopologyZone]
 			return []string{zone, testAggregateName}, metav1.Condition{
 				Type:    kvmv1.ConditionTypeAggregatesUpdated,
@@ -154,7 +154,7 @@ func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]s
 		}
 
 		// If the onboarding is almost complete, it will wait (among other things) for this controller to switch to Spec.Aggregates
-		if onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
+		if onboardedCondition.Reason == kvmv1.ConditionReasonHandover {
 			return hv.Spec.Aggregates, metav1.Condition{
 				Type:    kvmv1.ConditionTypeAggregatesUpdated,
 				Status:  metav1.ConditionTrue,

@@ -105,7 +105,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// check condition reason
-	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
 	if status == nil {
 		base := hv.DeepCopy()
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
@@ -116,8 +116,8 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		})
 
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue,
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionFalse,
 			Reason:  kvmv1.ConditionReasonInitial,
 			Message: "Initial onboarding",
 		})
@@ -142,7 +142,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) error {
-	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
 	// Never onboarded
 	if status == nil {
 		return nil
@@ -163,7 +163,7 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	}
 
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
+		Type:    kvmv1.ConditionTypeOnboarded,
 		Status:  metav1.ConditionFalse,
 		Reason:  kvmv1.ConditionReasonAborted,
 		Message: "Aborted due to LifecycleEnabled being false",
@@ -176,8 +176,8 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 
 	if err := r.deleteTestServers(ctx, computeHost); err != nil {
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionFalse, // No cleanup, so we are still not "onboarded"
 			Reason:  kvmv1.ConditionReasonAborted,
 			Message: err.Error(),
 		})
@@ -223,8 +223,8 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 
 	base := hv.DeepCopy()
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionTrue,
+		Type:    kvmv1.ConditionTypeOnboarded,
+		Status:  metav1.ConditionFalse,
 		Reason:  kvmv1.ConditionReasonTesting,
 		Message: "Running onboarding tests",
 	})
@@ -253,8 +253,8 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		base := hv.DeepCopy()
 		// Set condition back to testing
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue,
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionFalse,
 			Reason:  kvmv1.ConditionReasonTesting,
 			Message: "Server ended up in error state: " + server.Fault.Message,
 		})
@@ -275,8 +275,8 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		if err != nil {
 			base := hv.DeepCopy()
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionTrue,
+				Type:    kvmv1.ConditionTypeOnboarded,
+				Status:  metav1.ConditionFalse,
 				Reason:  kvmv1.ConditionReasonTesting,
 				Message: fmt.Sprintf("could not get console output %v", err),
 			})
@@ -293,8 +293,8 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
 			base := hv.DeepCopy()
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionTrue,
+				Type:    kvmv1.ConditionTypeOnboarded,
+				Status:  metav1.ConditionFalse,
 				Reason:  kvmv1.ConditionReasonTesting,
 				Message: fmt.Sprintf("failed to terminate instance %v", err),
 			})
@@ -314,8 +314,8 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	log := logger.FromContext(ctx)
 
 	// Check if we're in the RemovingTestAggregate phase
-	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
+	onboardedCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
+	if onboardedCondition != nil && onboardedCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates controller to sync
 		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated) {
 			log.Info("waiting for aggregates to be updated", "condition", kvmv1.ConditionTypeAggregatesUpdated)
@@ -327,8 +327,8 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 		base := hv.DeepCopy()
 
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionFalse,
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionTrue,
 			Reason:  kvmv1.ConditionReasonSucceeded,
 			Message: "Onboarding completed",
 		})
@@ -348,8 +348,8 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	if err != nil {
 		base := hv.DeepCopy()
 		if meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
+			Type:    kvmv1.ConditionTypeOnboarded,
+			Status:  metav1.ConditionFalse, // No cleanup, so we are still not "onboarded"
 			Reason:  kvmv1.ConditionReasonAborted,
 			Message: err.Error(),
 		}) {
@@ -370,8 +370,8 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 
 	// Mark onboarding as almost complete, triggers other controllers to do their part
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionTrue,
+		Type:    kvmv1.ConditionTypeOnboarded,
+		Status:  metav1.ConditionFalse,
 		Reason:  kvmv1.ConditionReasonHandover,
 		Message: "Waiting for other controllers to take over",
 	})

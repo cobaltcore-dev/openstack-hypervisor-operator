@@ -84,8 +84,8 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	// We do not care about the particular value, as long as it isn't an error
 	var minAvailable int32 = 1
 
-	// Onboarding is not in progress anymore, i.e. the host is onboarded
-	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	// Onboarding is completed, i.e. the host is onboarded
+	onboardingCompleted := meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded)
 	// Evicting is not in progress anymore, i.e. the host is empty
 	offboarded := meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
 

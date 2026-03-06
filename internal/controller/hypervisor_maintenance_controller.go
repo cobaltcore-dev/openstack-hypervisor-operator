@@ -63,8 +63,8 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 
 	// If onboarding hasn't even started, no value will be set
 	// If it has been started, but not finished yet, we need to wait for it to be aborted
-	// So we can continue, if the condition is either not set at all or false
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) {
+	// So we can continue, if the condition is either not set at all or true
+	if meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarded) {
 		return ctrl.Result{}, nil
 	}
 

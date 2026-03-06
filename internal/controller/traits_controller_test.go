@@ -133,8 +133,8 @@ var _ = Describe("TraitsController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:   kvmv1.ConditionTypeOnboarding,
-				Status: metav1.ConditionFalse,
+				Type:   kvmv1.ConditionTypeOnboarded,
+				Status: metav1.ConditionTrue,
 				Reason: "UnitTest",
 			})
 			hypervisor.Status.HypervisorID = "1234"
@@ -202,8 +202,8 @@ var _ = Describe("TraitsController", func() {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:   kvmv1.ConditionTypeOnboarding,
-				Status: metav1.ConditionFalse,
+				Type:   kvmv1.ConditionTypeOnboarded,
+				Status: metav1.ConditionTrue,
 				Reason: "UnitTest",
 			})
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{

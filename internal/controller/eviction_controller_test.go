@@ -183,8 +183,8 @@ var _ = Describe("Eviction Controller", func() {
 			hypervisor.Status.HypervisorID = hypervisorId
 			hypervisor.Status.ServiceID = serviceId
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionTrue,
+				Type:    kvmv1.ConditionTypeOnboarded,
+				Status:  metav1.ConditionFalse,
 				Reason:  "dontcare",
 				Message: "dontcare",
 			})

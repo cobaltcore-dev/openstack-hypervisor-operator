@@ -29,8 +29,9 @@ import (
 // Hypervisor Condition Types
 // type of condition in CamelCase or in foo.example.com/CamelCase.
 const (
-	// ConditionTypeOnboarding is the type of condition for onboarding status
-	ConditionTypeOnboarding = "Onboarding"
+	// ConditionTypeOnboarded is the type of condition for onboarded status
+	// Status=True means onboarding is complete, Status=False means onboarding is in progress
+	ConditionTypeOnboarded = "Onboarded"
 
 	// ConditionTypeOffboarded is the type of condition for the completed offboarding
 	ConditionTypeOffboarded = "Offboarded"
@@ -60,7 +61,7 @@ const (
 	ConditionReasonReadyEvicted     = "Evicted"
 	ConditionReasonReadyEvicting    = "Evicting"
 
-	// ConditionTypeOnboarding reasons
+	// ConditionTypeOnboarded reasons
 	ConditionReasonInitial    = "Initial"
 	ConditionReasonOnboarding = "Onboarding"
 	ConditionReasonTesting    = "Testing"
@@ -392,7 +393,7 @@ type HypervisorStatus struct {
 // +kubebuilder:printcolumn:JSONPath=".status.numInstances",name="Instances",type="integer"
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.hardwareModel",name="Hardware",type="string",priority=2
 // +kubebuilder:printcolumn:JSONPath=".status.operatingSystem.kernelRelease",name="Kernel",type="string",priority=2
-// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Onboarding\")].reason",name="Onboarding",type="string",priority=3
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type==\"Onboarded\")].reason",name="Onboarded",type="string",priority=3
 // +kubebuilder:printcolumn:JSONPath=".status.serviceId",name="Service ID",type="string",priority=3
 // +kubebuilder:printcolumn:JSONPath=".status.hypervisorId",name="Hypervisor ID",type="string",priority=3
 // +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Age",type="date"
