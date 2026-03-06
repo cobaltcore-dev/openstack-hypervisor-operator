@@ -112,7 +112,7 @@ var _ = Describe("Onboarding Controller", func() {
     "images": [
         {
             "status": "active",
-            "name": "cirros-d240801-kvm",
+            "name": "cirros-kvm",
             "tags": [],
             "container_format": "bare",
             "created_at": "2014-11-07T17:07:06Z",
