@@ -40,7 +40,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
@@ -210,17 +209,6 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return errRequeue
 	}
 
-	// The service may be forced down previously due to an HA event,
-	// so we need to ensure it not only enabled, but also not forced to be down.
-	falseVal := false
-	opts := openstack.UpdateServiceOpts{
-		Status:     services.ServiceEnabled,
-		ForcedDown: &falseVal,
-	}
-	if result := services.Update(ctx, r.computeClient, hv.Status.ServiceID, opts); result.Err != nil {
-		return result.Err
-	}
-
 	base := hv.DeepCopy()
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOnboarding,
@@ -316,6 +304,11 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates controller to sync
 		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated) {
+			return ctrl.Result{}, nil
+		}
+
+		// Wait for HypervisorComputeService controller to enable the compute service
+		if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled) {
 			return ctrl.Result{}, nil
 		}
 

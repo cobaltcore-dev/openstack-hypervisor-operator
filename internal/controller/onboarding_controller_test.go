@@ -457,6 +457,16 @@ var _ = Describe("Onboarding Controller", func() {
 				})
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
+				By("Simulating HypervisorComputeService controller enabling compute service")
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHypervisorDisabled,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Compute service is enabled",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
 				By("Reconciling again to call completeOnboarding and set RemovingTestAggregate")
 				err = reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
@@ -531,6 +541,16 @@ var _ = Describe("Onboarding Controller", func() {
 					Status:  metav1.ConditionTrue,
 					Reason:  kvmv1.ConditionReasonSucceeded,
 					Message: "HA is enabled",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				By("Simulating HypervisorComputeService controller enabling compute service")
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHypervisorDisabled,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Compute service is enabled",
 				})
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 

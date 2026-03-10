@@ -159,6 +159,7 @@ spec:
                 - manual
                 - auto
                 - ha
+                - no-schedule
                 - termination
                 type: string
               maintenanceReason:

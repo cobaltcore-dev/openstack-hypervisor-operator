@@ -130,7 +130,7 @@ type HypervisorSpec struct {
 	InstallCertificate bool `json:"installCertificate"`
 
 	// +kubebuilder:optional
-	// +kubebuilder:validation:Enum:="";manual;auto;ha;termination
+	// +kubebuilder:validation:Enum:="";manual;auto;ha;no-schedule;termination
 	// Maintenance indicates whether the hypervisor is in maintenance mode.
 	Maintenance string `json:"maintenance,omitempty"`
 
@@ -145,6 +145,7 @@ const (
 	MaintenanceManual      = "manual"      // manual maintenance mode by external user
 	MaintenanceAuto        = "auto"        // automatic maintenance mode
 	MaintenanceHA          = "ha"          // high availability maintenance mode
+	MaintenanceNoSchedule  = "no-schedule" // compute service disabled, no eviction
 	MaintenanceTermination = "termination" // internal use only, when node is terminating state
 )
 

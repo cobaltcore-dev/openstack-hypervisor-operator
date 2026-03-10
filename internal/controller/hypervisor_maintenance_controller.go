@@ -17,8 +17,7 @@ limitations under the License.
 
 package controller
 
-// This controller only takes care of enabling or disabling the compute
-// service depending on the hypervisor spec Maintenance field
+// This controller takes care of triggering evictions based on the maintenance field
 
 import (
 	"context"
@@ -34,11 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
-
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 )
 
 const (
@@ -47,8 +42,7 @@ const (
 
 type HypervisorMaintenanceController struct {
 	k8sclient.Client
-	Scheme        *runtime.Scheme
-	computeClient *gophercloud.ServiceClient
+	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
@@ -70,10 +64,6 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 
 	old := hv.DeepCopy()
 
-	if err := hec.reconcileComputeService(ctx, hv); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if err := hec.reconcileEviction(ctx, hv); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -86,80 +76,6 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
-func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.Context, hv *kvmv1.Hypervisor) error {
-	log := logger.FromContext(ctx)
-	serviceId := hv.Status.ServiceID
-
-	// We can only do something here, if there is a service to begin with.
-	// The onboarding should take care of that
-	if serviceId == "" {
-		return nil
-	}
-
-	switch hv.Spec.Maintenance {
-	case kvmv1.MaintenanceUnset:
-		// Enable the compute service (in case we haven't done so already)
-		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeHypervisorDisabled,
-			Status:  metav1.ConditionFalse,
-			Message: "Hypervisor is enabled",
-			Reason:  kvmv1.ConditionReasonSucceeded,
-		}) {
-			// Spec matches status
-			return nil
-		}
-
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionTrue,
-			Reason:  kvmv1.ConditionReasonReadyReady,
-			Message: "Hypervisor is ready",
-		})
-
-		// We need to enable the host as per spec
-		enableService := services.UpdateOpts{Status: services.ServiceEnabled}
-		log.Info("Enabling hypervisor", "id", serviceId)
-		_, err := services.Update(ctx, hec.computeClient, serviceId, enableService).Extract()
-		if err != nil {
-			return fmt.Errorf("failed to enable hypervisor due to %w", err)
-		}
-	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceHA, kvmv1.MaintenanceTermination:
-		// Disable the compute service:
-		// Also in case of HA, as it doesn't hurt to disable it twice, and this
-		// allows us to enable the service again, when the maintenance field is
-		// cleared in the case above.
-		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeHypervisorDisabled,
-			Status:  metav1.ConditionTrue,
-			Message: "Hypervisor is disabled",
-			Reason:  kvmv1.ConditionReasonSucceeded,
-		}) {
-			// Spec matches status
-			return nil
-		}
-
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  kvmv1.ConditionReasonReadyMaintenance,
-			Message: "Hypervisor is disabled",
-		})
-
-		// We need to disable the host as per spec
-		enableService := services.UpdateOpts{
-			Status:         services.ServiceDisabled,
-			DisabledReason: "Hypervisor CRD: spec.maintenance=" + hv.Spec.Maintenance,
-		}
-		log.Info("Disabling hypervisor", "id", serviceId)
-		_, err := services.Update(ctx, hec.computeClient, serviceId, enableService).Extract()
-		if err != nil {
-			return fmt.Errorf("failed to disable hypervisor due to %w", err)
-		}
-	}
-
-	return nil
-}
-
 func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Context, hv *kvmv1.Hypervisor) error {
 	eviction := &kvmv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
@@ -168,7 +84,7 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 	}
 
 	switch hv.Spec.Maintenance {
-	case kvmv1.MaintenanceUnset:
+	case kvmv1.MaintenanceUnset, kvmv1.MaintenanceNoSchedule:
 		// Avoid deleting the eviction over and over.
 		if hv.Status.Evicted || meta.RemoveStatusCondition(&hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
 			err := k8sclient.IgnoreNotFound(hec.Delete(ctx, eviction))
@@ -260,12 +176,6 @@ func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, 
 func (hec *HypervisorMaintenanceController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
-
-	var err error
-	if hec.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
-		return err
-	}
-	hec.computeClient.Microversion = "2.90" // Xena (or later)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(HypervisorMaintenanceControllerName).

@@ -22,7 +22,6 @@ import (
 	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
-	"github.com/gophercloud/gophercloud/v2/testhelper/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -85,9 +84,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 		By("Creating the HypervisorMaintenanceController")
 		controller = &HypervisorMaintenanceController{
-			Client:        k8sClient,
-			Scheme:        k8sClient.Scheme(),
-			computeClient: client.ServiceClient(fakeServer),
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
 		}
 
 		By("Creating a blank Hypervisor resource")
@@ -140,67 +138,6 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			)
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
-
-		Describe("Enabling or Disabling the Nova Service", func() {
-			Context("Spec.Maintenance=\"\"", func() {
-				BeforeEach(func(ctx SpecContext) {
-					hypervisor := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-					hypervisor.Spec.Maintenance = ""
-					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-					expectedBody := `{"status": "enabled"}`
-					mockServiceUpdate(expectedBody)
-				})
-
-				It("should set the ConditionTypeHypervisorDisabled to false", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
-				})
-
-				It("should set the ConditionTypeReady to true", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(updated.Status.Conditions).To(ContainElement(
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Status", metav1.ConditionTrue),
-						)))
-				})
-			}) // Spec.Maintenance=""
-		})
-
-		for _, mode := range []string{"auto", "manual", "ha"} {
-			Context(fmt.Sprintf("Spec.Maintenance=\"%v\"", mode), func() {
-				BeforeEach(func(ctx SpecContext) {
-					hypervisor := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-					hypervisor.Spec.Maintenance = mode
-					if mode == "manual" {
-						hypervisor.Spec.MaintenanceReason = "Test maintenance reason"
-					}
-					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-					expectedBody := fmt.Sprintf(`{"disabled_reason": "Hypervisor CRD: spec.maintenance=%v", "status": "disabled"}`, mode)
-					mockServiceUpdate(expectedBody)
-				})
-
-				It("should set the ConditionTypeHypervisorDisabled to true", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
-				})
-
-				It("should set the ConditionTypeReady to false", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(updated.Status.Conditions).To(ContainElement(
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Status", metav1.ConditionFalse),
-						)))
-				})
-			}) // Spec.Maintenance="<mode>"
-		}
 
 		Describe("Eviction reconciliation", func() {
 			Context("Spec.Maintenance=\"\"", func() {

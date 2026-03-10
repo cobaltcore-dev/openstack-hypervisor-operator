@@ -260,6 +260,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.HypervisorComputeServiceController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", controller.HypervisorComputeServiceControllerName)
+		os.Exit(1)
+	}
+
 	if err = (&controller.NodeDecommissionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
