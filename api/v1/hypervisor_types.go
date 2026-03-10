@@ -18,6 +18,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -133,6 +134,14 @@ type HypervisorSpec struct {
 	// +kubebuilder:optional
 	// MaintenanceReason provides the reason for manual maintenance mode.
 	MaintenanceReason string `json:"maintenanceReason,omitempty"`
+
+	// Overcommit specifies the desired overcommit ratio by resource type.
+	//
+	// If no overcommit is specified for a resource type, the default overcommit
+	// ratio of 1 should be applied.
+	//
+	// +kubebuilder:validation:Optional
+	Overcommit map[corev1.ResourceName]uint `json:"overcommit,omitempty"`
 }
 
 const (
@@ -337,11 +346,27 @@ type HypervisorStatus struct {
 
 	// Auto-discovered resource allocation of all hosted VMs.
 	// +kubebuilder:validation:Optional
-	Allocation map[string]resource.Quantity `json:"allocation"`
+	Allocation map[corev1.ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of the hypervisor.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the hypervisor. Use the
+	// effective capacity field to get the capacity considering the applied
+	// overcommit ratios.
+	//
 	// +kubebuilder:validation:Optional
-	Capacity map[string]resource.Quantity `json:"capacity"`
+	Capacity map[corev1.ResourceName]resource.Quantity `json:"capacity"`
+
+	// Auto-discovered capacity of the hypervisor, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// +kubebuilder:validation:Optional
+	EffectiveCapacity map[corev1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 
 	// Auto-discovered cells on this hypervisor.
 	// +kubebuilder:validation:Optional
