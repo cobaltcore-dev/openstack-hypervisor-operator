@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -205,7 +204,7 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		currentAggregateNames[i] = agg.Name
 	}
 	expectedAggregates := []string{zone, testAggregateName}
-	if !slices.Equal(currentAggregateNames, expectedAggregates) {
+	if !slicesEqualUnordered(currentAggregateNames, expectedAggregates) {
 		// Aggregates not yet applied, requeue
 		return errRequeue
 	}
