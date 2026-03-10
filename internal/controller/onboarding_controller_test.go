@@ -466,6 +466,12 @@ var _ = Describe("Onboarding Controller", func() {
 					Reason:  kvmv1.ConditionReasonSucceeded,
 					Message: "Aggregates updated successfully",
 				})
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeTraitsUpdated,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Traits updated successfully",
+				})
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
 				By("Reconciling once more to complete onboarding and set Ready")
@@ -511,7 +517,7 @@ var _ = Describe("Onboarding Controller", func() {
 				err = reconcileLoop(ctx, 1)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("Simulating aggregates controller setting condition after removing test aggregate")
+				By("Simulating aggregates and traits controllers setting conditions after removing test aggregate")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				hv.Status.Aggregates = []kvmv1.Aggregate{
@@ -523,9 +529,15 @@ var _ = Describe("Onboarding Controller", func() {
 					Reason:  kvmv1.ConditionReasonSucceeded,
 					Message: "Aggregates updated successfully",
 				})
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeTraitsUpdated,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Traits updated successfully",
+				})
 				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
-				By("Reconciling to complete onboarding after aggregates condition is set")
+				By("Reconciling to complete onboarding after aggregates and traits conditions are set")
 				err = reconcileLoop(ctx, 5)
 				Expect(err).NotTo(HaveOccurred())
 

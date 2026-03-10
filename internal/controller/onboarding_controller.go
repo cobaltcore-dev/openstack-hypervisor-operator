@@ -315,13 +315,17 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 	// Check if we're in the RemovingTestAggregate phase
 	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
-		// We're waiting for aggregates controller to sync
+		// We're waiting for aggregates and traits controllers to sync
 		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated) {
 			log.Info("waiting for aggregates to be updated", "condition", kvmv1.ConditionTypeAggregatesUpdated)
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
+		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated) {
+			log.Info("waiting for traits to be updated", "condition", kvmv1.ConditionTypeTraitsUpdated)
+			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		}
 
-		// Aggregates have been synced, mark onboarding as complete
+		// Aggregates and traits have been synced, mark onboarding as complete
 		log.Info("aggregates updated successfully", "aggregates", hv.Status.Aggregates)
 		base := hv.DeepCopy()
 

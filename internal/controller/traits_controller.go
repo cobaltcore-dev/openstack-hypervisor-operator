@@ -69,8 +69,18 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding) ||
-		meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+		return ctrl.Result{}, nil
+	}
+
+	// Only run when onboarding is complete (False) or in Handover phase
+	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	if onboardingCondition == nil {
+		// Onboarding hasn't started yet
+		return ctrl.Result{}, nil
+	}
+	if onboardingCondition.Status == metav1.ConditionTrue && onboardingCondition.Reason != kvmv1.ConditionReasonHandover {
+		// Onboarding is in progress (Initial/Testing) — not yet at Handover
 		return ctrl.Result{}, nil
 	}
 
