@@ -72,6 +72,7 @@ const (
 	ConditionReasonTestAggregates     = "TestAggregates"
 	ConditionReasonTerminating        = "Terminating"
 	ConditionReasonEvictionInProgress = "EvictionInProgress"
+	ConditionReasonWaitingForTraits   = "WaitingForTraits"
 )
 
 // HypervisorSpec defines the desired state of Hypervisor

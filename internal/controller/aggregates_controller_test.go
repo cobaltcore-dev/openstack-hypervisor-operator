@@ -239,6 +239,162 @@ var _ = Describe("AggregatesController", func() {
 			})
 		})
 
+		Context("During onboarding Handover phase with traits not ready", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Setting onboarding condition to Handover without TraitsUpdated")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonHandover,
+					Message: "Waiting for other controllers to take over",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				By("Setting desired aggregates")
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Aggregates = []string{"zone-a", "prod-agg"}
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+				By("Mocking GetAggregates to return aggregates without host")
+				aggregateList := `{
+					"aggregates": [
+						{
+							"name": "zone-a",
+							"availability_zone": "zone-a",
+							"deleted": false,
+							"id": 1,
+							"uuid": "uuid-zone-a",
+							"hosts": []
+						},
+						{
+							"name": "tenant_filter_tests",
+							"availability_zone": "",
+							"deleted": false,
+							"id": 99,
+							"uuid": "uuid-test",
+							"hosts": []
+						}
+					]
+				}`
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, aggregateList)
+				})
+
+				By("Mocking AddHost for zone and test aggregates")
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/1/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "zone-a", "id": 1, "uuid": "uuid-zone-a", "hosts": ["hv-test"]}}`)
+				})
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/99/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "tenant_filter_tests", "id": 99, "uuid": "uuid-test", "hosts": ["hv-test"]}}`)
+				})
+			})
+
+			It("should keep test aggregates and set WaitingForTraits condition", func(ctx SpecContext) {
+				updated := &kvmv1.Hypervisor{}
+				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+
+				aggregateNames := make([]string, len(updated.Status.Aggregates))
+				for i, agg := range updated.Status.Aggregates {
+					aggregateNames[i] = agg.Name
+				}
+
+				Expect(aggregateNames).To(ConsistOf("zone-a", testAggregateName))
+				Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+				cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonWaitingForTraits))
+			})
+		})
+
+		Context("During onboarding Handover phase with traits ready", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Setting onboarding condition to Handover with TraitsUpdated=True")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonHandover,
+					Message: "Waiting for other controllers to take over",
+				})
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeTraitsUpdated,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Traits updated successfully",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				By("Setting desired aggregates")
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Aggregates = []string{"zone-a", "prod-agg"}
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+				By("Mocking GetAggregates")
+				aggregateList := `{
+					"aggregates": [
+						{
+							"name": "zone-a",
+							"availability_zone": "zone-a",
+							"deleted": false,
+							"id": 1,
+							"uuid": "uuid-zone-a",
+							"hosts": []
+						},
+						{
+							"name": "prod-agg",
+							"availability_zone": "",
+							"deleted": false,
+							"id": 2,
+							"uuid": "uuid-prod-agg",
+							"hosts": []
+						}
+					]
+				}`
+				fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, aggregateList)
+				})
+
+				By("Mocking AddHost for both spec aggregates")
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/1/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "zone-a", "id": 1, "uuid": "uuid-zone-a", "hosts": ["hv-test"]}}`)
+				})
+				fakeServer.Mux.HandleFunc("POST /os-aggregates/2/action", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"aggregate": {"name": "prod-agg", "id": 2, "uuid": "uuid-prod-agg", "hosts": ["hv-test"]}}`)
+				})
+			})
+
+			It("should apply spec aggregates and set Succeeded condition", func(ctx SpecContext) {
+				updated := &kvmv1.Hypervisor{}
+				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+
+				aggregateNames := make([]string, len(updated.Status.Aggregates))
+				for i, agg := range updated.Status.Aggregates {
+					aggregateNames[i] = agg.Name
+				}
+
+				Expect(aggregateNames).To(ConsistOf("zone-a", "prod-agg"))
+				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+				cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
+			})
+		})
+
 		Context("During normal operations", func() {
 			BeforeEach(func(ctx SpecContext) {
 				By("Setting desired aggregates")

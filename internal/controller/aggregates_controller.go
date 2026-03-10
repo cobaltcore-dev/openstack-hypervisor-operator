@@ -153,8 +153,19 @@ func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]s
 			}
 		}
 
-		// If the onboarding is almost complete, it will wait (among other things) for this controller to switch to Spec.Aggregates
+		// If the onboarding is almost complete, it will wait (among other things) for this controller to switch to Spec.Aggregates.
+		// We wait for traits to be applied first to ensure sequential ordering: Traits → Aggregates.
 		if onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
+			if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated) {
+				// Traits not yet applied — keep test aggregates and signal we're waiting
+				zone := hv.Labels[corev1.LabelTopologyZone]
+				return []string{zone, testAggregateName}, metav1.Condition{
+					Type:    kvmv1.ConditionTypeAggregatesUpdated,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonWaitingForTraits,
+					Message: "Waiting for traits to be applied before switching to spec aggregates",
+				}
+			}
 			return hv.Spec.Aggregates, metav1.Condition{
 				Type:    kvmv1.ConditionTypeAggregatesUpdated,
 				Status:  metav1.ConditionTrue,
