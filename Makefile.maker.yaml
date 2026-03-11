@@ -40,7 +40,7 @@ githubWorkflow:
     queries: security-extended
   pushContainerToGhcr:
     enabled: true
-    platforms: "linux/amd64,linux/arm64"
+    platforms: "linux/amd64"
     tagStrategy:
       - latest
       - semver
