@@ -345,21 +345,21 @@ func (in *HypervisorStatus) DeepCopyInto(out *HypervisorStatus) {
 	in.DomainCapabilities.DeepCopyInto(&out.DomainCapabilities)
 	if in.Allocation != nil {
 		in, out := &in.Allocation, &out.Allocation
-		*out = make(map[corev1.ResourceName]resource.Quantity, len(*in))
+		*out = make(map[ResourceName]resource.Quantity, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
 	if in.Capacity != nil {
 		in, out := &in.Capacity, &out.Capacity
-		*out = make(map[corev1.ResourceName]resource.Quantity, len(*in))
+		*out = make(map[ResourceName]resource.Quantity, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
 	if in.EffectiveCapacity != nil {
 		in, out := &in.EffectiveCapacity, &out.EffectiveCapacity
-		*out = make(map[corev1.ResourceName]resource.Quantity, len(*in))
+		*out = make(map[ResourceName]resource.Quantity, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
 		}

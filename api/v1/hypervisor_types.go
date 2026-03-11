@@ -23,6 +23,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ResourceName is the name identifying a hypervisor resource.
+// Note: this type is similar to the type defined in the kubernetes core api,
+// but may be extended to support additional resource types in the future.
+// See: https://github.com/kubernetes/api/blob/7e7aaba/core/v1/types.go#L6954-L6970
+type ResourceName string
+
+// Resource names must be not more than 63 characters, consisting of upper- or
+// lower-case alphanumeric characters, with the -, _, and . characters allowed
+// anywhere, except the first or last character. The default convention,
+// matching that for annotations, is to use lower-case names, with dashes,
+// rather than camel case, separating compound words. Fully-qualified resource
+// typenames are constructed from a DNS-style subdomain, followed by a slash `/`
+// and a name.
+const (
+	// CPU, in cores. (500m = .5 cores)
+	ResourceCPU ResourceName = "cpu"
+	// Memory, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
+	ResourceMemory ResourceName = "memory"
+	// Volume size, in bytes (e,g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
+	ResourceStorage ResourceName = "storage"
+	// Local ephemeral storage, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
+	ResourceEphemeralStorage ResourceName = "ephemeral-storage"
+)
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 // INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 // Important: Run "make" to regenerate code after modifying this file
@@ -346,7 +370,7 @@ type HypervisorStatus struct {
 
 	// Auto-discovered resource allocation of all hosted VMs.
 	// +kubebuilder:validation:Optional
-	Allocation map[corev1.ResourceName]resource.Quantity `json:"allocation"`
+	Allocation map[ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of the hypervisor.
 	//
@@ -356,7 +380,7 @@ type HypervisorStatus struct {
 	// overcommit ratios.
 	//
 	// +kubebuilder:validation:Optional
-	Capacity map[corev1.ResourceName]resource.Quantity `json:"capacity"`
+	Capacity map[ResourceName]resource.Quantity `json:"capacity"`
 
 	// Auto-discovered capacity of the hypervisor, considering the
 	// applied overcommit ratios.
@@ -366,7 +390,7 @@ type HypervisorStatus struct {
 	// is the same as the actual capacity.
 	//
 	// +kubebuilder:validation:Optional
-	EffectiveCapacity map[corev1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
+	EffectiveCapacity map[ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 
 	// Auto-discovered cells on this hypervisor.
 	// +kubebuilder:validation:Optional

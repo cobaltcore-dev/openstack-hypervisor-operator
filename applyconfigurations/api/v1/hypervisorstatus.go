@@ -3,7 +3,7 @@
 package v1
 
 import (
-	corev1 "k8s.io/api/core/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
@@ -18,9 +18,9 @@ type HypervisorStatusApplyConfiguration struct {
 	Instances          []InstanceApplyConfiguration              `json:"instances,omitempty"`
 	Capabilities       *CapabilitiesApplyConfiguration           `json:"capabilities,omitempty"`
 	DomainCapabilities *DomainCapabilitiesApplyConfiguration     `json:"domainCapabilities,omitempty"`
-	Allocation         map[corev1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
-	Capacity           map[corev1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
-	EffectiveCapacity  map[corev1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
+	Allocation         map[apiv1.ResourceName]resource.Quantity  `json:"allocation,omitempty"`
+	Capacity           map[apiv1.ResourceName]resource.Quantity  `json:"capacity,omitempty"`
+	EffectiveCapacity  map[apiv1.ResourceName]resource.Quantity  `json:"effectiveCapacity,omitempty"`
 	Cells              []CellApplyConfiguration                  `json:"cells,omitempty"`
 	NumInstances       *int                                      `json:"numInstances,omitempty"`
 	HypervisorID       *string                                   `json:"hypervisorId,omitempty"`
@@ -104,9 +104,9 @@ func (b *HypervisorStatusApplyConfiguration) WithDomainCapabilities(value *Domai
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the Allocation field,
 // overwriting an existing map entries in Allocation field with the same key.
-func (b *HypervisorStatusApplyConfiguration) WithAllocation(entries map[corev1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
+func (b *HypervisorStatusApplyConfiguration) WithAllocation(entries map[apiv1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
 	if b.Allocation == nil && len(entries) > 0 {
-		b.Allocation = make(map[corev1.ResourceName]resource.Quantity, len(entries))
+		b.Allocation = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
 	}
 	for k, v := range entries {
 		b.Allocation[k] = v
@@ -118,9 +118,9 @@ func (b *HypervisorStatusApplyConfiguration) WithAllocation(entries map[corev1.R
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the Capacity field,
 // overwriting an existing map entries in Capacity field with the same key.
-func (b *HypervisorStatusApplyConfiguration) WithCapacity(entries map[corev1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
+func (b *HypervisorStatusApplyConfiguration) WithCapacity(entries map[apiv1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
 	if b.Capacity == nil && len(entries) > 0 {
-		b.Capacity = make(map[corev1.ResourceName]resource.Quantity, len(entries))
+		b.Capacity = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
 	}
 	for k, v := range entries {
 		b.Capacity[k] = v
@@ -132,9 +132,9 @@ func (b *HypervisorStatusApplyConfiguration) WithCapacity(entries map[corev1.Res
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the EffectiveCapacity field,
 // overwriting an existing map entries in EffectiveCapacity field with the same key.
-func (b *HypervisorStatusApplyConfiguration) WithEffectiveCapacity(entries map[corev1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
+func (b *HypervisorStatusApplyConfiguration) WithEffectiveCapacity(entries map[apiv1.ResourceName]resource.Quantity) *HypervisorStatusApplyConfiguration {
 	if b.EffectiveCapacity == nil && len(entries) > 0 {
-		b.EffectiveCapacity = make(map[corev1.ResourceName]resource.Quantity, len(entries))
+		b.EffectiveCapacity = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
 	}
 	for k, v := range entries {
 		b.EffectiveCapacity[k] = v
