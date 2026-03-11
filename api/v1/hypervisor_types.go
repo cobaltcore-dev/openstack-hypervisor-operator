@@ -162,10 +162,15 @@ type HypervisorSpec struct {
 	// Overcommit specifies the desired overcommit ratio by resource type.
 	//
 	// If no overcommit is specified for a resource type, the default overcommit
-	// ratio of 1 should be applied.
+	// ratio of 1.0 should be applied, i.e. the effective capacity is the same
+	// as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity,
+	// the effective capacity is expected to be rounded down. This allows
+	// gradually adjusting the hypervisor capacity.
 	//
 	// +kubebuilder:validation:Optional
-	Overcommit map[corev1.ResourceName]uint `json:"overcommit,omitempty"`
+	Overcommit map[corev1.ResourceName]float64 `json:"overcommit,omitempty"`
 }
 
 const (
@@ -388,6 +393,9 @@ type HypervisorStatus struct {
 	// In case no overcommit ratio is specified for a resource type, the default
 	// overcommit ratio of 1 should be applied, meaning the effective capacity
 	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
 	//
 	// +kubebuilder:validation:Optional
 	EffectiveCapacity map[ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`

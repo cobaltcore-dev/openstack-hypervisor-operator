@@ -314,7 +314,7 @@ func (in *HypervisorSpec) DeepCopyInto(out *HypervisorSpec) {
 	}
 	if in.Overcommit != nil {
 		in, out := &in.Overcommit, &out.Overcommit
-		*out = make(map[corev1.ResourceName]uint, len(*in))
+		*out = make(map[corev1.ResourceName]float64, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

@@ -9,20 +9,20 @@ import (
 // HypervisorSpecApplyConfiguration represents a declarative configuration of the HypervisorSpec type for use
 // with apply.
 type HypervisorSpecApplyConfiguration struct {
-	OperatingSystemVersion       *string                      `json:"version,omitempty"`
-	Reboot                       *bool                        `json:"reboot,omitempty"`
-	EvacuateOnReboot             *bool                        `json:"evacuateOnReboot,omitempty"`
-	LifecycleEnabled             *bool                        `json:"lifecycleEnabled,omitempty"`
-	SkipTests                    *bool                        `json:"skipTests,omitempty"`
-	CustomTraits                 []string                     `json:"customTraits,omitempty"`
-	Aggregates                   []string                     `json:"aggregates,omitempty"`
-	AllowedProjects              []string                     `json:"allowedProjects,omitempty"`
-	HighAvailability             *bool                        `json:"highAvailability,omitempty"`
-	CreateCertManagerCertificate *bool                        `json:"createCertManagerCertificate,omitempty"`
-	InstallCertificate           *bool                        `json:"installCertificate,omitempty"`
-	Maintenance                  *string                      `json:"maintenance,omitempty"`
-	MaintenanceReason            *string                      `json:"maintenanceReason,omitempty"`
-	Overcommit                   map[corev1.ResourceName]uint `json:"overcommit,omitempty"`
+	OperatingSystemVersion       *string                         `json:"version,omitempty"`
+	Reboot                       *bool                           `json:"reboot,omitempty"`
+	EvacuateOnReboot             *bool                           `json:"evacuateOnReboot,omitempty"`
+	LifecycleEnabled             *bool                           `json:"lifecycleEnabled,omitempty"`
+	SkipTests                    *bool                           `json:"skipTests,omitempty"`
+	CustomTraits                 []string                        `json:"customTraits,omitempty"`
+	Aggregates                   []string                        `json:"aggregates,omitempty"`
+	AllowedProjects              []string                        `json:"allowedProjects,omitempty"`
+	HighAvailability             *bool                           `json:"highAvailability,omitempty"`
+	CreateCertManagerCertificate *bool                           `json:"createCertManagerCertificate,omitempty"`
+	InstallCertificate           *bool                           `json:"installCertificate,omitempty"`
+	Maintenance                  *string                         `json:"maintenance,omitempty"`
+	MaintenanceReason            *string                         `json:"maintenanceReason,omitempty"`
+	Overcommit                   map[corev1.ResourceName]float64 `json:"overcommit,omitempty"`
 }
 
 // HypervisorSpecApplyConfiguration constructs a declarative configuration of the HypervisorSpec type for use with
@@ -145,9 +145,9 @@ func (b *HypervisorSpecApplyConfiguration) WithMaintenanceReason(value string) *
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the Overcommit field,
 // overwriting an existing map entries in Overcommit field with the same key.
-func (b *HypervisorSpecApplyConfiguration) WithOvercommit(entries map[corev1.ResourceName]uint) *HypervisorSpecApplyConfiguration {
+func (b *HypervisorSpecApplyConfiguration) WithOvercommit(entries map[corev1.ResourceName]float64) *HypervisorSpecApplyConfiguration {
 	if b.Overcommit == nil && len(entries) > 0 {
-		b.Overcommit = make(map[corev1.ResourceName]uint, len(entries))
+		b.Overcommit = make(map[corev1.ResourceName]float64, len(entries))
 	}
 	for k, v := range entries {
 		b.Overcommit[k] = v
