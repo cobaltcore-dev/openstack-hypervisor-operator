@@ -56,7 +56,7 @@ const (
 	testDomainName           = "cc3test"
 	testImageName            = "cirros-kvm"
 	testPrefixName           = "ohooc-"
-	testVolumeType           = "kvm-pilot"
+	testVolumeType           = "premium"
 	OnboardingControllerName = "onboarding"
 )
 
