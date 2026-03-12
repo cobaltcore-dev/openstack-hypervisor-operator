@@ -618,6 +618,7 @@ var _ = Describe("Integration: Full Onboarding Lifecycle", func() {
 				testComputeClient: testComputeClient,
 				testImageClient:   testImageClient,
 				testNetworkClient: testNetworkClient,
+				requeueInterval:   1 * time.Second,
 			}
 			Expect(onboardingCtrl.registerWithManager(mgr)).To(Succeed())
 
