@@ -391,6 +391,15 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 	return nil
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (r *EvictionReconciler) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(EvictionControllerName).
+		For(&kvmv1.Eviction{}).
+		Complete(r)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -401,8 +410,5 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(EvictionControllerName).
-		For(&kvmv1.Eviction{}).
-		Complete(r)
+	return r.registerWithManager(mgr)
 }

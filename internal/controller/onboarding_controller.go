@@ -613,6 +613,15 @@ func (r *OnboardingController) patchStatus(ctx context.Context, hv, base *kvmv1.
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OnboardingControllerName))
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (r *OnboardingController) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(OnboardingControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Complete(r)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -644,8 +653,5 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(OnboardingControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Complete(r)
+	return r.registerWithManager(mgr)
 }

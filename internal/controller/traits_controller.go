@@ -181,6 +181,15 @@ func getTraitCondition(err error, msg string) metav1.Condition {
 	}
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (tc *TraitsController) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(TraitsControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Complete(tc)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -192,8 +201,5 @@ func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	tc.serviceClient.Microversion = "1.39" // yoga, or later
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(TraitsControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Complete(tc)
+	return tc.registerWithManager(mgr)
 }

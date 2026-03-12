@@ -178,6 +178,15 @@ func (r *NodeDecommissionReconciler) markOffboarded(ctx context.Context, hv *kvm
 	return nil
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (r *NodeDecommissionReconciler) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(DecommissionControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Complete(r)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -195,8 +204,5 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.placementClient.Microversion = "1.39" // yoga, or later
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(DecommissionControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Complete(r)
+	return r.registerWithManager(mgr)
 }

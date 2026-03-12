@@ -208,6 +208,15 @@ func slicesEqualUnordered(a, b []string) bool {
 	return true
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (ac *AggregatesController) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(AggregatesControllerName).
+		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
+		Complete(ac)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -218,8 +227,5 @@ func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(AggregatesControllerName).
-		For(&kvmv1.Hypervisor{}, builder.WithPredicates(utils.LifecycleEnabledPredicate)).
-		Complete(ac)
+	return ac.registerWithManager(mgr)
 }

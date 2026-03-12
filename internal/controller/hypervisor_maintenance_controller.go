@@ -256,6 +256,16 @@ func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, 
 	}
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (hec *HypervisorMaintenanceController) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(HypervisorMaintenanceControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Owns(&kvmv1.Eviction{}). // trigger Reconcile whenever an Own-ed eviction is created/updated/deleted
+		Complete(hec)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (hec *HypervisorMaintenanceController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -267,9 +277,5 @@ func (hec *HypervisorMaintenanceController) SetupWithManager(mgr ctrl.Manager) e
 	}
 	hec.computeClient.Microversion = "2.90" // Xena (or later)
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(HypervisorMaintenanceControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Owns(&kvmv1.Eviction{}). // trigger Reconcile whenever an Own-ed eviction is created/updated/deleted
-		Complete(hec)
+	return hec.registerWithManager(mgr)
 }
