@@ -151,7 +151,9 @@ func CleanupResourceProvider(ctx context.Context, client *gophercloud.ServiceCli
 
 		// The consumer actually doesn't have *any* allocations, so it is just
 		// inconsistent, and we can drop them all
-		deleteConsumerAllocations(ctx, client, consumerID)
+		if err := deleteConsumerAllocations(ctx, client, consumerID).Err; err != nil {
+			return fmt.Errorf("deleteConsumerAllocations failed for consumer %s: %w", consumerID, err)
+		}
 	}
 
 	// We are done, let's clean it up
