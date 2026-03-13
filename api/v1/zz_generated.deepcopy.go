@@ -22,7 +22,6 @@ limitations under the License.
 package v1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -314,7 +313,7 @@ func (in *HypervisorSpec) DeepCopyInto(out *HypervisorSpec) {
 	}
 	if in.Overcommit != nil {
 		in, out := &in.Overcommit, &out.Overcommit
-		*out = make(map[corev1.ResourceName]float64, len(*in))
+		*out = make(map[ResourceName]float64, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

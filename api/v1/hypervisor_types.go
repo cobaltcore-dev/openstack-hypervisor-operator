@@ -18,7 +18,6 @@ limitations under the License.
 package v1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -41,7 +40,7 @@ const (
 	ResourceCPU ResourceName = "cpu"
 	// Memory, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
 	ResourceMemory ResourceName = "memory"
-	// Volume size, in bytes (e,g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
+	// Volume size, in bytes (e.g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
 	ResourceStorage ResourceName = "storage"
 	// Local ephemeral storage, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
 	ResourceEphemeralStorage ResourceName = "ephemeral-storage"
@@ -175,7 +174,7 @@ type HypervisorSpec struct {
 	// 1.0, if specified. For this we don't need extra validating webhooks.
 	// See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
 	// +kubebuilder:validation:XValidation:rule="self.all(e, e.value >= 1.0)",message="overcommit ratios must be >= 1.0"
-	Overcommit map[corev1.ResourceName]float64 `json:"overcommit,omitempty"`
+	Overcommit map[ResourceName]float64 `json:"overcommit,omitempty"`
 }
 
 const (
