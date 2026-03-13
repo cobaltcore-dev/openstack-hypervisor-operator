@@ -310,12 +310,35 @@ spec:
                         - type: string
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
-                      description: Auto-discovered capacity of this cell.
+                      description: |-
+                        Auto-discovered capacity of this cell.
+
+                        Note that this capacity does not include the applied overcommit ratios,
+                        and represents the actual capacity of the cell. Use the effective capacity
+                        field to get the capacity considering the applied overcommit ratios.
                       type: object
                     cellID:
                       description: Cell ID.
                       format: int64
                       type: integer
+                    effectiveCapacity:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: |-
+                        Auto-discovered capacity of this cell, considering the
+                        applied overcommit ratios.
+
+                        In case no overcommit ratio is specified for a resource type, the default
+                        overcommit ratio of 1 should be applied, meaning the effective capacity
+                        is the same as the actual capacity.
+
+                        If the overcommit ratio results in a fractional effective capacity, the
+                        effective capacity is expected to be rounded down.
+                      type: object
                   required:
                   - cellID
                   type: object

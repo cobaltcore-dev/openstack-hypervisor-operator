@@ -342,8 +342,26 @@ type Cell struct {
 	Allocation map[ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of this cell.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the cell. Use the effective capacity
+	// field to get the capacity considering the applied overcommit ratios.
+	//
 	// +kubebuilder:validation:Optional
 	Capacity map[ResourceName]resource.Quantity `json:"capacity"`
+
+	// Auto-discovered capacity of this cell, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
+	//
+	// +kubebuilder:validation:Optional
+	EffectiveCapacity map[ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor

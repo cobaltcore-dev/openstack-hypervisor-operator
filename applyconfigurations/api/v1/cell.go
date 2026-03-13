@@ -10,9 +10,10 @@ import (
 // CellApplyConfiguration represents a declarative configuration of the Cell type for use
 // with apply.
 type CellApplyConfiguration struct {
-	CellID     *uint64                                  `json:"cellID,omitempty"`
-	Allocation map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
-	Capacity   map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
+	CellID            *uint64                                  `json:"cellID,omitempty"`
+	Allocation        map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
+	Capacity          map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
+	EffectiveCapacity map[apiv1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 }
 
 // CellApplyConfiguration constructs a declarative configuration of the Cell type for use with
@@ -53,6 +54,20 @@ func (b *CellApplyConfiguration) WithCapacity(entries map[apiv1.ResourceName]res
 	}
 	for k, v := range entries {
 		b.Capacity[k] = v
+	}
+	return b
+}
+
+// WithEffectiveCapacity puts the entries into the EffectiveCapacity field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the EffectiveCapacity field,
+// overwriting an existing map entries in EffectiveCapacity field with the same key.
+func (b *CellApplyConfiguration) WithEffectiveCapacity(entries map[apiv1.ResourceName]resource.Quantity) *CellApplyConfiguration {
+	if b.EffectiveCapacity == nil && len(entries) > 0 {
+		b.EffectiveCapacity = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
+	}
+	for k, v := range entries {
+		b.EffectiveCapacity[k] = v
 	}
 	return b
 }
