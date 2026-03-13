@@ -3,15 +3,16 @@
 package v1
 
 import (
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 )
 
 // CellApplyConfiguration represents a declarative configuration of the Cell type for use
 // with apply.
 type CellApplyConfiguration struct {
-	CellID     *uint64                      `json:"cellID,omitempty"`
-	Allocation map[string]resource.Quantity `json:"allocation,omitempty"`
-	Capacity   map[string]resource.Quantity `json:"capacity,omitempty"`
+	CellID     *uint64                                  `json:"cellID,omitempty"`
+	Allocation map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
+	Capacity   map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
 }
 
 // CellApplyConfiguration constructs a declarative configuration of the Cell type for use with
@@ -32,9 +33,9 @@ func (b *CellApplyConfiguration) WithCellID(value uint64) *CellApplyConfiguratio
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the Allocation field,
 // overwriting an existing map entries in Allocation field with the same key.
-func (b *CellApplyConfiguration) WithAllocation(entries map[string]resource.Quantity) *CellApplyConfiguration {
+func (b *CellApplyConfiguration) WithAllocation(entries map[apiv1.ResourceName]resource.Quantity) *CellApplyConfiguration {
 	if b.Allocation == nil && len(entries) > 0 {
-		b.Allocation = make(map[string]resource.Quantity, len(entries))
+		b.Allocation = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
 	}
 	for k, v := range entries {
 		b.Allocation[k] = v
@@ -46,9 +47,9 @@ func (b *CellApplyConfiguration) WithAllocation(entries map[string]resource.Quan
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, the entries provided by each call will be put on the Capacity field,
 // overwriting an existing map entries in Capacity field with the same key.
-func (b *CellApplyConfiguration) WithCapacity(entries map[string]resource.Quantity) *CellApplyConfiguration {
+func (b *CellApplyConfiguration) WithCapacity(entries map[apiv1.ResourceName]resource.Quantity) *CellApplyConfiguration {
 	if b.Capacity == nil && len(entries) > 0 {
-		b.Capacity = make(map[string]resource.Quantity, len(entries))
+		b.Capacity = make(map[apiv1.ResourceName]resource.Quantity, len(entries))
 	}
 	for k, v := range entries {
 		b.Capacity[k] = v

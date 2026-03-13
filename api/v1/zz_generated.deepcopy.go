@@ -64,14 +64,14 @@ func (in *Cell) DeepCopyInto(out *Cell) {
 	*out = *in
 	if in.Allocation != nil {
 		in, out := &in.Allocation, &out.Allocation
-		*out = make(map[string]resource.Quantity, len(*in))
+		*out = make(map[ResourceName]resource.Quantity, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
 		}
 	}
 	if in.Capacity != nil {
 		in, out := &in.Capacity, &out.Capacity
-		*out = make(map[string]resource.Quantity, len(*in))
+		*out = make(map[ResourceName]resource.Quantity, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val.DeepCopy()
 		}

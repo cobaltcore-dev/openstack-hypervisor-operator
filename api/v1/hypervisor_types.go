@@ -342,11 +342,11 @@ type Cell struct {
 
 	// Auto-discovered resource allocation of all hosted VMs in this cell.
 	// +kubebuilder:validation:Optional
-	Allocation map[string]resource.Quantity `json:"allocation"`
+	Allocation map[ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of this cell.
 	// +kubebuilder:validation:Optional
-	Capacity map[string]resource.Quantity `json:"capacity"`
+	Capacity map[ResourceName]resource.Quantity `json:"capacity"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor
