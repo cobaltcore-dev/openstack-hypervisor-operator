@@ -42,6 +42,8 @@ githubWorkflow:
       - latest
       - semver
       - sha
+  pushHelmChartToGhcr:
+    path: charts/openstack-hypervisor-operator
   license:
     enabled: true
 

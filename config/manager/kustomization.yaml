@@ -3,7 +3,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/cobaltcore-dev/openstack-hypervisor-operator
-  newTag: latest
+  newTag: ""
 resources:
 - manager.yaml
 - secret.yaml
