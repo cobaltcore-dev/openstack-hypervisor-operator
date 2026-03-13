@@ -170,6 +170,11 @@ type HypervisorSpec struct {
 	// gradually adjusting the hypervisor capacity.
 	//
 	// +kubebuilder:validation:Optional
+	//
+	// It is validated that all overcommit ratios are greater than or equal to
+	// 1.0, if specified. For this we don't need extra validating webhooks.
+	// See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
+	// +kubebuilder:validation:XValidation:rule="self.all(e, e.value >= 1.0)",message="overcommit ratios must be >= 1.0"
 	Overcommit map[corev1.ResourceName]float64 `json:"overcommit,omitempty"`
 }
 

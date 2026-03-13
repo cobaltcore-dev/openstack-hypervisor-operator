@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.18.0
   name: hypervisors.kvm.cloud.sap
 spec:
   group: kvm.cloud.sap
@@ -178,7 +178,14 @@ spec:
                   If the overcommit ratio results in a fractional effective capacity,
                   the effective capacity is expected to be rounded down. This allows
                   gradually adjusting the hypervisor capacity.
+
+                  It is validated that all overcommit ratios are greater than or equal to
+                  1.0, if specified. For this we don't need extra validating webhooks.
+                  See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
                 type: object
+                x-kubernetes-validations:
+                - message: overcommit ratios must be >= 1.0
+                  rule: self.all(e, e.value >= 1.0)
               reboot:
                 default: false
                 description: Reboot request an reboot after successful installation
