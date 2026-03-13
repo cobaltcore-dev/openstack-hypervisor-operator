@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	policyv1ac "k8s.io/client-go/applyconfigurations/policy/v1"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -40,10 +42,19 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
+const defaultHaDisabledTimeout = 15 * time.Minute
+
 type GardenerNodeLifecycleController struct {
 	k8sclient.Client
 	Scheme    *runtime.Scheme
 	namespace string
+	// HaDisabledTimeout is the maximum time to wait for ConditionTypeHaEnabled to
+	// become False after the node is offboarded, measured from the lastTransitionTime
+	// of the ConditionTypeOffboarded condition. After the deadline, Unknown and unset
+	// are also accepted. Defaults to defaultHaDisabledTimeout when zero.
+	HaDisabledTimeout time.Duration
+	// Clock is used to determine the current time. Defaults to clock.RealClock{}.
+	Clock clock.Clock
 }
 
 const (
@@ -84,18 +95,34 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	// We do not care about the particular value, as long as it isn't an error
 	var minAvailable int32 = 1
 
-	// Onboarding is not in progress anymore, i.e. the host is onboarded
+	// Onboarding is not in progress, i.e. the host is onboarded
 	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-	// Evicting is not in progress anymore, i.e. the host is empty
+	// Evicting is not in progress, i.e. the host is empty
 	offboarded := meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
 
 	if offboarded {
 		minAvailable = 0
 
 		if onboardingCompleted && isTerminating(node) {
-			// Wait for HypervisorInstanceHa controller to disable HA
+			// Wait for HypervisorInstanceHa controller to disable HA.
+			// After the deadline (measured from the lastTransitionTime of the
+			// Offboarded condition) we also accept Unknown and unset, so that a
+			// stalled HA controller cannot block node termination indefinitely.
 			if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
-				return ctrl.Result{}, nil // Will be reconciled again when condition changes
+				offboardedCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
+				timeout := r.HaDisabledTimeout
+				if timeout == 0 {
+					timeout = defaultHaDisabledTimeout
+				}
+				now := r.Clock.Now()
+				offboardedAt := offboardedCondition.LastTransitionTime.Time
+				deadline := offboardedAt.Add(timeout)
+				if now.Before(deadline) {
+					return ctrl.Result{RequeueAfter: deadline.Sub(now)}, nil
+				}
+				log.Info("HA disabled timeout exceeded, proceeding without waiting for HaEnabled=False",
+					"timeout", timeout,
+					"offboardedAt", offboardedAt)
 			}
 		}
 	}
@@ -221,7 +248,9 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 	ctx := context.Background()
 	_ = logger.FromContext(ctx)
 	r.namespace = namespace
-
+	if r.Clock == nil {
+		r.Clock = clock.RealClock{}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(MaintenanceControllerName).
 		For(&corev1.Node{}).
