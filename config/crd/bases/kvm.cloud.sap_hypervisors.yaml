@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: hypervisors.kvm.cloud.sap
 spec:
   group: kvm.cloud.sap
@@ -185,7 +185,7 @@ spec:
                 type: object
                 x-kubernetes-validations:
                 - message: overcommit ratios must be >= 1.0
-                  rule: self.all(e, e.value >= 1.0)
+                  rule: self.all(k, self[k] >= 1.0)
               reboot:
                 default: false
                 description: Reboot request an reboot after successful installation
