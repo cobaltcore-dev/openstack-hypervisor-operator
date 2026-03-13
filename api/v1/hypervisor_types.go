@@ -22,6 +22,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ResourceName is the name identifying a hypervisor resource.
+// Note: this type is similar to the type defined in the kubernetes core api,
+// but may be extended to support additional resource types in the future.
+// See: https://github.com/kubernetes/api/blob/7e7aaba/core/v1/types.go#L6954-L6970
+type ResourceName string
+
+// Resource names must be not more than 63 characters, consisting of upper- or
+// lower-case alphanumeric characters, with the -, _, and . characters allowed
+// anywhere, except the first or last character. The default convention,
+// matching that for annotations, is to use lower-case names, with dashes,
+// rather than camel case, separating compound words. Fully-qualified resource
+// typenames are constructed from a DNS-style subdomain, followed by a slash `/`
+// and a name.
+const (
+	// CPU, in cores. Note that currently, it is not supported to provide
+	// fractional cpu resources, such as 500m for 0.5 cpu.
+	ResourceCPU ResourceName = "cpu"
+	// Memory, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
+	ResourceMemory ResourceName = "memory"
+)
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 // INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 // Important: Run "make" to regenerate code after modifying this file
@@ -138,6 +159,24 @@ type HypervisorSpec struct {
 	// +kubebuilder:optional
 	// MaintenanceReason provides the reason for manual maintenance mode.
 	MaintenanceReason string `json:"maintenanceReason,omitempty"`
+
+	// Overcommit specifies the desired overcommit ratio by resource type.
+	//
+	// If no overcommit is specified for a resource type, the default overcommit
+	// ratio of 1.0 should be applied, i.e. the effective capacity is the same
+	// as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity,
+	// the effective capacity is expected to be rounded down. This allows
+	// gradually adjusting the hypervisor capacity.
+	//
+	// +kubebuilder:validation:Optional
+	//
+	// It is validated that all overcommit ratios are greater than or equal to
+	// 1.0, if specified. For this we don't need extra validating webhooks.
+	// See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
+	// +kubebuilder:validation:XValidation:rule="self.all(k, self[k] >= 1.0)",message="overcommit ratios must be >= 1.0"
+	Overcommit map[ResourceName]float64 `json:"overcommit,omitempty"`
 }
 
 const (
@@ -305,11 +344,29 @@ type Cell struct {
 
 	// Auto-discovered resource allocation of all hosted VMs in this cell.
 	// +kubebuilder:validation:Optional
-	Allocation map[string]resource.Quantity `json:"allocation"`
+	Allocation map[ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of this cell.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the cell. Use the effective capacity
+	// field to get the capacity considering the applied overcommit ratios.
+	//
 	// +kubebuilder:validation:Optional
-	Capacity map[string]resource.Quantity `json:"capacity"`
+	Capacity map[ResourceName]resource.Quantity `json:"capacity"`
+
+	// Auto-discovered capacity of this cell, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
+	//
+	// +kubebuilder:validation:Optional
+	EffectiveCapacity map[ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 }
 
 // HypervisorStatus defines the observed state of Hypervisor
@@ -342,11 +399,30 @@ type HypervisorStatus struct {
 
 	// Auto-discovered resource allocation of all hosted VMs.
 	// +kubebuilder:validation:Optional
-	Allocation map[string]resource.Quantity `json:"allocation"`
+	Allocation map[ResourceName]resource.Quantity `json:"allocation"`
 
 	// Auto-discovered capacity of the hypervisor.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the hypervisor. Use the
+	// effective capacity field to get the capacity considering the applied
+	// overcommit ratios.
+	//
 	// +kubebuilder:validation:Optional
-	Capacity map[string]resource.Quantity `json:"capacity"`
+	Capacity map[ResourceName]resource.Quantity `json:"capacity"`
+
+	// Auto-discovered capacity of the hypervisor, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
+	//
+	// +kubebuilder:validation:Optional
+	EffectiveCapacity map[ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 
 	// Auto-discovered cells on this hypervisor.
 	// +kubebuilder:validation:Optional
