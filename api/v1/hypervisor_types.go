@@ -36,14 +36,11 @@ type ResourceName string
 // typenames are constructed from a DNS-style subdomain, followed by a slash `/`
 // and a name.
 const (
-	// CPU, in cores. (500m = .5 cores)
+	// CPU, in cores. Note that currently, it is not supported to provide
+	// fractional cpu resources, such as 500m for 0.5 cpu.
 	ResourceCPU ResourceName = "cpu"
 	// Memory, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
 	ResourceMemory ResourceName = "memory"
-	// Volume size, in bytes (e.g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
-	ResourceStorage ResourceName = "storage"
-	// Local ephemeral storage, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
-	ResourceEphemeralStorage ResourceName = "ephemeral-storage"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
