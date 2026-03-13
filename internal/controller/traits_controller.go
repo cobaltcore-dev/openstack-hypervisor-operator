@@ -133,14 +133,15 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			ResourceProviderGeneration: current.ResourceProviderGeneration,
 			Traits:                     targetTraits,
 		})
-
-		if result.Err != nil {
+		err = result.Err
+		if err != nil {
 			// set status condition
 			base := hv.DeepCopy()
 			if meta.SetStatusCondition(&hv.Status.Conditions,
 				getTraitCondition(err, "Failed to update traits in placement")) {
-				err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-					k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
+				err = errors.Join(err,
+					tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+						k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 			}
 			return ctrl.Result{}, err
 		}
