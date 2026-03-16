@@ -35,11 +35,7 @@ default: build-all
 
 .PHONY: install-crds
 install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl kustomize config/crd | kubectl apply -f -
-
-.PHONY: helmify
-helmify:
-	kubectl kustomize config/default | helmify -crd-dir charts/openstack-hypervisor-operator
+	kubectl apply -f config/crd/*.yaml
 
 install-goimports: FORCE
 	@if ! hash goimports 2>/dev/null; then printf "\e[1;36m>> Installing goimports (this may take a while)...\e[0m\n"; go install golang.org/x/tools/cmd/goimports@latest; fi
@@ -117,7 +113,7 @@ check: FORCE static-check build/cover.html build-all
 
 generate: install-controller-gen
 	@printf "\e[1;36m>> controller-gen\e[0m\n"
-	@controller-gen crd:allowDangerousTypes=true rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	@controller-gen crd:allowDangerousTypes=true rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=charts/openstack-hypervisor-operator/crds
 	@controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
 	@controller-gen applyconfiguration paths="./..."
 

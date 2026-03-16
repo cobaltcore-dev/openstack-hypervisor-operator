@@ -23,8 +23,7 @@ controllerManager:
       osUserDomainName: ""
       osUsername: ""
     image:
-      repository: keppel.eu-de-1.cloud.sap/ccloud/openstack-hypervisor-operator
-      tag: latest
+      repository: ghcr.io/cobaltcore-dev/openstack-hypervisor-operator
     resources:
       limits:
         cpu: 500m

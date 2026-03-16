@@ -7,9 +7,10 @@ binaries:
 
 controllerGen:
   enabled: true
-  crdOutputPath: config/crd/bases
+  crdOutputPath: charts/openstack-hypervisor-operator/crds
   objectHeaderFile: hack/boilerplate.go.txt
   rbacRoleName: manager-role
+  allowDangerousTypes: true
 
 coverageTest:
   only: '/internal'
@@ -72,8 +73,4 @@ reuse:
 verbatim: |
   .PHONY: install-crds
   install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-      kubectl kustomize config/crd | kubectl apply -f -
-
-  .PHONY: helmify
-  helmify:
-      kubectl kustomize config/default | helmify -crd-dir charts/openstack-hypervisor-operator
+      kubectl apply -f config/crd/*.yaml
