@@ -67,6 +67,9 @@ prometheusRules:
   # disabled:
   #   HypervisorOnboardingStuck: true
   #   HypervisorEvictedTooLong: true
+  #   EvictionFailed: true
+  #   EvictionMigrationFailing: true
+  #   EvictionOutstandingRamHigh: true
   disabled: {}
 
 dashboards:
@@ -80,3 +83,8 @@ dashboards:
 
 customResourceMetrics:
   create: true
+  # Disable individual custom resource metrics ConfigMaps by name:
+  # disabled:
+  #   hypervisor: true
+  #   eviction: true
+  disabled: {}

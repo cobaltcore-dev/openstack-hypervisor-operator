@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+groups:
+- name: evictionLifecycle
+  rules:
+  - alert: EvictionFailed
+    expr: |
+      kube_customresource_eviction_condition{condition="Evicting", reason="Failed"} == 1
+    for: 5m
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Eviction {{ $labels.name }} has failed"
+      description: "The eviction {{ $labels.name }} for hypervisor {{ $labels.hypervisor }} has reached a terminal failure state. Manual intervention is required — check if the hypervisor exists in OpenStack."
+
+  - alert: EvictionMigrationFailing
+    expr: |
+      kube_customresource_eviction_condition{condition="MigratingInstance", reason="Failed"} == 1
+        and on (name)
+      kube_customresource_eviction_condition{condition="Evicting", reason="Running"} == 1
+    for: 1h
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Eviction {{ $labels.name }} has failing instance migrations for over 1 hour"
+      description: "The eviction {{ $labels.name }} has had MigratingInstance=Failed for more than 1 hour while still running. Instances may be in ERROR state, blocking eviction progress."
+
+  - alert: EvictionOutstandingRamHigh
+    expr: |
+      kube_customresource_eviction_outstanding_ram_mb > 0
+        and on (name)
+      kube_customresource_eviction_condition{condition="Evicting", reason="Running"} == 1
+    for: 6h
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Eviction {{ $labels.name }} has outstanding RAM for over 6 hours"
+      description: "The eviction {{ $labels.name }} has had {{ $value }}MB of outstanding RAM for more than 6 hours. Check for stuck live-migrations or instances that cannot be moved."

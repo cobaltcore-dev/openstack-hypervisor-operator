@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.customResourceMetrics.create }}
+{{- $disabled := .Values.customResourceMetrics.disabled | default dict }}
+{{- if not (index $disabled "hypervisor") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -87,4 +89,5 @@ data:
                   booleanTrue: "true"
                   booleanFalse: "false"
                   nilIsZero: true
+{{- end }}
 {{- end }}
