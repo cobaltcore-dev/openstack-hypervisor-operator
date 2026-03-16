@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.prometheusRules.create -}}
+{{- $root := . -}}
+{{- $additionalRuleLabels := include "openstack-hypervisor-operator.additionalRuleLabels" $root | trim }}
+{{- $labelsLineRegex := "(?m)^(\\s+labels:\\s*\\n)" }}
+{{- $docStarted := false }}
+
+{{- range $alertPath, $alertRaw := $root.Files.Glob "alerts/*.yaml" }}
+{{- $alertName := base $alertPath }}
+{{- $alertContent := printf "%s" $alertRaw }}
+{{- if $additionalRuleLabels }}
+  {{- $alertContent = regexReplaceAll $labelsLineRegex $alertContent (printf "$1%s\n" ($additionalRuleLabels | indent 6)) }}
+{{- end }}
+
+{{- if $docStarted }}
+---
+{{- end }}
+{{- $docStarted = true }}
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "%s-%s-alerts" $root.Release.Name (trimSuffix ".yaml" $alertName) | trunc 63 | lower }}
+  labels:
+{{- include "openstack-hypervisor-operator.ruleSelectorLabels" (list $alertPath $root) | indent 4 }}
+{{ include "openstack-hypervisor-operator.monitoringLabels" (list $alertPath $root) | indent 4 }}
+{{- with $root.Values.prometheusRules.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+{{- with $root.Values.prometheusRules.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+{{ tpl $alertContent $root | indent 2 }}
+{{- end }}
+{{- end }}

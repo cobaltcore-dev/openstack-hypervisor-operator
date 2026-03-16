@@ -1,0 +1,595 @@
+{
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "hypervisor-overview",
+    "project": "default"
+  },
+  "spec": {
+    "display": {
+      "name": "Hypervisor Overview"
+    },
+    "duration": "1h",
+    "refreshInterval": "30s",
+    "variables": [
+      {
+        "kind": "ListVariable",
+        "spec": {
+          "display": {
+            "name": "Zone"
+          },
+          "allowAllValue": true,
+          "allowMultiple": true,
+          "defaultValue": ["$__all"],
+          "name": "zone",
+          "plugin": {
+            "kind": "PrometheusLabelValuesVariable",
+            "spec": {
+              "datasource": {
+                "kind": "PrometheusDatasource",
+                "name": "prometheus"
+              },
+              "labelName": "zone",
+              "matchers": ["kube_customresource_hypervisor_info"]
+            }
+          }
+        }
+      },
+      {
+        "kind": "ListVariable",
+        "spec": {
+          "display": {
+            "name": "Building Block"
+          },
+          "allowAllValue": true,
+          "allowMultiple": true,
+          "defaultValue": ["$__all"],
+          "name": "building_block",
+          "plugin": {
+            "kind": "PrometheusLabelValuesVariable",
+            "spec": {
+              "datasource": {
+                "kind": "PrometheusDatasource",
+                "name": "prometheus"
+              },
+              "labelName": "building_block",
+              "matchers": ["kube_customresource_hypervisor_info"]
+            }
+          }
+        }
+      }
+    ],
+    "panels": {
+      "totalHypervisors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Total Hypervisors"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "count(kube_customresource_hypervisor_info{zone=~\"$zone\", building_block=~\"$building_block\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "readyHypervisors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ready Hypervisors"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "count(kube_customresource_hypervisor_condition{condition=\"Ready\", zone=~\"$zone\", building_block=~\"$building_block\"} == 1)"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "notReadyHypervisors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Not Ready Hypervisors"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "count(kube_customresource_hypervisor_condition{condition=\"Ready\", zone=~\"$zone\", building_block=~\"$building_block\"} == 0) or vector(0)"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "evictedHypervisors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Evicted Hypervisors"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "count(kube_customresource_hypervisor_evicted{zone=~\"$zone\", building_block=~\"$building_block\"} == 1) or vector(0)"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "totalInstances": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Total Instances"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "sum(kube_customresource_hypervisor_num_instances{zone=~\"$zone\", building_block=~\"$building_block\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "totalCpuCapacity": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Total CPU Capacity"
+          },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "sum(kube_customresource_hypervisor_capability_cpus{zone=~\"$zone\", building_block=~\"$building_block\"})"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "instancesPerHypervisor": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Instances per Hypervisor"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "kube_customresource_hypervisor_num_instances{zone=~\"$zone\", building_block=~\"$building_block\"}",
+                    "seriesNameFormat": "{{name}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cpuCapacityByZone": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "CPU Capacity by Zone"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "sum by (zone) (kube_customresource_hypervisor_capability_cpus{zone=~\"$zone\", building_block=~\"$building_block\"})",
+                    "seriesNameFormat": "{{zone}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "hypervisorConditions": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Hypervisor Conditions"
+          },
+          "plugin": {
+            "kind": "Table",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "kube_customresource_hypervisor_condition{zone=~\"$zone\", building_block=~\"$building_block\"}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "hypervisorsByZone": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Hypervisors by Zone"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "count by (zone) (kube_customresource_hypervisor_info{zone=~\"$zone\", building_block=~\"$building_block\"})",
+                    "seriesNameFormat": "{{zone}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "reconcileRate": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Reconciliation Rate"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "sum by (controller, result) (rate(controller_runtime_reconcile_total{job=~\".*hypervisor-operator.*\"}[5m]))",
+                    "seriesNameFormat": "{{controller}} - {{result}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "reconcileErrors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Reconciliation Errors"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "sum by (controller) (rate(controller_runtime_reconcile_errors_total{job=~\".*hypervisor-operator.*\"}[5m]))",
+                    "seriesNameFormat": "{{controller}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "reconcileDuration": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Reconciliation Duration (p99)"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "format": {
+                  "unit": "seconds"
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "histogram_quantile(0.99, sum by (controller, le) (rate(controller_runtime_reconcile_time_seconds_bucket{job=~\".*hypervisor-operator.*\"}[5m])))",
+                    "seriesNameFormat": "{{controller}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "workqueueDepth": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Workqueue Depth"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "workqueue_depth{job=~\".*hypervisor-operator.*\"}",
+                    "seriesNameFormat": "{{name}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "lifecycleAndHa": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Lifecycle & HA Status"
+          },
+          "plugin": {
+            "kind": "Table",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "kube_customresource_hypervisor_lifecycle_enabled{zone=~\"$zone\", building_block=~\"$building_block\"}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "PrometheusDatasource",
+                      "name": "prometheus"
+                    },
+                    "query": "kube_customresource_hypervisor_high_availability{zone=~\"$zone\", building_block=~\"$building_block\"}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Overview",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            { "x": 0, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/totalHypervisors" } },
+            { "x": 4, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/readyHypervisors" } },
+            { "x": 8, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/notReadyHypervisors" } },
+            { "x": 12, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/evictedHypervisors" } },
+            { "x": 16, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/totalInstances" } },
+            { "x": 20, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/totalCpuCapacity" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Hypervisor Details",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            { "x": 0, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/instancesPerHypervisor" } },
+            { "x": 12, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/cpuCapacityByZone" } },
+            { "x": 0, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/hypervisorsByZone" } },
+            { "x": 12, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/hypervisorConditions" } },
+            { "x": 0, "y": 16, "width": 24, "height": 8, "content": { "$ref": "#/spec/panels/lifecycleAndHa" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Operator Health",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            { "x": 0, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/reconcileRate" } },
+            { "x": 12, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/reconcileErrors" } },
+            { "x": 0, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/reconcileDuration" } },
+            { "x": 12, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/workqueueDepth" } }
+          ]
+        }
+      }
+    ]
+  }
+}

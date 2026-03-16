@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+groups:
+- name: hypervisorOperator
+  rules:
+  - alert: HypervisorNotReady
+    expr: |
+      kube_customresource_hypervisor_condition{condition="Ready"} == 0
+    for: 10m
+    labels:
+      severity: critical
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{`{{ $labels.name }}`}} is not ready"
+      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has been in a non-ready state for more than 10 minutes."
+
+  - alert: HypervisorConditionDegraded
+    expr: |
+      kube_customresource_hypervisor_condition{condition!="Ready"} == 0
+    for: 10m
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{`{{ $labels.name }}`}} condition {{`{{ $labels.condition }}`}} is degraded"
+      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has condition {{`{{ $labels.condition }}`}} in a False state for more than 10 minutes. Reason: {{`{{ $labels.reason }}`}}."
+
+  - alert: HypervisorEvicted
+    expr: |
+      kube_customresource_hypervisor_evicted == 1
+    for: 2d
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{`{{ $labels.name }}`}} has been evicted"
+      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has been in an evicted state for more than 2 days."
+
+  - alert: HypervisorOperatorReconcileErrors
+    expr: |
+      rate(controller_runtime_reconcile_errors_total[5m]) > 0
+    for: 15m
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor operator controller {{`{{ $labels.controller }}`}} has persistent reconcile errors"
+      description: "The controller {{`{{ $labels.controller }}`}} has been producing reconciliation errors for more than 15 minutes."
+
+  - alert: HypervisorOperatorDown
+    expr: |
+      up{job=~".*hypervisor-operator.*"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor operator is down"
+      description: "The hypervisor operator metrics endpoint has been unreachable for more than 5 minutes."

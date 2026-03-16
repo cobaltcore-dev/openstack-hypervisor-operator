@@ -1,0 +1,90 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.customResourceMetrics.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-hypervisor-resources" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    dev.custom.kube-state-metrics: "true"
+{{ include "openstack-hypervisor-operator.labels" . | indent 4 }}
+data:
+  hypervisor-metrics.yaml: |
+    spec:
+      resources:
+        - groupVersionKind:
+            group: kvm.cloud.sap
+            version: v1
+            kind: Hypervisor
+          labelsFromPath:
+            name: [metadata, name]
+            zone: [metadata, labels, "topology.kubernetes.io/zone"]
+            building_block: [metadata, labels, "kubernetes.metal.cloud.sap/bb"]
+            worker_group: [metadata, labels, "worker.garden.sapcloud.io/group"]
+            maintenance: [spec, maintenance]
+          metrics:
+            - name: hypervisor_info
+              help: "Info metric for hypervisor with version label (always 1)"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    hypervisor_version: [status, hypervisorVersion]
+                    libvirt_version: [status, libVirtVersion]
+                    hardware_model: [status, operatingSystem, hardwareModel]
+                    os_version: [status, operatingSystem, prettyVersion]
+            - name: hypervisor_num_instances
+              help: "Number of instances on the hypervisor"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, numInstances]
+                  nilIsZero: true
+            - name: hypervisor_evicted
+              help: "1 if hypervisor is evicted"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, evicted]
+                  booleanTrue: "true"
+                  booleanFalse: "false"
+                  nilIsZero: true
+            - name: hypervisor_condition
+              help: "Hypervisor condition status (1=True, 0=False)"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, conditions]
+                  labelsFromPath:
+                    condition: [type]
+                    reason: [reason]
+                  valueFrom: [status]
+                  booleanTrue: "True"
+                  booleanFalse: "False"
+            - name: hypervisor_capability_cpus
+              help: "Total CPUs available on the hypervisor"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, capabilities, cpus]
+                  nilIsZero: true
+            - name: hypervisor_lifecycle_enabled
+              help: "1 if lifecycle management is enabled"
+              each:
+                type: Gauge
+                gauge:
+                  path: [spec, lifecycleEnabled]
+                  booleanTrue: "true"
+                  booleanFalse: "false"
+                  nilIsZero: true
+            - name: hypervisor_high_availability
+              help: "1 if high availability is enabled"
+              each:
+                type: Gauge
+                gauge:
+                  path: [spec, highAvailability]
+                  booleanTrue: "true"
+                  booleanFalse: "false"
+                  nilIsZero: true
+{{- end }}

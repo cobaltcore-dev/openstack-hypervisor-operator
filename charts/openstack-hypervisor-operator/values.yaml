@@ -53,3 +53,25 @@ serviceAccount:
   automount: true
   create: true
   name: ""
+
+global:
+  commonLabels: {}
+
+prometheusRules:
+  create: true
+  ruleSelectors: {}
+  labels: {}
+  annotations: {}
+  additionalRuleLabels: {}
+
+dashboards:
+  create: true
+  global:
+    create: false
+  dashboardSelectors:
+    - name: perses.dev/resource
+      value: '"true"'
+
+customResourceMetrics:
+  create: true
+  namespace: kvm-monitoring
