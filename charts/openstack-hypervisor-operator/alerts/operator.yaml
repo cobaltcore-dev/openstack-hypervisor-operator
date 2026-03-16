@@ -2,51 +2,85 @@
 # SPDX-License-Identifier: Apache-2.0
 
 groups:
-- name: hypervisorOperator
+- name: hypervisorLifecycle
   rules:
-  - alert: HypervisorNotReady
+  - alert: HypervisorOnboardingStuck
     expr: |
-      kube_customresource_hypervisor_condition{condition="Ready"} == 0
-    for: 10m
-    labels:
-      severity: critical
-      type: hypervisor_operator
-    annotations:
-      summary: "Hypervisor {{`{{ $labels.name }}`}} is not ready"
-      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has been in a non-ready state for more than 10 minutes."
-
-  - alert: HypervisorConditionDegraded
-    expr: |
-      kube_customresource_hypervisor_condition{condition!="Ready"} == 0
-    for: 10m
+      kube_customresource_hypervisor_condition{condition="Onboarding"} == 1
+    for: 1h
     labels:
       severity: warning
       type: hypervisor_operator
     annotations:
-      summary: "Hypervisor {{`{{ $labels.name }}`}} condition {{`{{ $labels.condition }}`}} is degraded"
-      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has condition {{`{{ $labels.condition }}`}} in a False state for more than 10 minutes. Reason: {{`{{ $labels.reason }}`}}."
+      summary: "Hypervisor {{ $labels.name }} onboarding stuck for over 1 hour"
+      description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has been onboarding for more than 1 hour. Check nova registration, test VM status, or trait/aggregate sync."
 
-  - alert: HypervisorEvicted
+  - alert: HypervisorEvictionStuck
+    expr: |
+      kube_customresource_hypervisor_condition{condition="Evicting"} == 1
+    for: 4h
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{ $labels.name }} eviction running for over 4 hours"
+      description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had an active eviction for more than 4 hours. Check for stuck live-migrations or failed VMs."
+
+  - alert: HypervisorEvictedTooLong
     expr: |
       kube_customresource_hypervisor_evicted == 1
-    for: 2d
+        unless on (name)
+      kube_customresource_hypervisor_condition{condition="Offboarded"} == 1
+    for: 7d
+    labels:
+      severity: info
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{ $labels.name }} has been evicted for over 7 days"
+      description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has been evicted for more than 7 days without being offboarded. Consider re-enabling or decommissioning."
+
+- name: hypervisorSync
+  rules:
+  - alert: HypervisorTraitSyncFailed
+    expr: |
+      kube_customresource_hypervisor_condition{condition="TraitsUpdated"} == 0
+        and on (name)
+      kube_customresource_hypervisor_condition{condition="Onboarding"} == 0
+    for: 30m
     labels:
       severity: warning
       type: hypervisor_operator
     annotations:
-      summary: "Hypervisor {{`{{ $labels.name }}`}} has been evicted"
-      description: "The hypervisor {{`{{ $labels.name }}`}} in zone {{`{{ $labels.zone }}`}} has been in an evicted state for more than 2 days."
+      summary: "Hypervisor {{ $labels.name }} trait sync has been failing"
+      description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had TraitsUpdated=False for more than 30 minutes outside of onboarding. Check OpenStack Placement API connectivity."
 
+  - alert: HypervisorAggregateSyncFailed
+    expr: |
+      kube_customresource_hypervisor_condition{condition="AggregatesUpdated"} == 0
+        and on (name)
+      kube_customresource_hypervisor_condition{condition="Onboarding"} == 0
+        unless on (name)
+      kube_customresource_hypervisor_condition{condition="Evicting"} == 1
+    for: 30m
+    labels:
+      severity: warning
+      type: hypervisor_operator
+    annotations:
+      summary: "Hypervisor {{ $labels.name }} aggregate sync has been failing"
+      description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had AggregatesUpdated=False for more than 30 minutes outside of onboarding and eviction. Check OpenStack Nova API connectivity."
+
+- name: hypervisorOperatorHealth
+  rules:
   - alert: HypervisorOperatorReconcileErrors
     expr: |
-      rate(controller_runtime_reconcile_errors_total[5m]) > 0
+      rate(controller_runtime_reconcile_errors_total[5m]) > 0.01
     for: 15m
     labels:
       severity: warning
       type: hypervisor_operator
     annotations:
-      summary: "Hypervisor operator controller {{`{{ $labels.controller }}`}} has persistent reconcile errors"
-      description: "The controller {{`{{ $labels.controller }}`}} has been producing reconciliation errors for more than 15 minutes."
+      summary: "Hypervisor operator controller {{ $labels.controller }} has persistent reconcile errors"
+      description: "The controller {{ $labels.controller }} has been producing sustained reconciliation errors for more than 15 minutes."
 
   - alert: HypervisorOperatorDown
     expr: |

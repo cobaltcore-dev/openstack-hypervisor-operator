@@ -63,11 +63,17 @@ prometheusRules:
   labels: {}
   annotations: {}
   additionalRuleLabels: {}
+  # Disable individual alerts by name:
+  # disabled:
+  #   HypervisorOnboardingStuck: true
+  #   HypervisorEvictedTooLong: true
+  disabled: {}
 
 dashboards:
   create: true
   global:
     create: false
+    dashboardSelectors: []
   dashboardSelectors:
     - name: perses.dev/resource
       value: '"true"'

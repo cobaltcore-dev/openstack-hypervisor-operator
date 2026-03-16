@@ -8,7 +8,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ printf "%s-%s" $root.Release.Name ($path | replace ".json" "" | replace "/" "-" | trunc 63) }}
+  name: {{ printf "%s-%s" $root.Release.Name ($path | replace ".json" "" | replace "/" "-") | trunc 63 | trimSuffix "-" }}
   labels:
 {{- include "openstack-hypervisor-operator.dashboardSelectorLabels" (list $path $root) | indent 4 }}
 {{ include "openstack-hypervisor-operator.monitoringLabels" (list $path $root) | indent 4 }}
@@ -25,7 +25,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ printf "%s-%s-global" $root.Release.Name ($path | replace ".json" "" | replace "/" "-" | trunc 63) }}
+  name: {{ printf "%s-%s-global" $root.Release.Name ($path | replace ".json" "" | replace "/" "-") | trunc 63 | trimSuffix "-" }}
   labels:
 {{- include "openstack-hypervisor-operator.globalDashboardSelectorLabels" (list $path $root) | indent 4 }}
 {{ include "openstack-hypervisor-operator.monitoringLabels" (list $path $root) | indent 4 }}

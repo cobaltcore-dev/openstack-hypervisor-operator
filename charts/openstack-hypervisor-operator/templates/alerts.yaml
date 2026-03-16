@@ -3,22 +3,38 @@
 
 {{- if .Values.prometheusRules.create -}}
 {{- $root := . -}}
-{{- $additionalRuleLabels := include "openstack-hypervisor-operator.additionalRuleLabels" $root | trim }}
-{{- $labelsLineRegex := "(?m)^(\\s+labels:\\s*\\n)" }}
+{{- $disabled := $root.Values.prometheusRules.disabled | default dict -}}
+{{- $additionalRuleLabels := $root.Values.prometheusRules.additionalRuleLabels | default dict -}}
 {{- $docStarted := false }}
 
 {{- range $alertPath, $alertRaw := $root.Files.Glob "alerts/*.yaml" }}
 {{- $alertName := base $alertPath }}
-{{- $alertContent := printf "%s" $alertRaw }}
-{{- if $additionalRuleLabels }}
-  {{- $alertContent = regexReplaceAll $labelsLineRegex $alertContent (printf "$1%s\n" ($additionalRuleLabels | indent 6)) }}
+{{- $parsed := fromYaml (printf "%s" $alertRaw) }}
+
+{{/* Filter disabled alerts and inject additionalRuleLabels */}}
+{{- $filteredGroups := list }}
+{{- range $group := $parsed.groups }}
+  {{- $filteredRules := list }}
+  {{- range $rule := $group.rules }}
+    {{- if not (index $disabled $rule.alert) }}
+      {{- if $additionalRuleLabels }}
+        {{- $mergedLabels := merge (deepCopy $additionalRuleLabels) $rule.labels }}
+        {{- $_ := set $rule "labels" $mergedLabels }}
+      {{- end }}
+      {{- $filteredRules = append $filteredRules $rule }}
+    {{- end }}
+  {{- end }}
+  {{- if $filteredRules }}
+    {{- $filteredGroup := dict "name" $group.name "rules" $filteredRules }}
+    {{- $filteredGroups = append $filteredGroups $filteredGroup }}
+  {{- end }}
 {{- end }}
 
+{{- if $filteredGroups }}
 {{- if $docStarted }}
 ---
 {{- end }}
 {{- $docStarted = true }}
-
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -34,6 +50,8 @@ metadata:
 {{ toYaml . | indent 4 }}
 {{- end }}
 spec:
-{{ tpl $alertContent $root | indent 2 }}
+  groups:
+{{ toYaml $filteredGroups | indent 4 }}
+{{- end }}
 {{- end }}
 {{- end }}
