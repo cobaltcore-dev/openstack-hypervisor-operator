@@ -74,4 +74,3 @@ dashboards:
 
 customResourceMetrics:
   create: true
-  namespace: kvm-monitoring
