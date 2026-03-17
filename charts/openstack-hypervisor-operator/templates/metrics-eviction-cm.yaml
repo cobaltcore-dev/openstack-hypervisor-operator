@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.customResourceMetrics.create }}
+{{- $disabled := .Values.customResourceMetrics.disabled | default dict }}
+{{- if not (index $disabled "eviction") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-eviction-resources" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    dev.custom.kube-state-metrics: "true"
+{{ include "openstack-hypervisor-operator.labels" . | indent 4 }}
+data:
+  eviction-metrics.yaml: |
+    spec:
+      resources:
+        - groupVersionKind:
+            group: kvm.cloud.sap
+            version: v1
+            kind: Eviction
+          labelsFromPath:
+            name: [metadata, name]
+          metrics:
+            - name: eviction_info
+              help: "Info metric for eviction with hypervisor and reason labels (always 1)"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    hypervisor: [spec, hypervisor]
+                    reason: [spec, reason]
+            - name: eviction_outstanding_ram_mb
+              help: "Outstanding RAM in MB to be migrated"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, outstandingRamMb]
+                  nilIsZero: true
+            - name: eviction_condition
+              help: "Eviction condition status (1=True, 0=False)"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, conditions]
+                  labelsFromPath:
+                    condition: [type]
+                    reason: [reason]
+                  valueFrom: [status]
+                  booleanTrue: "True"
+                  booleanFalse: "False"
+{{- end }}
+{{- end }}

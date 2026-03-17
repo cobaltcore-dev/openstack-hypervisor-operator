@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Validate Prometheus Alerts
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'charts/openstack-hypervisor-operator/alerts/*.yaml'
+      - 'charts/openstack-hypervisor-operator/alerts/*.yml'
+
+permissions:
+  contents: read
+
+env:
+  PROMTOOL_VERSION: 3.8.0
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: validate-prometheus-alerts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}/prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz" \
+            | tar xz --strip-components=1 "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
+          sudo install -m 0755 promtool /usr/local/bin/promtool
+          promtool --version
+
+      - name: Validate Prometheus alert rules
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(charts/openstack-hypervisor-operator/alerts/*.{yaml,yml})
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No Prometheus rule files found."
+            exit 1
+          fi
+          promtool check rules "${files[@]}"

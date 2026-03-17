@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.prometheusRules.create -}}
+{{- $root := . -}}
+{{- $disabled := $root.Values.prometheusRules.disabled | default dict -}}
+{{- $additionalRuleLabels := $root.Values.prometheusRules.additionalRuleLabels | default dict -}}
+{{- $docStarted := false }}
+
+{{- range $alertPath, $alertRaw := $root.Files.Glob "alerts/*.yaml" }}
+{{- $alertName := base $alertPath }}
+{{- $parsed := fromYaml (printf "%s" $alertRaw) }}
+
+{{/* Filter disabled alerts and inject additionalRuleLabels */}}
+{{- $filteredGroups := list }}
+{{- range $group := $parsed.groups }}
+  {{- $filteredRules := list }}
+  {{- range $rule := $group.rules }}
+    {{- if not (index $disabled $rule.alert) }}
+      {{- if $additionalRuleLabels }}
+        {{- $mergedLabels := merge (deepCopy $additionalRuleLabels) $rule.labels }}
+        {{- $_ := set $rule "labels" $mergedLabels }}
+      {{- end }}
+      {{- $filteredRules = append $filteredRules $rule }}
+    {{- end }}
+  {{- end }}
+  {{- if $filteredRules }}
+    {{- $filteredGroup := dict "name" $group.name "rules" $filteredRules }}
+    {{- $filteredGroups = append $filteredGroups $filteredGroup }}
+  {{- end }}
+{{- end }}
+
+{{- if $filteredGroups }}
+{{- if $docStarted }}
+---
+{{- end }}
+{{- $docStarted = true }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "%s-%s-alerts" $root.Release.Name (trimSuffix ".yaml" $alertName) | trunc 63 | lower }}
+  labels:
+{{- include "openstack-hypervisor-operator.ruleSelectorLabels" (list $alertPath $root) | indent 4 }}
+{{ include "openstack-hypervisor-operator.monitoringLabels" (list $alertPath $root) | indent 4 }}
+{{- with $root.Values.prometheusRules.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+{{- with $root.Values.prometheusRules.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+  groups:
+{{ toYaml $filteredGroups | indent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

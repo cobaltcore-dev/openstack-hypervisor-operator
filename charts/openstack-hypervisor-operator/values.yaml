@@ -53,3 +53,38 @@ serviceAccount:
   automount: true
   create: true
   name: ""
+
+global:
+  commonLabels: {}
+
+prometheusRules:
+  create: true
+  ruleSelectors: {}
+  labels: {}
+  annotations: {}
+  additionalRuleLabels: {}
+  # Disable individual alerts by name:
+  # disabled:
+  #   HypervisorOnboardingStuck: true
+  #   HypervisorEvictedTooLong: true
+  #   EvictionFailed: true
+  #   EvictionMigrationFailing: true
+  #   EvictionOutstandingRamHigh: true
+  disabled: {}
+
+dashboards:
+  create: true
+  global:
+    create: false
+    dashboardSelectors: []
+  dashboardSelectors:
+    - name: perses.dev/resource
+      value: '"true"'
+
+customResourceMetrics:
+  create: true
+  # Disable individual custom resource metrics ConfigMaps by name:
+  # disabled:
+  #   hypervisor: true
+  #   eviction: true
+  disabled: {}

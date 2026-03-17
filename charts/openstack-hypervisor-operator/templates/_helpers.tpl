@@ -60,3 +60,60 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Additional labels injected into every Prometheus alert rule body.
+*/}}
+{{- define "openstack-hypervisor-operator.additionalRuleLabels" -}}
+{{- with .Values.prometheusRules.additionalRuleLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Selector labels applied to PrometheusRule metadata for Prometheus Operator discovery.
+*/}}
+{{- define "openstack-hypervisor-operator.ruleSelectorLabels" -}}
+{{- $root := index . 1 -}}
+{{- with $root.Values.prometheusRules.ruleSelectors }}
+{{- range $i, $target := . }}
+{{ $target.name | required (printf "$.Values.prometheusRules.ruleSelectors[%v].name missing" $i) }}: {{ tpl ($target.value | required (printf "$.Values.prometheusRules.ruleSelectors[%v].value missing" $i)) $root }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Selector labels applied to dashboard ConfigMap metadata for Perses discovery.
+*/}}
+{{- define "openstack-hypervisor-operator.dashboardSelectorLabels" -}}
+{{- $root := index . 1 -}}
+{{- with $root.Values.dashboards.dashboardSelectors }}
+{{- range $i, $target := . }}
+{{ $target.name | required (printf "$.Values.dashboards.dashboardSelectors[%v].name missing" $i) }}: {{ tpl ($target.value | required (printf "$.Values.dashboards.dashboardSelectors[%v].value missing" $i)) $root }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Selector labels applied to global dashboard ConfigMap metadata.
+*/}}
+{{- define "openstack-hypervisor-operator.globalDashboardSelectorLabels" -}}
+{{- $root := index . 1 -}}
+{{- with $root.Values.dashboards.global.dashboardSelectors }}
+{{- range $i, $target := . }}
+{{ $target.name | required (printf "$.Values.dashboards.global.dashboardSelectors[%v].name missing" $i) }}: {{ tpl ($target.value | required (printf "$.Values.dashboards.global.dashboardSelectors[%v].value missing" $i)) $root }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Common labels for monitoring resources (alerts, dashboards).
+*/}}
+{{- define "openstack-hypervisor-operator.monitoringLabels" -}}
+{{- $root := index . 1 -}}
+app.kubernetes.io/version: {{ $root.Chart.Version }}
+app.kubernetes.io/part-of: {{ $root.Release.Name }}
+{{- with $root.Values.global.commonLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
