@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -51,6 +52,7 @@ var errRequeue = errors.New("requeue requested")
 
 const (
 	defaultWaitTime          = 1 * time.Minute
+	smokeTestTimeout         = 5 * time.Minute
 	testProjectName          = "test"
 	testDomainName           = "cc3test"
 	testImageName            = "cirros-kvm"
@@ -63,6 +65,7 @@ type OnboardingController struct {
 	k8sclient.Client
 	Scheme            *runtime.Scheme
 	TestFlavorID      string
+	Clock             clock.Clock
 	computeClient     *gophercloud.ServiceClient
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
@@ -286,6 +289,23 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		}
 
 		if !strings.Contains(consoleOutput, server.Name) {
+			if !server.LaunchedAt.IsZero() && r.Clock.Now().After(server.LaunchedAt.Add(smokeTestTimeout)) {
+				base := hv.DeepCopy()
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonTesting,
+					Message: fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt),
+				})
+				if err := r.patchStatus(ctx, hv, base); err != nil {
+					return ctrl.Result{}, err
+				}
+				if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
+					if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+						return ctrl.Result{}, fmt.Errorf("failed to delete timed out test instance %v: %w", server.ID, err)
+					}
+				}
+			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
@@ -612,6 +632,10 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)
+
+	if r.Clock == nil {
+		r.Clock = clock.RealClock{}
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(OnboardingControllerName).

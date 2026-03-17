@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
@@ -30,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
+	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
@@ -221,6 +224,7 @@ var _ = Describe("Onboarding Controller", func() {
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
 			TestFlavorID:      "1",
+			Clock:             clock.RealClock{},
 			computeClient:     client.ServiceClient(fakeServer),
 			testComputeClient: client.ServiceClient(fakeServer),
 			testImageClient:   client.ServiceClient(fakeServer),
@@ -340,6 +344,12 @@ var _ = Describe("Onboarding Controller", func() {
 	})
 
 	Context("running tests after initial setup", func() {
+		var (
+			serverActionHandler func(http.ResponseWriter, *http.Request)
+			serverDeleteHandler func(http.ResponseWriter, *http.Request)
+			serverDetailHandler func(http.ResponseWriter, *http.Request)
+		)
+
 		BeforeEach(func(ctx SpecContext) {
 			hv := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
@@ -371,11 +381,14 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
+			serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
+				_, err := fmt.Fprint(w, emptyServersBody)
+				Expect(err).NotTo(HaveOccurred())
+			}
 			fakeServer.Mux.HandleFunc("GET /servers/detail", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, emptyServersBody)
-				Expect(err).NotTo(HaveOccurred())
+				serverDetailHandler(w, r)
 			})
 
 			fakeServer.Mux.HandleFunc("POST /instance-ha", func(w http.ResponseWriter, r *http.Request) {
@@ -406,15 +419,21 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			fakeServer.Mux.HandleFunc("POST /servers/server-id/action", func(w http.ResponseWriter, r *http.Request) {
+			serverActionHandler = func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprintf(w, `{"output": "FAKE CONSOLE OUTPUT\nANOTHER\nLAST LINE\nohooc--%v-%v\n"}`, hv.Name, hv.UID)
 				Expect(err).NotTo(HaveOccurred())
-
+			}
+			fakeServer.Mux.HandleFunc("POST /servers/server-id/action", func(w http.ResponseWriter, r *http.Request) {
+				serverActionHandler(w, r)
 			})
-			fakeServer.Mux.HandleFunc("DELETE /servers/server-id", func(w http.ResponseWriter, r *http.Request) {
+
+			serverDeleteHandler = func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusAccepted)
+			}
+			fakeServer.Mux.HandleFunc("DELETE /servers/server-id", func(w http.ResponseWriter, r *http.Request) {
+				serverDeleteHandler(w, r)
 			})
 		})
 
@@ -568,6 +587,81 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Reason", kvmv1.ConditionReasonSucceeded),
 					),
 				))
+			})
+		})
+
+		When("smoke test times out waiting for console output", func() {
+			var serverDeletedCalled bool
+
+			BeforeEach(func(ctx SpecContext) {
+				By("Overriding HV status to Testing state")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionTrue,
+					Reason: kvmv1.ConditionReasonTesting,
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				// Construct the server name the controller will look for.
+				serverName := fmt.Sprintf("%s-%s-%s", testPrefixName, hypervisorName, string(hv.UID))
+				detailCallCount := 0
+
+				// On the first reconcile GET /servers/detail returns empty so the controller
+				// creates the server via POST (no launched_at → timeout cannot fire yet).
+				// On the second reconcile GET /servers/detail returns the ACTIVE server with a
+				// stale launched_at so createOrGetTestServer takes the "already-running" path and
+				// smokeTest fires the timeout.
+				serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
+					if detailCallCount == 0 {
+						detailCallCount++
+						_, err := fmt.Fprint(w, emptyServersBody)
+						Expect(err).NotTo(HaveOccurred())
+					} else {
+						_, err := fmt.Fprintf(w,
+							`{"servers": [{"id": "server-id", "name": %q, "status": "ACTIVE", "OS-SRV-USG:launched_at": "2025-01-01T12:00:00.000000"}], "servers_links": []}`,
+							serverName)
+						Expect(err).NotTo(HaveOccurred())
+					}
+				}
+
+				// Set the clock to 6 minutes after the launched_at above (past the 5-minute deadline).
+				onboardingReconciler.Clock = clocktesting.NewFakeClock(time.Date(2025, 1, 1, 12, 6, 0, 0, time.UTC))
+				serverDeletedCalled = false
+
+				// Console output that does NOT contain the server name, so the timeout path is exercised.
+				serverActionHandler = func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"output": "some unrelated console output\n"}`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				serverDeleteHandler = func(w http.ResponseWriter, _ *http.Request) {
+					serverDeletedCalled = true
+					w.WriteHeader(http.StatusAccepted)
+				}
+			})
+
+			It("should delete the stalled server and record a timeout in the status", func(ctx SpecContext) {
+				By("First reconcile: controller creates the ACTIVE server; launched_at is absent so timeout does not fire yet")
+				_, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Second reconcile: GET /servers/detail returns the stale server; timeout fires and the server is deleted")
+				_, err = onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying the timed-out server was deleted")
+				Expect(serverDeletedCalled).To(BeTrue())
+
+				By("Verifying the onboarding condition message indicates a timeout")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(onboardingCond).NotTo(BeNil())
+				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
+				Expect(onboardingCond.Message).To(ContainSubstring("timeout"))
 			})
 		})
 
