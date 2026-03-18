@@ -106,7 +106,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		base := hv.DeepCopy()
 		if meta.SetStatusCondition(&hv.Status.Conditions,
 			getTraitCondition(err, "Failed to get current traits from placement")) {
-			err = errors.Join(tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+			err = errors.Join(err, tc.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
 				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(TraitsControllerName)))
 		}
 		return ctrl.Result{}, err

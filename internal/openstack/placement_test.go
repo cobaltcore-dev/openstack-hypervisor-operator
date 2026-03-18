@@ -298,6 +298,46 @@ var _ = Describe("Placement API", func() {
 			})
 		})
 
+		Context("when deleting consumer allocations fails", func() {
+			BeforeEach(func() {
+				fakeServer.Mux.HandleFunc(providerAllocsURL, func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, `{"allocations": {"consumer-1": {}}}`)
+				})
+
+				fakeServer.Mux.HandleFunc("/allocations/consumer-1", func(w http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						// Consumer has no allocations of its own — proceed to delete
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, `{"allocations": {}, "consumer_generation": 0}`)
+					case http.MethodDelete:
+						// Deletion fails
+						w.WriteHeader(http.StatusInternalServerError)
+						fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+					}
+				})
+
+				// The provider delete succeeds, so that it cannot accidentally surface
+				// the error for us — only the consumer allocation delete error should be returned.
+				fakeServer.Mux.HandleFunc(deleteProviderURL, func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
+			})
+
+			It("should return an error when consumer allocation deletion fails", func() {
+				provider := &resourceproviders.ResourceProvider{
+					UUID: providerUUID,
+					Name: "test-provider",
+				}
+
+				err := CleanupResourceProvider(ctx, client.ServiceClient(fakeServer), provider)
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
 		Context("when deleting provider fails", func() {
 			BeforeEach(func() {
 				fakeServer.Mux.HandleFunc(providerAllocsURL, func(w http.ResponseWriter, r *http.Request) {

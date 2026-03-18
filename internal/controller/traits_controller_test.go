@@ -266,6 +266,38 @@ var _ = Describe("TraitsController", func() {
 		})
 	})
 
+	Context("Reconcile when GetTraits returns an error", func() {
+		BeforeEach(func(ctx SpecContext) {
+			// Mock resourceproviders.GetTraits to return a server error
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+			})
+			// UpdateTraits must not be called
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:   kvmv1.ConditionTypeOnboarding,
+				Status: metav1.ConditionFalse,
+				Reason: "UnitTest",
+			})
+			hypervisor.Status.HypervisorID = "1234"
+			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should return the GetTraits error", func(ctx SpecContext) {
+			req := ctrl.Request{NamespacedName: hypervisorName}
+			_, err := traitsController.Reconcile(ctx, req)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
 	Context("Reconcile when terminating", func() {
 		BeforeEach(func(ctx SpecContext) {
 			// Mock resourceproviders.GetTraits
