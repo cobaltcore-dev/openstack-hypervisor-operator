@@ -36,7 +36,6 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
@@ -63,6 +62,7 @@ const (
 type OnboardingController struct {
 	k8sclient.Client
 	Scheme            *runtime.Scheme
+	TestFlavorID      string
 	computeClient     *gophercloud.ServiceClient
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
@@ -490,10 +490,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 		return foundServer, nil
 	}
 
-	flavorRef, err := r.findTestFlavor(ctx)
-	if err != nil {
-		return nil, err
-	}
+	flavorRef := r.TestFlavorID
 
 	imageRef, err := r.findTestImage(ctx)
 	if err != nil {
@@ -576,28 +573,6 @@ func (r *OnboardingController) findTestImage(ctx context.Context) (string, error
 	return "", fmt.Errorf("couldn't find image with name %v", testImageName)
 }
 
-func (r *OnboardingController) findTestFlavor(ctx context.Context) (string, error) {
-	flavorPages, err := flavors.ListDetail(r.testComputeClient, flavors.ListOpts{SortDir: "asc", SortKey: "memory_mb"}).AllPages(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	extractedFlavors, err := flavors.ExtractFlavors(flavorPages)
-	if err != nil {
-		return "", err
-	}
-
-	for _, flavor := range extractedFlavors {
-		_, found := flavor.ExtraSpecs["capabilities:hypervisor_type"]
-		if !found {
-			// Flavor does not restrict the hypervisor-type
-			return flavor.ID, nil
-		}
-	}
-
-	return "", errors.New("couldn't find flavor")
-}
-
 func (r *OnboardingController) patchStatus(ctx context.Context, hv, base *kvmv1.Hypervisor) error {
 	return r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
 		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OnboardingControllerName))
@@ -605,6 +580,10 @@ func (r *OnboardingController) patchStatus(ctx context.Context, hv, base *kvmv1.
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
+	if r.TestFlavorID == "" {
+		r.TestFlavorID = "1"
+	}
+
 	ctx := context.Background()
 
 	var err error

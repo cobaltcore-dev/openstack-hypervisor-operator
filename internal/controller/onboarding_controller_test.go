@@ -220,6 +220,7 @@ var _ = Describe("Onboarding Controller", func() {
 		onboardingReconciler = &OnboardingController{
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
+			TestFlavorID:      "1",
 			computeClient:     client.ServiceClient(fakeServer),
 			testComputeClient: client.ServiceClient(fakeServer),
 			testImageClient:   client.ServiceClient(fakeServer),
@@ -381,14 +382,6 @@ var _ = Describe("Onboarding Controller", func() {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprint(w, `{}`)
-				Expect(err).NotTo(HaveOccurred())
-			})
-
-			// Only needed for mocking the test
-			fakeServer.Mux.HandleFunc("GET /flavors/detail", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Add("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprint(w, flavorDetailsBody)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
