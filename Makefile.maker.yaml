@@ -73,4 +73,4 @@ reuse:
 verbatim: |
   .PHONY: install-crds
   install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-      kubectl apply -f config/crd/*.yaml
+      kubectl apply -f "charts/openstack-hypervisor-operator/crds/*.yaml"
