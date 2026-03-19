@@ -35,7 +35,7 @@ default: build-all
 
 .PHONY: install-crds
 install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f config/crd/*.yaml
+	kubectl apply -f "charts/openstack-hypervisor-operator/crds/*.yaml"
 
 install-goimports: FORCE
 	@if ! hash goimports 2>/dev/null; then printf "\e[1;36m>> Installing goimports (this may take a while)...\e[0m\n"; go install golang.org/x/tools/cmd/goimports@latest; fi
