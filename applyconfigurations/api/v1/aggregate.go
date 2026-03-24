@@ -5,8 +5,9 @@ package v1
 // AggregateApplyConfiguration represents a declarative configuration of the Aggregate type for use
 // with apply.
 type AggregateApplyConfiguration struct {
-	Name *string `json:"name,omitempty"`
-	UUID *string `json:"uuid,omitempty"`
+	Name     *string           `json:"name,omitempty"`
+	UUID     *string           `json:"uuid,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // AggregateApplyConfiguration constructs a declarative configuration of the Aggregate type for use with
@@ -28,5 +29,19 @@ func (b *AggregateApplyConfiguration) WithName(value string) *AggregateApplyConf
 // If called multiple times, the UUID field is set to the value of the last call.
 func (b *AggregateApplyConfiguration) WithUUID(value string) *AggregateApplyConfiguration {
 	b.UUID = &value
+	return b
+}
+
+// WithMetadata puts the entries into the Metadata field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the Metadata field,
+// overwriting an existing map entries in Metadata field with the same key.
+func (b *AggregateApplyConfiguration) WithMetadata(entries map[string]string) *AggregateApplyConfiguration {
+	if b.Metadata == nil && len(entries) > 0 {
+		b.Metadata = make(map[string]string, len(entries))
+	}
+	for k, v := range entries {
+		b.Metadata[k] = v
+	}
 	return b
 }

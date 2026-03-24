@@ -206,6 +206,10 @@ type Aggregate struct {
 
 	// UUID is the unique identifier of the aggregate.
 	UUID string `json:"uuid"`
+
+	// Metadata is the metadata of the aggregate as key-value pairs.
+	// +kubebuilder:validation:Optional
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type HyperVisorUpdateStatus struct {
