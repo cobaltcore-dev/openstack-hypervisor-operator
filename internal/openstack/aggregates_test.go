@@ -38,7 +38,8 @@ var _ = Describe("ApplyAggregates", func() {
 					"deleted": false,
 					"id": 1,
 					"uuid": "uuid-agg1",
-					"hosts": ["test-host"]
+					"hosts": ["test-host"],
+					"metadata": {"key1": "value1", "key2": "value2"}
 				},
 				{
 					"name": "agg2",
@@ -54,7 +55,8 @@ var _ = Describe("ApplyAggregates", func() {
 					"deleted": false,
 					"id": 3,
 					"uuid": "uuid-agg3",
-					"hosts": []
+					"hosts": [],
+					"metadata": {}
 				}
 			]
 		}`
@@ -119,12 +121,17 @@ var _ = Describe("ApplyAggregates", func() {
 			// Check we have the right aggregates by name and UUID
 			names := make([]string, len(aggregates))
 			uuids := make([]string, len(aggregates))
+			metadata := make([]map[string]string, len(aggregates))
 			for i, agg := range aggregates {
 				names[i] = agg.Name
 				uuids[i] = agg.UUID
+				metadata[i] = agg.Metadata
 			}
 			Expect(names).To(ConsistOf("agg1", "agg2", "agg3"))
 			Expect(uuids).To(ConsistOf("uuid-agg1", "uuid-agg2", "uuid-agg3"))
+			Expect(metadata[0]).To(Equal(map[string]string{"key1": "value1", "key2": "value2"})) // agg1 metadata should be preserved
+			Expect(metadata[1]).To(BeNil())                                                      // agg2 has no metadata field, should be nil
+			Expect(metadata[2]).To(BeEmpty())                                                    // agg3 has empty metadata, should be preserved
 		})
 	})
 

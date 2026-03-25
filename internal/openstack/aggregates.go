@@ -127,8 +127,9 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 	for _, name := range desiredAggregates {
 		agg := aggregateMap[name] // exists as per "Verify all desired aggregates exist" check
 		result = append(result, kvmv1.Aggregate{
-			Name: agg.Name,
-			UUID: agg.UUID,
+			Name:     agg.Name,
+			UUID:     agg.UUID,
+			Metadata: agg.Metadata,
 		})
 	}
 
