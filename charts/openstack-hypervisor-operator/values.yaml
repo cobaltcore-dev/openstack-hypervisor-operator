@@ -45,6 +45,14 @@ metricsService:
     protocol: TCP
     targetPort: 8443
   type: ClusterIP
+serviceMonitor:
+  create: true
+  labels: {}
+  annotations: {}
+  interval: ""
+  scrapeTimeout: ""
+  metricRelabelings: []
+  relabelings: []
 secret:
   servicePassword: ""
 serviceAccount:
