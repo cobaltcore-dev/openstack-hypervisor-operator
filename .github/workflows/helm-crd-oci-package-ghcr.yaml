@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
+# SPDX-License-Identifier: Apache-2.0
+
+name: Helm CRD OCI Package GHCR
+"on":
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/openstack-hypervisor-operator/crds/**'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build-and-push-helm-crd-package:
+    name: Build and publish Helm CRD Chart OCI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Sync CRDs from main chart
+        run: cp charts/openstack-hypervisor-operator/crds/*.yaml charts/openstack-hypervisor-operator-crd/templates/
+      - name: Lint Helm Chart
+        run: helm lint charts/openstack-hypervisor-operator-crd
+      - name: Package Helm Chart
+        run: |
+          # Use run number to auto-increment version on each CRD change
+          VERSION="1.0.${{ github.run_number }}"
+          echo "Running helm package with version $VERSION"
+          helm package charts/openstack-hypervisor-operator-crd --destination ./chart --version "$VERSION"
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+      - name: Push Helm Chart to ghcr.io
+        run: helm push ./chart/*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts

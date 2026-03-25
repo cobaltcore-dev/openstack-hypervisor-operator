@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openstack-hypervisor-operator-crd
+description: CRDs for the OpenStack Hypervisor Operator
+appVersion: latest
+version: 1.0.0
+type: application
