@@ -37,6 +37,8 @@ jobs:
           APP_VERSION=$(git describe --tags --exact-match ${{ github.sha }} 2>/dev/null || echo "")
           if [ -n "$APP_VERSION" ]; then
             VERSION=$(echo -n "$APP_VERSION" | sed -E 's/^v//')
+          else
+            VERSION=$((git describe --tags --abbrev=0 2>/dev/null | sed -E 's/^v//') || echo "")
           fi
 
           # use the git sha as app-version, if no version could be detected from the tags
