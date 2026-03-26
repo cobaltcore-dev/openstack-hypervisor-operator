@@ -33,7 +33,7 @@ jobs:
         run: helm lint charts/openstack-hypervisor-operator
       - name: Package Helm Chart
         run: |
-          # try to detect a version from the git tags, only if the tag is exactly on the commit
+          # try to detect a version from the git tags, set APP_VERSION only if this commit has been tagged
           APP_VERSION=$(git describe --tags --exact-match ${{ github.sha }} 2>/dev/null || echo "")
           if [ -n "$APP_VERSION" ]; then
             VERSION=$(echo -n "$APP_VERSION" | sed -E 's/^v//')
