@@ -20,7 +20,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
       - name: Sync CRDs from main chart
         run: cp charts/openstack-hypervisor-operator/crds/*.yaml charts/openstack-hypervisor-operator-crd/templates/
       - name: Lint Helm Chart
