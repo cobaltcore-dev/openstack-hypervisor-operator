@@ -260,11 +260,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NodeDecommissionReconciler{
+	if err = (&controller.HypervisorOffboardingReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "NodeDecommission")
+		setupLog.Error(err, "unable to create controller", "controller", "HypervisorOffboarding")
 		os.Exit(1)
 	}
 

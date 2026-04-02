@@ -1,5 +1,5 @@
 /*
-SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+SPDX-FileCopyrightText: Copyright 2026 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,7 +36,7 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
-var _ = Describe("Decommission Controller", func() {
+var _ = Describe("Offboarding Controller", func() {
 	const (
 		EOF            = "EOF"
 		serviceId      = "service-1234"
@@ -45,10 +45,10 @@ var _ = Describe("Decommission Controller", func() {
 	)
 
 	var (
-		decommissionReconciler *NodeDecommissionReconciler
-		resourceName           = types.NamespacedName{Name: hypervisorName}
-		reconcileReq           = ctrl.Request{NamespacedName: resourceName}
-		fakeServer             testhelper.FakeServer
+		offboardingReconciler *HypervisorOffboardingReconciler
+		resourceName          = types.NamespacedName{Name: hypervisorName}
+		reconcileReq          = ctrl.Request{NamespacedName: resourceName}
+		fakeServer            testhelper.FakeServer
 	)
 
 	BeforeEach(func(ctx SpecContext) {
@@ -67,8 +67,8 @@ var _ = Describe("Decommission Controller", func() {
 			os.Unsetenv("KVM_HA_SERVICE_URL")
 		})
 
-		By("Creating the NodeDecommissionReconciler")
-		decommissionReconciler = &NodeDecommissionReconciler{
+		By("Creating the HypervisorOffboardingReconciler")
+		offboardingReconciler = &HypervisorOffboardingReconciler{
 			Client:          k8sClient,
 			Scheme:          k8sClient.Scheme(),
 			computeClient:   client.ServiceClient(fakeServer),
@@ -101,7 +101,7 @@ var _ = Describe("Decommission Controller", func() {
 		Context("When marking the hypervisor terminating", func() {
 			JustBeforeEach(func(ctx SpecContext) {
 				By("Reconciling first to add the finalizer")
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Marking the hypervisor for termination")
@@ -176,7 +176,7 @@ var _ = Describe("Decommission Controller", func() {
 				})
 
 				It("should set the hypervisor ready condition", func(ctx SpecContext) {
-					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+					_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 					Expect(err).NotTo(HaveOccurred())
 
 					hypervisor := &kvmv1.Hypervisor{}
@@ -185,14 +185,14 @@ var _ = Describe("Decommission Controller", func() {
 						SatisfyAll(
 							HaveField("Type", kvmv1.ConditionTypeReady),
 							HaveField("Status", metav1.ConditionFalse),
-							HaveField("Reason", "Decommissioning"),
+							HaveField("Reason", "Offboarding"),
 						),
 					))
 				})
 
 				It("should set the hypervisor offboarded condition", func(ctx SpecContext) {
 					for range 3 {
-						_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+						_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 						Expect(err).NotTo(HaveOccurred())
 					}
 					Expect(getHypervisorsCalled).To(BeNumerically(">", 0))
@@ -227,8 +227,8 @@ var _ = Describe("Decommission Controller", func() {
 					hypervisor.Status.HypervisorID = "c48f6247-abe4-4a24-824e-ea39e108874f"
 					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 
-					By("Reconciling - decommission controller will wait for aggregates to be cleared")
-					_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+					By("Reconciling - offboarding controller will wait for aggregates to be cleared")
+					_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 					Expect(err).NotTo(HaveOccurred())
 
 					By("Simulating aggregates controller clearing aggregates")
@@ -238,13 +238,13 @@ var _ = Describe("Decommission Controller", func() {
 
 					By("Reconciling again after aggregates are cleared")
 					for range 3 {
-						_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+						_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 						Expect(err).NotTo(HaveOccurred())
 					}
 
 					By("Verifying Status.Aggregates is empty")
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-					Expect(hypervisor.Status.Aggregates).To(BeEmpty(), "Status.Aggregates should be cleared after decommissioning")
+					Expect(hypervisor.Status.Aggregates).To(BeEmpty(), "Status.Aggregates should be cleared after offboarding")
 				})
 			})
 		})
@@ -252,7 +252,7 @@ var _ = Describe("Decommission Controller", func() {
 
 	Context("Guard Conditions", func() {
 		JustBeforeEach(func(ctx SpecContext) {
-			result, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ctrl.Result{}))
 		})
@@ -291,14 +291,14 @@ var _ = Describe("Decommission Controller", func() {
 	})
 
 	Context("Failure Modes", func() {
-		var sharedDecommissioningErrorCheck = func(ctx SpecContext, expectedMessageSubstring string) {
+		var sharedOffboardingErrorCheck = func(ctx SpecContext, expectedMessageSubstring string) {
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
 			Expect(hypervisor.Status.Conditions).To(ContainElement(
 				SatisfyAll(
 					HaveField("Type", kvmv1.ConditionTypeReady),
 					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "Decommissioning"),
+					HaveField("Reason", "Offboarding"),
 					HaveField("Message", ContainSubstring(expectedMessageSubstring)),
 				),
 			))
@@ -320,10 +320,10 @@ var _ = Describe("Decommission Controller", func() {
 				})
 			})
 
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			It("should set offboarding condition with error", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "")
+				sharedOffboardingErrorCheck(ctx, "")
 			})
 		})
 
@@ -352,10 +352,10 @@ var _ = Describe("Decommission Controller", func() {
 				})
 			})
 
-			It("should set decommissioning condition about running VMs", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			It("should set offboarding condition about running VMs", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "still has 2 running VMs")
+				sharedOffboardingErrorCheck(ctx, "still has 2 running VMs")
 			})
 		})
 
@@ -391,9 +391,9 @@ var _ = Describe("Decommission Controller", func() {
 			})
 
 			It("should wait for aggregates to be cleared", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "Waiting for aggregates to be removed")
+				sharedOffboardingErrorCheck(ctx, "Waiting for aggregates to be removed")
 			})
 		})
 
@@ -424,10 +424,10 @@ var _ = Describe("Decommission Controller", func() {
 				})
 			})
 
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			It("should set offboarding condition with error", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "cannot delete service")
+				sharedOffboardingErrorCheck(ctx, "cannot delete service")
 			})
 		})
 
@@ -462,10 +462,10 @@ var _ = Describe("Decommission Controller", func() {
 				})
 			})
 
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			It("should set offboarding condition with error", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "cannot get resource provider")
+				sharedOffboardingErrorCheck(ctx, "cannot get resource provider")
 			})
 		})
 
@@ -512,10 +512,10 @@ var _ = Describe("Decommission Controller", func() {
 				})
 			})
 
-			It("should set decommissioning condition with error", func(ctx SpecContext) {
-				_, err := decommissionReconciler.Reconcile(ctx, reconcileReq)
+			It("should set offboarding condition with error", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
-				sharedDecommissioningErrorCheck(ctx, "cannot clean up resource provider")
+				sharedOffboardingErrorCheck(ctx, "cannot clean up resource provider")
 			})
 		})
 	})

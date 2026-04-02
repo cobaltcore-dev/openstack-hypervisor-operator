@@ -1,5 +1,5 @@
 /*
-SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+SPDX-FileCopyrightText: Copyright 2026 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,10 +38,10 @@ import (
 )
 
 const (
-	DecommissionControllerName = "offboarding"
+	OffboardingControllerName = "offboarding"
 )
 
-type NodeDecommissionReconciler struct {
+type HypervisorOffboardingReconciler struct {
 	k8sclient.Client
 	Scheme          *runtime.Scheme
 	computeClient   *gophercloud.ServiceClient
@@ -53,7 +53,7 @@ type NodeDecommissionReconciler struct {
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;update;patch
-func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hostname := req.Name
 	log := logger.FromContext(ctx).WithName(req.Name).WithValues("hostname", hostname)
 	ctx = logger.IntoContext(ctx, log)
@@ -69,7 +69,7 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
-		return r.setDecommissioningCondition(ctx, hv, "Node is being decommissioned, removing host from nova")
+		return r.setOffboardingCondition(ctx, hv, "Hypervisor is being offboarded, removing host from nova")
 	}
 
 	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded) {
@@ -95,22 +95,22 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			// We are (hopefully) done
 			return ctrl.Result{}, r.markOffboarded(ctx, hv)
 		}
-		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot get hypervisor by name %s due to %s", hostname, err))
+		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get hypervisor by name %s due to %s", hostname, err))
 	}
 
 	// TODO: remove since RunningVMs is only available until micro-version 2.87, and also is updated asynchronously
 	// so it might be not accurate
 	if hypervisor.RunningVMs > 0 {
 		// Still running VMs, cannot delete the service
-		msg := fmt.Sprintf("Node is being decommissioned, but still has %d running VMs", hypervisor.RunningVMs)
-		return r.setDecommissioningCondition(ctx, hv, msg)
+		msg := fmt.Sprintf("Hypervisor is being offboarded, but still has %d running VMs", hypervisor.RunningVMs)
+		return r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	if hypervisor.Servers != nil && len(*hypervisor.Servers) > 0 {
 		// Still VMs assigned to the host, cannot delete the service
-		msg := fmt.Sprintf("Node is being decommissioned, but still has %d assigned VMs, "+
+		msg := fmt.Sprintf("Hypervisor is being offboarded, but still has %d assigned VMs, "+
 			"check with `openstack server list --all-projects --host %s`", len(*hypervisor.Servers), hostname)
-		return r.setDecommissioningCondition(ctx, hv, msg)
+		return r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	// Wait for aggregates controller to remove from all aggregates
@@ -120,44 +120,44 @@ func (r *NodeDecommissionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			aggregateNames[i] = agg.Name
 		}
 		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", aggregateNames)
-		return r.setDecommissioningCondition(ctx, hv, msg)
+		return r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	// Deleting and evicted, so better delete the service
 	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		msg := fmt.Sprintf("cannot delete service %s due to %v", hypervisor.Service.ID, err)
-		return r.setDecommissioningCondition(ctx, hv, msg)
+		return r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisor.ID).Extract()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err))
+		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err))
 	}
 
 	if err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp); err != nil {
-		return r.setDecommissioningCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err))
+		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err))
 	}
 
 	return ctrl.Result{}, r.markOffboarded(ctx, hv)
 }
 
-func (r *NodeDecommissionReconciler) setDecommissioningCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
+func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
 	base := hv.DeepCopy()
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeReady,
 		Status:  metav1.ConditionFalse,
-		Reason:  "Decommissioning",
+		Reason:  "Offboarding",
 		Message: message,
 	})
 	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OffboardingControllerName)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *NodeDecommissionReconciler) markOffboarded(ctx context.Context, hv *kvmv1.Hypervisor) error {
+func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv *kvmv1.Hypervisor) error {
 	base := hv.DeepCopy()
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOffboarded,
@@ -172,14 +172,14 @@ func (r *NodeDecommissionReconciler) markOffboarded(ctx context.Context, hv *kvm
 		Message: "Offboarding successful",
 	})
 	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(DecommissionControllerName)); err != nil {
+		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OffboardingControllerName)); err != nil {
 		return fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
 	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *HypervisorOffboardingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 
 	var err error
@@ -196,7 +196,7 @@ func (r *NodeDecommissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.placementClient.Microversion = "1.39" // yoga, or later
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named(DecommissionControllerName).
+		Named(OffboardingControllerName).
 		For(&kvmv1.Hypervisor{}).
 		Complete(r)
 }
