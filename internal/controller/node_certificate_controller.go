@@ -131,7 +131,7 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 			CommonName:  computeHost,
 			DNSNames:    dnsNames,
 			IPAddresses: ipAddresses,
-			IssuerRef: cmmeta.ObjectReference{
+			IssuerRef: cmmeta.IssuerReference{
 				Name:  r.issuerName,
 				Kind:  cmapi.IssuerKind,
 				Group: cmapi.SchemeGroupVersion.Group,
