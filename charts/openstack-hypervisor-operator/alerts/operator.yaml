@@ -11,6 +11,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisoronboardingstuck
     annotations:
       summary: "Hypervisor {{ $labels.name }} onboarding stuck for over 1 hour"
       description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has been onboarding for more than 1 hour. Check nova registration, test VM status, or trait/aggregate sync."
@@ -22,6 +23,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisorevictionstuck
     annotations:
       summary: "Hypervisor {{ $labels.name }} eviction running for over 4 hours"
       description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had an active eviction for more than 4 hours. Check for stuck live-migrations or failed VMs."
@@ -35,6 +37,7 @@ groups:
     labels:
       severity: info
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisorevictedtoolong
     annotations:
       summary: "Hypervisor {{ $labels.name }} has been evicted for over 7 days"
       description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has been evicted for more than 7 days without being offboarded. Consider re-enabling or decommissioning."
@@ -50,6 +53,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisortraitsyncfailed
     annotations:
       summary: "Hypervisor {{ $labels.name }} trait sync has been failing"
       description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had TraitsUpdated=False for more than 30 minutes outside of onboarding. Check OpenStack Placement API connectivity."
@@ -65,6 +69,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisoraggregatesyncfailed
     annotations:
       summary: "Hypervisor {{ $labels.name }} aggregate sync has been failing"
       description: "The hypervisor {{ $labels.name }} in zone {{ $labels.zone }} has had AggregatesUpdated=False for more than 30 minutes outside of onboarding and eviction. Check OpenStack Nova API connectivity."
@@ -78,6 +83,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisorreconcileerrors
     annotations:
       summary: "Hypervisor operator controller {{ $labels.controller }} has persistent reconcile errors"
       description: "The controller {{ $labels.controller }} has been producing sustained reconciliation errors for more than 15 minutes."
@@ -89,6 +95,7 @@ groups:
     labels:
       severity: critical
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/hypervisoroperatordown
     annotations:
       summary: "Hypervisor operator is down"
       description: "The hypervisor operator metrics endpoint has been unreachable for more than 5 minutes."
