@@ -19,6 +19,7 @@ package controller
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,6 +49,7 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 		controller = &GardenerNodeLifecycleController{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
+			Clock:  clock.RealClock{},
 		}
 
 		By("creating the core resource for the Kind Node")
@@ -166,18 +169,21 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 
 	Context("When node is terminating and offboarded", func() {
 		BeforeEach(func(ctx SpecContext) {
-			// Set node as terminating and add required labels for disableInstanceHA
+			// Set node labels (spec/metadata update)
 			node := &corev1.Node{}
 			Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
 			node.Labels = map[string]string{
 				corev1.LabelHostname:          nodeName,
 				"topology.kubernetes.io/zone": "test-zone",
 			}
+			Expect(k8sClient.Update(ctx, node)).To(Succeed())
+			// Set node Terminating condition separately via the status subresource,
+			// using a fresh Get to avoid the spec Update overwriting the status.
+			Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "Terminating",
 				Status: corev1.ConditionTrue,
 			})
-			Expect(k8sClient.Update(ctx, node)).To(Succeed())
 			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
 
 			// Set hypervisor as onboarded and offboarded
@@ -198,13 +204,70 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
-		It("should allow pod eviction by setting the PDB to minAvailable 0", func(ctx SpecContext) {
-			_, err := controller.Reconcile(ctx, reconcileReq)
-			Expect(err).NotTo(HaveOccurred())
+		When("HaEnabled is explicitly False", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeHaEnabled,
+					Status:  metav1.ConditionFalse,
+					Reason:  "Evicted",
+					Message: "HA disabled due to eviction",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
 
-			pdb := &policyv1.PodDisruptionBudget{}
-			Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
-			Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+			It("should allow pod eviction immediately by setting the PDB to minAvailable 0", func(ctx SpecContext) {
+				result, err := controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeZero())
+
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+			})
+		})
+
+		When("HaEnabled is not yet False and the timeout has not elapsed", func() {
+			BeforeEach(func() {
+				// LastTransitionTime ≈ now (set by meta.SetStatusCondition above),
+				// so deadline = now + 1h is in the future.
+				controller.HaDisabledTimeout = time.Hour
+			})
+
+			It("should requeue and not proceed", func(ctx SpecContext) {
+				result, err := controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				// Should requeue before the deadline rather than returning immediately.
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			})
+		})
+
+		When("HaEnabled is not False but the timeout has elapsed", func() {
+			BeforeEach(func(ctx SpecContext) {
+				// Push LastTransitionTime 2h into the past so that
+				// deadline = (now - 2h) + 1h = now - 1h, which has already elapsed.
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				for i := range hypervisor.Status.Conditions {
+					if hypervisor.Status.Conditions[i].Type == kvmv1.ConditionTypeOffboarded {
+						hypervisor.Status.Conditions[i].LastTransitionTime = metav1.NewTime(time.Now().Add(-2 * time.Hour))
+						break
+					}
+				}
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				controller.HaDisabledTimeout = time.Hour
+			})
+
+			It("should allow pod eviction by setting the PDB to minAvailable 0", func(ctx SpecContext) {
+				result, err := controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeZero())
+
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+			})
 		})
 	})
 })
