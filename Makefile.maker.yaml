@@ -20,7 +20,9 @@ dockerfile:
   runAsRoot: false
 
 golang:
-  autoupdateableDeps: ^github.com/(?:sapcc|sap-cloud-infrastructure|cobaltcore-dev)/
+  autoupdateDependencies:
+    enabled: true
+    matchModule: ^github.com/(?:sapcc|sap-cloud-infrastructure|cobaltcore-dev)/
   setGoModVersion: true
 
 golangciLint:
