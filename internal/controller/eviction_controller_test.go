@@ -35,6 +35,85 @@ import (
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
 
+var _ = Describe("Instance slice helpers", func() {
+	Describe("peekInstance", func() {
+		It("returns empty string for empty slice", func() {
+			Expect(peekInstance([]string{})).To(Equal(""))
+		})
+
+		It("returns empty string for nil slice", func() {
+			Expect(peekInstance(nil)).To(Equal(""))
+		})
+
+		It("returns the last element", func() {
+			Expect(peekInstance([]string{"a", "b", "c"})).To(Equal("c"))
+		})
+
+		It("returns the only element for single-element slice", func() {
+			Expect(peekInstance([]string{"only"})).To(Equal("only"))
+		})
+
+		It("does not modify the slice", func() {
+			s := []string{"a", "b", "c"}
+			peekInstance(s)
+			Expect(s).To(Equal([]string{"a", "b", "c"}))
+		})
+	})
+
+	Describe("popInstance", func() {
+		It("returns empty string and unchanged slice for empty slice", func() {
+			s, uuid := popInstance([]string{})
+			Expect(uuid).To(Equal(""))
+			Expect(s).To(BeEmpty())
+		})
+
+		It("returns empty string and unchanged slice for nil slice", func() {
+			s, uuid := popInstance(nil)
+			Expect(uuid).To(Equal(""))
+			Expect(s).To(BeNil())
+		})
+
+		It("removes and returns the last element", func() {
+			s, uuid := popInstance([]string{"a", "b", "c"})
+			Expect(uuid).To(Equal("c"))
+			Expect(s).To(Equal([]string{"a", "b"}))
+		})
+
+		It("returns empty slice when popping last element", func() {
+			s, uuid := popInstance([]string{"only"})
+			Expect(uuid).To(Equal("only"))
+			Expect(s).To(BeEmpty())
+		})
+	})
+
+	Describe("moveToBack", func() {
+		It("returns unchanged slice for empty slice", func() {
+			s := moveToBack([]string{})
+			Expect(s).To(BeEmpty())
+		})
+
+		It("returns unchanged slice for nil slice", func() {
+			s := moveToBack(nil)
+			Expect(s).To(BeNil())
+		})
+
+		It("returns unchanged slice for single-element slice", func() {
+			s := moveToBack([]string{"only"})
+			Expect(s).To(Equal([]string{"only"}))
+		})
+
+		It("moves last element to front for two elements", func() {
+			s := moveToBack([]string{"a", "b"})
+			Expect(s).To(Equal([]string{"b", "a"}))
+		})
+
+		It("moves last element to front for multiple elements", func() {
+			s := moveToBack([]string{"a", "b", "c", "d"})
+			Expect(s).To(Equal([]string{"d", "a", "b", "c"}))
+		})
+	})
+})
+
 var _ = Describe("Eviction Controller", func() {
 	const (
 		resourceName   = "test-resource"

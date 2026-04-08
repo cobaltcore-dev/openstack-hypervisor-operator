@@ -53,6 +53,36 @@ const (
 	defaultPollTime        = 10 * time.Second
 )
 
+// popInstance removes and returns the last instance UUID from the slice.
+// Returns the modified slice and the UUID (empty string if slice was empty).
+func popInstance(instances []string) (remaining []string, uuid string) {
+	if len(instances) == 0 {
+		return instances, ""
+	}
+	return instances[:len(instances)-1], instances[len(instances)-1]
+}
+
+// peekInstance returns the last instance UUID without removing it.
+// Returns empty string if the slice is empty.
+func peekInstance(instances []string) string {
+	if len(instances) == 0 {
+		return ""
+	}
+	return instances[len(instances)-1]
+}
+
+// moveToBack moves the last instance to the front of the slice,
+// effectively deprioritizing it. Returns the modified slice.
+func moveToBack(instances []string) []string {
+	if len(instances) < 2 {
+		return instances
+	}
+	uuid := instances[len(instances)-1]
+	copy(instances[1:], instances[:len(instances)-1])
+	instances[0] = uuid
+	return instances
+}
+
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/finalizers,verbs=update
@@ -224,9 +254,11 @@ func (r *EvictionReconciler) handleNotFound(ctx context.Context, eviction, base 
 	if base == nil {
 		base = eviction.DeepCopy()
 	}
-	instances := &eviction.Status.OutstandingInstances
-	uuid := (*instances)[len(*instances)-1]
-	*instances = (*instances)[:len(*instances)-1]
+	var uuid string
+	eviction.Status.OutstandingInstances, uuid = popInstance(eviction.Status.OutstandingInstances)
+	if uuid == "" {
+		return nil
+	}
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeMigration,
 		Status:  metav1.ConditionFalse,
@@ -238,8 +270,10 @@ func (r *EvictionReconciler) handleNotFound(ctx context.Context, eviction, base 
 
 func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
 	base := eviction.DeepCopy()
-	instances := &eviction.Status.OutstandingInstances
-	uuid := (*instances)[len(*instances)-1]
+	uuid := peekInstance(eviction.Status.OutstandingInstances)
+	if uuid == "" {
+		return ctrl.Result{}, nil
+	}
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
 	logger.IntoContext(ctx, log)
 
@@ -265,8 +299,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	case "ERROR":
 		// Needs manual intervention (or another operator fixes it)
 		// put it at the end of the list (beginning of array)
-		copy((*instances)[1:], (*instances)[:len(*instances)-1])
-		(*instances)[0] = uuid
+		eviction.Status.OutstandingInstances = moveToBack(eviction.Status.OutstandingInstances)
 		log.Info("error", "faultMessage", vm.Fault.Message)
 		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeMigration,
@@ -303,14 +336,13 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		}
 
 		// All done
-		*instances = (*instances)[:len(*instances)-1]
+		eviction.Status.OutstandingInstances, _ = popInstance(eviction.Status.OutstandingInstances)
 		return ctrl.Result{}, r.updateStatus(ctx, eviction, base)
 	}
 
 	if vm.TaskState == "deleting" { //nolint:gocritic
 		// We just have to wait for it to be gone. Try the next one.
-		copy((*instances)[1:], (*instances)[:len(*instances)-1])
-		(*instances)[0] = uuid
+		eviction.Status.OutstandingInstances = moveToBack(eviction.Status.OutstandingInstances)
 
 		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeMigration,
