@@ -110,12 +110,6 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if status == nil {
 		base := hv.DeepCopy()
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  kvmv1.ConditionReasonOnboarding,
-			Message: "Onboarding in progress",
-		})
 
 		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeOnboarding,
@@ -151,18 +145,6 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	}
 
 	base := hv.DeepCopy()
-	ready := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady)
-	if ready != nil {
-		// Only undo ones own readiness status reporting
-		if ready.Reason == kvmv1.ConditionReasonOnboarding {
-			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeReady,
-				Status:  metav1.ConditionFalse,
-				Reason:  kvmv1.ConditionReasonOnboarding,
-				Message: "Onboarding aborted",
-			})
-		}
-	}
 
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOnboarding,
@@ -352,13 +334,6 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			Status:  metav1.ConditionFalse,
 			Reason:  kvmv1.ConditionReasonSucceeded,
 			Message: "Onboarding completed",
-		})
-
-		meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeReady,
-			Status:  metav1.ConditionTrue,
-			Reason:  kvmv1.ConditionReasonReadyReady,
-			Message: "Hypervisor is ready",
 		})
 
 		return ctrl.Result{}, r.patchStatus(ctx, hv, base)

@@ -49,6 +49,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/ready"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/logger"
 
@@ -313,6 +314,14 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", controller.HypervisorTaintControllerName)
+		os.Exit(1)
+	}
+
+	if err = (&ready.Controller{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", ready.ControllerName)
 		os.Exit(1)
 	}
 
