@@ -368,7 +368,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 		return err
 	}
 
-	log.Info("Live migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	log.Info("Live migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header.Get("X-Openstack-Request-Id"))
 	return nil
 }
 
@@ -387,7 +387,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 		return err
 	}
 
-	log.Info("Cold-migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header["X-Openstack-Request-Id"][0])
+	log.Info("Cold-migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header.Get("X-Openstack-Request-Id"))
 	return nil
 }
 
