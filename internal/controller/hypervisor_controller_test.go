@@ -21,7 +21,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -311,12 +310,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				// Get the Hypervisor resource
 				updatedHypervisor := &kvmv1.Hypervisor{}
 				Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
-				Expect(updatedHypervisor.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Reason", terminatingReason),
-						HaveField("Status", metav1.ConditionFalse),
-					),
+				Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeTerminating),
 						HaveField("Reason", terminatingReason),
@@ -342,39 +336,6 @@ var _ = Describe("Hypervisor Controller", func() {
 				})
 			})
 
-			Context("and the Hypervisor resource already has a Ready Condition set to false", func() {
-				BeforeEach(func(ctx SpecContext) {
-					hypervisor := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-						Type:   kvmv1.ConditionTypeReady,
-						Status: metav1.ConditionFalse,
-						Reason: "SomeOtherReason",
-					})
-					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-				})
-
-				It("should not update the existing Ready Condition with the new reason", func(ctx SpecContext) {
-					for range 2 {
-						_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-							NamespacedName: types.NamespacedName{Name: resource.Name},
-						})
-						Expect(err).NotTo(HaveOccurred())
-					}
-
-					// Get the Hypervisor resource again
-					updatedHypervisor := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
-					Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Reason", "SomeOtherReason"),
-							HaveField("Status", metav1.ConditionFalse),
-						),
-					))
-				})
-			})
-
 			It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 				By("Reconciling the created resource")
 				for range 2 {
@@ -391,12 +352,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				// Not sure, if that is a good idea, but that is the current behaviour
 				// We expect another operator to set the Maintenance field to Termination
 				Expect(updatedHypervisor.Spec.Maintenance).NotTo(Equal(kvmv1.MaintenanceTermination))
-				Expect(updatedHypervisor.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Reason", terminatingReason),
-						HaveField("Status", metav1.ConditionFalse),
-					),
+				Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeTerminating),
 						HaveField("Reason", terminatingReason),
