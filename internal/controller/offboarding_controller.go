@@ -68,11 +68,14 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, nil
 	}
 
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeReady) {
+	// Check if offboarding has already started or completed
+	offboardedCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
+	if offboardedCondition == nil {
+		// Start offboarding
 		return r.setOffboardingCondition(ctx, hv, "Hypervisor is being offboarded, removing host from nova")
 	}
 
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded) {
+	if offboardedCondition.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -145,7 +148,7 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
 	base := hv.DeepCopy()
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeReady,
+		Type:    kvmv1.ConditionTypeOffboarded,
 		Status:  metav1.ConditionFalse,
 		Reason:  "Offboarding",
 		Message: message,
@@ -162,12 +165,6 @@ func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeOffboarded,
 		Status:  metav1.ConditionTrue,
-		Reason:  "Offboarded",
-		Message: "Offboarding successful",
-	})
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeReady,
-		Status:  metav1.ConditionFalse,
 		Reason:  "Offboarded",
 		Message: "Offboarding successful",
 	})

@@ -175,7 +175,7 @@ var _ = Describe("Offboarding Controller", func() {
 					})
 				})
 
-				It("should set the hypervisor ready condition", func(ctx SpecContext) {
+				It("should set the hypervisor offboarding condition", func(ctx SpecContext) {
 					_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 					Expect(err).NotTo(HaveOccurred())
 
@@ -183,7 +183,7 @@ var _ = Describe("Offboarding Controller", func() {
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
 					Expect(hypervisor.Status.Conditions).To(ContainElement(
 						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
+							HaveField("Type", kvmv1.ConditionTypeOffboarded),
 							HaveField("Status", metav1.ConditionFalse),
 							HaveField("Reason", "Offboarding"),
 						),
@@ -199,16 +199,10 @@ var _ = Describe("Offboarding Controller", func() {
 
 					hypervisor := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
-					Expect(hypervisor.Status.Conditions).To(ContainElements(
+					Expect(hypervisor.Status.Conditions).To(ContainElement(
 						SatisfyAll(
 							HaveField("Type", kvmv1.ConditionTypeOffboarded),
 							HaveField("Status", metav1.ConditionTrue),
-							HaveField("Reason", "Offboarded"),
-							HaveField("Message", "Offboarding successful"),
-						),
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Status", metav1.ConditionFalse),
 							HaveField("Reason", "Offboarded"),
 							HaveField("Message", "Offboarding successful"),
 						),
@@ -296,7 +290,7 @@ var _ = Describe("Offboarding Controller", func() {
 			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
 			Expect(hypervisor.Status.Conditions).To(ContainElement(
 				SatisfyAll(
-					HaveField("Type", kvmv1.ConditionTypeReady),
+					HaveField("Type", kvmv1.ConditionTypeOffboarded),
 					HaveField("Status", metav1.ConditionFalse),
 					HaveField("Reason", "Offboarding"),
 					HaveField("Message", ContainSubstring(expectedMessageSubstring)),
@@ -310,6 +304,15 @@ var _ = Describe("Offboarding Controller", func() {
 			Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
 			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
 			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			By("Setting initial offboarding condition")
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeOffboarded,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Offboarding",
+				Message: "Hypervisor is being offboarded, removing host from nova",
+			})
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
 		Context("When getting hypervisor by name fails", func() {

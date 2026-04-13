@@ -157,16 +157,6 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
 				})
-
-				It("should set the ConditionTypeReady to true", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(updated.Status.Conditions).To(ContainElement(
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Status", metav1.ConditionTrue),
-						)))
-				})
 			}) // Spec.Maintenance=""
 		})
 
@@ -188,16 +178,6 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					updated := &kvmv1.Hypervisor{}
 					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 					Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeTrue())
-				})
-
-				It("should set the ConditionTypeReady to false", func(ctx SpecContext) {
-					updated := &kvmv1.Hypervisor{}
-					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
-					Expect(updated.Status.Conditions).To(ContainElement(
-						SatisfyAll(
-							HaveField("Type", kvmv1.ConditionTypeReady),
-							HaveField("Status", metav1.ConditionFalse),
-						)))
 				})
 			}) // Spec.Maintenance="<mode>"
 		}
@@ -339,14 +319,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							Expect(hypervisor.Status.Evicted).To(BeFalse())
 						})
 
-						It("should set the ConditionTypeReady to false and reason to evicting", func(ctx SpecContext) {
+						It("should set the ConditionTypeEvicting to true", func(ctx SpecContext) {
 							updated := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 							Expect(updated.Status.Conditions).To(ContainElement(
 								SatisfyAll(
-									HaveField("Type", kvmv1.ConditionTypeReady),
-									HaveField("Status", metav1.ConditionFalse),
-									HaveField("Reason", kvmv1.ConditionReasonReadyEvicting),
+									HaveField("Type", kvmv1.ConditionTypeEvicting),
+									HaveField("Status", metav1.ConditionTrue),
 								)))
 						})
 					})
@@ -393,14 +372,13 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							Expect(hypervisor.Status.Evicted).To(BeTrue())
 						})
 
-						It("should set the ConditionTypeReady to false and reason to evicted", func(ctx SpecContext) {
+						It("should set the ConditionTypeEvicting to false when evicted", func(ctx SpecContext) {
 							updated := &kvmv1.Hypervisor{}
 							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 							Expect(updated.Status.Conditions).To(ContainElement(
 								SatisfyAll(
-									HaveField("Type", kvmv1.ConditionTypeReady),
+									HaveField("Type", kvmv1.ConditionTypeEvicting),
 									HaveField("Status", metav1.ConditionFalse),
-									HaveField("Reason", kvmv1.ConditionReasonReadyEvicted),
 								)))
 						})
 					})

@@ -282,12 +282,7 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				Expect(hv.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Status", metav1.ConditionFalse),
-						HaveField("Reason", kvmv1.ConditionReasonOnboarding),
-					),
+				Expect(hv.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeOnboarding),
 						HaveField("Status", metav1.ConditionTrue),
@@ -327,12 +322,7 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				Expect(hv.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Status", metav1.ConditionFalse),
-						HaveField("Reason", kvmv1.ConditionReasonOnboarding),
-					),
+				Expect(hv.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeOnboarding),
 						HaveField("Status", metav1.ConditionTrue),
@@ -355,11 +345,6 @@ var _ = Describe("Onboarding Controller", func() {
 			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 			hv.Status.HypervisorID = hypervisorId
 			hv.Status.ServiceID = serviceId
-			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-				Type:   kvmv1.ConditionTypeReady,
-				Status: metav1.ConditionFalse,
-				Reason: kvmv1.ConditionReasonOnboarding,
-			})
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeOnboarding,
 				Status: metav1.ConditionTrue,
@@ -503,11 +488,7 @@ var _ = Describe("Onboarding Controller", func() {
 
 				By("Verifying final state")
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				Expect(hv.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Status", metav1.ConditionTrue),
-					),
+				Expect(hv.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeOnboarding),
 						HaveField("Status", metav1.ConditionFalse),
@@ -576,11 +557,7 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
-				Expect(hv.Status.Conditions).To(ContainElements(
-					SatisfyAll(
-						HaveField("Type", kvmv1.ConditionTypeReady),
-						HaveField("Status", metav1.ConditionTrue),
-					),
+				Expect(hv.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeOnboarding),
 						HaveField("Status", metav1.ConditionFalse),
