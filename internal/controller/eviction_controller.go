@@ -275,7 +275,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		return ctrl.Result{}, nil
 	}
 	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
-	logger.IntoContext(ctx, log)
+	ctx = logger.IntoContext(ctx, log)
 
 	res := servers.Get(ctx, r.computeClient, uuid)
 	vm, err := res.Extract()
@@ -289,7 +289,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	}
 
 	log = log.WithValues("server_status", vm.Status)
-	logger.IntoContext(ctx, log)
+	ctx = logger.IntoContext(ctx, log)
 
 	// First, check the transient statuses
 	switch vm.Status {
