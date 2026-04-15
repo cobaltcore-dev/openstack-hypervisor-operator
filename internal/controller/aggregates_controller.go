@@ -115,7 +115,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 func (ac *AggregatesController) determineDesiredState(hv *kvmv1.Hypervisor) ([]string, metav1.Condition) {
 	// If terminating AND evicted, remove from all aggregates
 	// We must wait for eviction to complete before removing aggregates
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
 		evictingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
 		// Only remove aggregates if eviction is complete (Evicting=False)
 		// If Evicting condition is not set or still True, keep current aggregates

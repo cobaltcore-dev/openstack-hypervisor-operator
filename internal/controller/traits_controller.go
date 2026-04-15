@@ -69,7 +69,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
 		return ctrl.Result{}, nil
 	}
 

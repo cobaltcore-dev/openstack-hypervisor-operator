@@ -281,14 +281,13 @@ var _ = Describe("TraitsController", func() {
 
 			hypervisor := &kvmv1.Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeOnboarding,
 				Status: metav1.ConditionFalse,
-				Reason: "UnitTest",
-			})
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:   kvmv1.ConditionTypeTerminating,
-				Status: metav1.ConditionTrue,
 				Reason: "UnitTest",
 			})
 			hypervisor.Status.Traits = []string{"CUSTOM_FOO", "HW_CPU_X86_VMX"}
