@@ -88,12 +88,12 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to LifecycleEnabled being false")
 	}
 
 	// check if hv is terminating
 	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to MaintenanceTermination")
 	}
 
 	// We bail here out, because the openstack api is not the best to poll
@@ -137,7 +137,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 }
 
-func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost string) error {
+func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string) error {
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Never onboarded
 	if status == nil {
@@ -150,7 +150,7 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 		Type:    kvmv1.ConditionTypeOnboarding,
 		Status:  metav1.ConditionFalse,
 		Reason:  kvmv1.ConditionReasonAborted,
-		Message: "Aborted due to LifecycleEnabled being false",
+		Message: message,
 	})
 
 	if equality.Semantic.DeepEqual(hv, base) {
