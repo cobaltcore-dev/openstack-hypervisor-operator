@@ -650,35 +650,86 @@ var _ = Describe("AggregatesController", func() {
 
 		Context("when terminating", func() {
 			BeforeEach(func(ctx SpecContext) {
-				By("Setting terminating condition")
+				By("Setting spec.maintenance=termination")
 				hypervisor := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeTerminating,
-					Status:  metav1.ConditionTrue,
-					Reason:  "dontcare",
-					Message: "dontcare",
-				})
-				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-
-				By("Pre-setting the EvictionInProgress condition to match what controller will determine")
-				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
-				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeAggregatesUpdated,
-					Status:  metav1.ConditionFalse,
-					Reason:  kvmv1.ConditionReasonEvictionInProgress,
-					Message: "Aggregates unchanged while terminating and eviction in progress",
-				})
-				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
 			})
 
-			It("should neither update Aggregates and nor set status condition", func(ctx SpecContext) {
-				updated := &kvmv1.Hypervisor{}
-				Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
-				Expect(updated.Status.Aggregates).To(BeEmpty())
-				Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
-				cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
-				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonEvictionInProgress))
+			Context("eviction not yet complete", func() {
+				BeforeEach(func(ctx SpecContext) {
+					By("Pre-setting the EvictionInProgress condition to match what controller will determine")
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeAggregatesUpdated,
+						Status:  metav1.ConditionFalse,
+						Reason:  kvmv1.ConditionReasonEvictionInProgress,
+						Message: "Aggregates unchanged while terminating and eviction in progress",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should keep aggregates unchanged and set EvictionInProgress condition", func(ctx SpecContext) {
+					updated := &kvmv1.Hypervisor{}
+					Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(updated.Status.Aggregates).To(BeEmpty())
+					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+					cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+					Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonEvictionInProgress))
+				})
+			})
+
+			Context("eviction complete (regression: aggregates must be cleared)", func() {
+				BeforeEach(func(ctx SpecContext) {
+					By("Setting Evicting=False to signal eviction is complete")
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeEvicting,
+						Status:  metav1.ConditionFalse,
+						Reason:  kvmv1.ConditionReasonSucceeded,
+						Message: "Evicted",
+					})
+					hypervisor.Status.Aggregates = []kvmv1.Aggregate{
+						{Name: "staging", UUID: "uuid-staging"},
+						{Name: "qa-de-1b", UUID: "uuid-qa-de-1b"},
+					}
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+					By("Mocking GetAggregates and RemoveHost calls")
+					fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, `{
+							"aggregates": [
+								{"name": "staging", "id": 1, "uuid": "uuid-staging", "hosts": ["hv-test"]},
+								{"name": "qa-de-1b", "id": 2, "uuid": "uuid-qa-de-1b", "hosts": ["hv-test"]}
+							]
+						}`)
+					})
+					fakeServer.Mux.HandleFunc("POST /os-aggregates/1/action", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, `{"aggregate": {"name": "staging", "id": 1, "uuid": "uuid-staging", "hosts": []}}`)
+					})
+					fakeServer.Mux.HandleFunc("POST /os-aggregates/2/action", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, `{"aggregate": {"name": "qa-de-1b", "id": 2, "uuid": "uuid-qa-de-1b", "hosts": []}}`)
+					})
+				})
+
+				It("should remove all aggregates and set Terminating condition", func(ctx SpecContext) {
+					updated := &kvmv1.Hypervisor{}
+					Expect(aggregatesController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+					Expect(updated.Status.Aggregates).To(BeEmpty())
+					Expect(meta.IsStatusConditionFalse(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+					cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+					Expect(cond).NotTo(BeNil())
+					Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonTerminating))
+				})
 			})
 		})
 	})

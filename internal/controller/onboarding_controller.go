@@ -92,7 +92,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// check if hv is terminating
-	if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTerminating) {
+	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
 		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost)
 	}
 
