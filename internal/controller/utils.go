@@ -19,6 +19,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/util/retry"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -136,6 +139,22 @@ func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.Owner
 }
 
 var ErrRetry = errors.New("ErrRetry")
+
+// PatchHypervisorStatusWithRetry patches hypervisor status with retry on conflict.
+// The updateFn receives a fresh copy of the hypervisor and should apply status changes to it.
+// It re-fetches the resource before each retry attempt to get the latest resourceVersion.
+func PatchHypervisorStatusWithRetry(ctx context.Context, c k8sclient.Client, name, fieldOwner string, updateFn func(*kvmv1.Hypervisor)) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		hv := &kvmv1.Hypervisor{}
+		if err := c.Get(ctx, k8sclient.ObjectKey{Name: name}, hv); err != nil {
+			return err
+		}
+		base := hv.DeepCopy()
+		updateFn(hv)
+		return c.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
+			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(fieldOwner))
+	})
+}
 
 // returns if any ManagedField of the object has been modified by kubectl
 func HasKubectlManagedFields(object *metav1.ObjectMeta) bool {
