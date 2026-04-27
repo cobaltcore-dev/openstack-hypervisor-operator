@@ -136,6 +136,68 @@ spec:
                 description: EvacuateOnReboot request an evacuation of all instances
                   before reboot.
                 type: boolean
+              groups:
+                description: |-
+                  Groups defines typed group memberships for this hypervisor.
+
+                  Both traits and aggregates are forms of grouping: traits group
+                  hypervisors by capability, aggregates group them by administrative
+                  assignment. Each entry follows the field-presence union pattern
+                  (as used by PodSpec.volumes in core Kubernetes): exactly one
+                  type-specific sub-field must be populated per entry.
+
+                  The Cortex Placement Shim and scheduler read group memberships
+                  directly from this field.
+
+                  Note: uniqueness of trait names and aggregate UUIDs is not enforced
+                  via CEL because the required O(n^2) comparison exceeds the
+                  Kubernetes CEL cost budget. Enforce uniqueness in the consuming
+                  controller or via a validating webhook if needed.
+                items:
+                  description: |-
+                    Group is a typed group membership entry for a hypervisor.
+
+                    This follows the field-presence union pattern (as used by
+                    PodSpec.volumes in core Kubernetes): each entry populates exactly
+                    one type-specific sub-field, and the populated field identifies
+                    the group type.
+                  properties:
+                    aggregate:
+                      description: |-
+                        AggregateGroup represents an administrative grouping, such as an
+                        OpenStack host aggregate.
+                      properties:
+                        metadata:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        name:
+                          minLength: 1
+                          type: string
+                        uuid:
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - uuid
+                      type: object
+                    trait:
+                      description: |-
+                        TraitGroup represents a capability trait, such as an OpenStack
+                        Placement trait (e.g. HW_CPU_X86_AVX2, COMPUTE_STATUS_DISABLED).
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one group type must be set
+                    rule: '(has(self.trait) ? 1 : 0) + (has(self.aggregate) ? 1 :
+                      0) == 1'
+                type: array
               highAvailability:
                 default: true
                 description: HighAvailability is used to enable the high availability
