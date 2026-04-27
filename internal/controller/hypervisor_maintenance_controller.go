@@ -39,6 +39,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -82,8 +83,22 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, hec.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(MaintenanceControllerName))
+	// Capture only the fields this controller owns
+	disabledCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
+	evictingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+	evicted := hv.Status.Evicted
+
+	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, hec.Client, hv.Name, HypervisorMaintenanceControllerName, func(h *kvmv1.Hypervisor) {
+		if disabledCondition != nil {
+			meta.SetStatusCondition(&h.Status.Conditions, *disabledCondition)
+		}
+		if evictingCondition != nil {
+			meta.SetStatusCondition(&h.Status.Conditions, *evictingCondition)
+		} else {
+			meta.RemoveStatusCondition(&h.Status.Conditions, kvmv1.ConditionTypeEvicting)
+		}
+		h.Status.Evicted = evicted
+	})
 }
 
 func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.Context, hv *kvmv1.Hypervisor) error {

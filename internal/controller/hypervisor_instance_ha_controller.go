@@ -30,6 +30,7 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -99,17 +100,17 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 		}
 
 		if err := disableInstanceHA(hv); err != nil {
-			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			condition := metav1.Condition{
 				Type:    kvmv1.ConditionTypeHaEnabled,
 				Status:  metav1.ConditionUnknown,
 				Message: err.Error(),
 				Reason:  kvmv1.ConditionReasonFailed,
-			})
-
-			if patchErr := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorInstanceHaControllerName)); patchErr != nil {
-				return ctrl.Result{}, errors.Join(err, patchErr)
 			}
-			return ctrl.Result{}, err
+
+			patchErr := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
+				meta.SetStatusCondition(&h.Status.Conditions, condition)
+			})
+			return ctrl.Result{}, errors.Join(err, patchErr)
 		}
 	} else {
 		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
@@ -123,17 +124,17 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 		}
 
 		if err := enableInstanceHA(hv); err != nil {
-			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+			condition := metav1.Condition{
 				Type:    kvmv1.ConditionTypeHaEnabled,
 				Status:  metav1.ConditionUnknown,
 				Message: err.Error(),
 				Reason:  kvmv1.ConditionReasonFailed,
-			})
-
-			if patchErr := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorInstanceHaControllerName)); patchErr != nil {
-				return ctrl.Result{}, errors.Join(err, patchErr)
 			}
-			return ctrl.Result{}, err
+
+			patchErr := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
+				meta.SetStatusCondition(&h.Status.Conditions, condition)
+			})
+			return ctrl.Result{}, errors.Join(err, patchErr)
 		}
 	}
 
@@ -141,7 +142,13 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(old, k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorInstanceHaControllerName))
+	// Only set the HaEnabled condition this controller owns
+	haCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled)
+	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
+		if haCondition != nil {
+			meta.SetStatusCondition(&h.Status.Conditions, *haCondition)
+		}
+	})
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -38,6 +38,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -121,8 +122,16 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if !equality.Semantic.DeepEqual(hypervisor, base) {
-			return ctrl.Result{}, hv.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
-				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
+			// Capture values to apply - only mutate fields this controller owns
+			newInternalIP := hypervisor.Status.InternalIP
+			terminatingCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
+
+			return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, hv.Client, hypervisor.Name, HypervisorControllerName, func(h *kvmv1.Hypervisor) {
+				h.Status.InternalIP = newInternalIP
+				if terminatingCondition != nil {
+					meta.SetStatusCondition(&h.Status.Conditions, *terminatingCondition)
+				}
+			})
 		}
 
 		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
