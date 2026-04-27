@@ -23,7 +23,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -64,7 +63,6 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	base := hv.DeepCopy()
 	desiredAggregateNames, desiredCondition := ac.determineDesiredState(hv)
 
 	// Extract current aggregate names for comparison
@@ -73,11 +71,13 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		currentAggregateNames[i] = agg.Name
 	}
 
+	var newAggregates []kvmv1.Aggregate
+	aggregatesChanged := false
 	if !slicesEqualUnordered(desiredAggregateNames, currentAggregateNames) {
 		// Apply aggregates to OpenStack and update status
 		aggregates, err := openstack.ApplyAggregates(ctx, ac.computeClient, hv.Name, desiredAggregateNames)
 		if err != nil {
-			// Set error condition
+			// Set error condition with retry on conflict
 			condition := metav1.Condition{
 				Type:    kvmv1.ConditionTypeAggregatesUpdated,
 				Status:  metav1.ConditionFalse,
@@ -85,27 +85,27 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 				Message: fmt.Errorf("failed to apply aggregates: %w", err).Error(),
 			}
 
-			if meta.SetStatusCondition(&hv.Status.Conditions, condition) {
-				if err2 := ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-					k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName)); err2 != nil {
-					return ctrl.Result{}, errors.Join(err, err2)
-				}
+			if err2 := PatchHypervisorStatusWithRetry(ctx, ac.Client, hv.Name, AggregatesControllerName, func(h *kvmv1.Hypervisor) {
+				meta.SetStatusCondition(&h.Status.Conditions, condition)
+			}); err2 != nil {
+				return ctrl.Result{}, errors.Join(err, err2)
 			}
 			return ctrl.Result{}, err
 		}
 
-		hv.Status.Aggregates = aggregates
+		newAggregates = aggregates
+		aggregatesChanged = true
 	}
 
-	// Set the condition based on the determined desired state
-	meta.SetStatusCondition(&hv.Status.Conditions, desiredCondition)
+	// Patch status with retry on conflict
+	err := PatchHypervisorStatusWithRetry(ctx, ac.Client, hv.Name, AggregatesControllerName, func(h *kvmv1.Hypervisor) {
+		if aggregatesChanged {
+			h.Status.Aggregates = newAggregates
+		}
+		meta.SetStatusCondition(&h.Status.Conditions, desiredCondition)
+	})
 
-	if equality.Semantic.DeepEqual(base, hv) {
-		return ctrl.Result{}, nil
-	}
-
-	return ctrl.Result{}, ac.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(AggregatesControllerName))
+	return ctrl.Result{}, err
 }
 
 // determineDesiredState returns the desired aggregates and the corresponding condition

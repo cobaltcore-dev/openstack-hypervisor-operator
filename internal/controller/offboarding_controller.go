@@ -146,30 +146,30 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 }
 
 func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
-	base := hv.DeepCopy()
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOffboarded,
-		Status:  metav1.ConditionFalse,
-		Reason:  "Offboarding",
-		Message: message,
+	err := PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OffboardingControllerName, func(h *kvmv1.Hypervisor) {
+		meta.SetStatusCondition(&h.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeOffboarded,
+			Status:  metav1.ConditionFalse,
+			Reason:  "Offboarding",
+			Message: message,
+		})
 	})
-	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OffboardingControllerName)); err != nil {
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
 	return ctrl.Result{}, nil
 }
 
 func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv *kvmv1.Hypervisor) error {
-	base := hv.DeepCopy()
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOffboarded,
-		Status:  metav1.ConditionTrue,
-		Reason:  "Offboarded",
-		Message: "Offboarding successful",
+	err := PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OffboardingControllerName, func(h *kvmv1.Hypervisor) {
+		meta.SetStatusCondition(&h.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeOffboarded,
+			Status:  metav1.ConditionTrue,
+			Reason:  "Offboarded",
+			Message: "Offboarding successful",
+		})
 	})
-	if err := r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(OffboardingControllerName)); err != nil {
+	if err != nil {
 		return fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
 	return nil
