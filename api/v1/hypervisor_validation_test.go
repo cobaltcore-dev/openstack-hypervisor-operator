@@ -18,6 +18,8 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -393,6 +395,257 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 			updated := &Hypervisor{}
 			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
 			Expect(updated.Spec.MaintenanceReason).To(Equal("Updated reason"))
+		})
+	})
+})
+
+// TestGroupsCELValidation tests the CEL validation rules for spec.groups:
+// 1. Exactly one group type must be set per entry (union rule on Group)
+// 2. Field-level validation (minLength) on trait name, aggregate name, and aggregate UUID
+var _ = Describe("Groups CEL Validation", func() {
+	var (
+		hypervisor     *Hypervisor
+		hypervisorName types.NamespacedName
+		counter        int
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		counter++
+		hypervisorName = types.NamespacedName{
+			Name: fmt.Sprintf("test-groups-hv-%d", counter),
+		}
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		if hypervisor != nil {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+			hypervisor = nil
+		}
+	})
+
+	Context("Union rule: exactly one group type per entry", func() {
+		It("should accept a group with only trait set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept a group with only aggregate set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept mixed trait and aggregate entries", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"}},
+						{Trait: &TraitGroup{Name: "COMPUTE_STATUS_DISABLED"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should reject a group with both trait and aggregate set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{
+							Trait:     &TraitGroup{Name: "HW_CPU_X86_AVX2"},
+							Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exactly one group type must be set"))
+		})
+
+		It("should reject a group with neither trait nor aggregate set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exactly one group type must be set"))
+		})
+	})
+
+	Context("Field validation", func() {
+		It("should reject a trait with empty name", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Trait: &TraitGroup{Name: ""}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should reject an aggregate with empty name", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Aggregate: &AggregateGroup{Name: "", UUID: "uuid-1"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should reject an aggregate with empty UUID", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: ""}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should accept an aggregate without metadata", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "uuid-1"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept an aggregate with metadata", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{
+						{Aggregate: &AggregateGroup{
+							Name:     "fast-storage",
+							UUID:     "uuid-1",
+							Metadata: map[string]string{"ssd": "true"},
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept an empty groups list", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Groups: []Group{},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+	})
+})
+
+var _ = Describe("Group Helper Functions", func() {
+	groups := []Group{
+		{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
+		{Trait: &TraitGroup{Name: "COMPUTE_STATUS_DISABLED"}},
+		{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "uuid-1", Metadata: map[string]string{"ssd": "true"}}},
+		{Aggregate: &AggregateGroup{Name: "slow-storage", UUID: "uuid-2"}},
+	}
+
+	Context("HasTrait", func() {
+		It("should return true for an existing trait", func() {
+			Expect(HasTrait(groups, "HW_CPU_X86_AVX2")).To(BeTrue())
+		})
+
+		It("should return false for a missing trait", func() {
+			Expect(HasTrait(groups, "NONEXISTENT")).To(BeFalse())
+		})
+
+		It("should return false for an empty list", func() {
+			Expect(HasTrait(nil, "HW_CPU_X86_AVX2")).To(BeFalse())
+		})
+	})
+
+	Context("GetTraits", func() {
+		It("should return all trait entries", func() {
+			traits := GetTraits(groups)
+			Expect(traits).To(HaveLen(2))
+			Expect(traits[0].Name).To(Equal("HW_CPU_X86_AVX2"))
+			Expect(traits[1].Name).To(Equal("COMPUTE_STATUS_DISABLED"))
+		})
+
+		It("should return empty for a list with no traits", func() {
+			aggs := []Group{{Aggregate: &AggregateGroup{Name: "a", UUID: "u"}}}
+			Expect(GetTraits(aggs)).To(BeEmpty())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetTraits(nil)).To(BeNil())
+		})
+	})
+
+	Context("HasAggregate", func() {
+		It("should return true for an existing aggregate UUID", func() {
+			Expect(HasAggregate(groups, "uuid-1")).To(BeTrue())
+		})
+
+		It("should return false for a missing aggregate UUID", func() {
+			Expect(HasAggregate(groups, "uuid-999")).To(BeFalse())
+		})
+
+		It("should return false for an empty list", func() {
+			Expect(HasAggregate(nil, "uuid-1")).To(BeFalse())
+		})
+	})
+
+	Context("GetAggregates", func() {
+		It("should return all aggregate entries", func() {
+			aggs := GetAggregates(groups)
+			Expect(aggs).To(HaveLen(2))
+			Expect(aggs[0].Name).To(Equal("fast-storage"))
+			Expect(aggs[0].UUID).To(Equal("uuid-1"))
+			Expect(aggs[0].Metadata).To(HaveKeyWithValue("ssd", "true"))
+			Expect(aggs[1].Name).To(Equal("slow-storage"))
+			Expect(aggs[1].UUID).To(Equal("uuid-2"))
+		})
+
+		It("should return empty for a list with no aggregates", func() {
+			traits := []Group{{Trait: &TraitGroup{Name: "T"}}}
+			Expect(GetAggregates(traits)).To(BeEmpty())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetAggregates(nil)).To(BeNil())
 		})
 	})
 })

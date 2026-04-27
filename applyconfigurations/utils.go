@@ -18,6 +18,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	// Group=kvm.cloud.sap, Version=v1
 	case v1.SchemeGroupVersion.WithKind("Aggregate"):
 		return &apiv1.AggregateApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("AggregateGroup"):
+		return &apiv1.AggregateGroupApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Capabilities"):
 		return &apiv1.CapabilitiesApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Cell"):
@@ -30,6 +32,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.EvictionSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EvictionStatus"):
 		return &apiv1.EvictionStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("Group"):
+		return &apiv1.GroupApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Hypervisor"):
 		return &apiv1.HypervisorApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("HypervisorSpec"):
@@ -42,6 +46,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.InstanceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("OperatingSystemStatus"):
 		return &apiv1.OperatingSystemStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TraitGroup"):
+		return &apiv1.TraitGroupApplyConfiguration{}
 
 	}
 	return nil

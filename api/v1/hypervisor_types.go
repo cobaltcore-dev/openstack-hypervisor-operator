@@ -132,6 +132,25 @@ type HypervisorSpec struct {
 	// Aggregates are used to apply aggregates to the hypervisor.
 	Aggregates []string `json:"aggregates"`
 
+	// Groups defines typed group memberships for this hypervisor.
+	//
+	// Both traits and aggregates are forms of grouping: traits group
+	// hypervisors by capability, aggregates group them by administrative
+	// assignment. Each entry follows the field-presence union pattern
+	// (as used by PodSpec.volumes in core Kubernetes): exactly one
+	// type-specific sub-field must be populated per entry.
+	//
+	// The Cortex Placement shim and scheduler read group memberships
+	// directly from this field.
+	//
+	// Note: uniqueness of trait names and aggregate UUIDs is not enforced
+	// via CEL because the required O(n^2) comparison exceeds the
+	// Kubernetes CEL cost budget. Enforce uniqueness in the consuming
+	// controller or via a validating webhook if needed.
+	//
+	// +kubebuilder:validation:Optional
+	Groups []Group `json:"groups,omitempty"`
+
 	// +kubebuilder:default:={}
 	// AllowedProjects defines which openstack projects are allowed to schedule
 	// instances on this hypervisor. The values of this list should be project
@@ -210,6 +229,84 @@ type Aggregate struct {
 	// Metadata is the metadata of the aggregate as key-value pairs.
 	// +kubebuilder:validation:Optional
 	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// TraitGroup represents a capability trait, such as an OpenStack
+// Placement trait (e.g. HW_CPU_X86_AVX2, COMPUTE_STATUS_DISABLED).
+type TraitGroup struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// AggregateGroup represents an administrative grouping, such as an
+// OpenStack host aggregate.
+type AggregateGroup struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:MinLength=1
+	UUID string `json:"uuid"`
+
+	// +kubebuilder:validation:Optional
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// Group is a typed group membership entry for a hypervisor.
+//
+// This follows the field-presence union pattern (as used by
+// PodSpec.volumes in core Kubernetes): each entry populates exactly
+// one type-specific sub-field, and the populated field identifies
+// the group type.
+//
+// +kubebuilder:validation:XValidation:rule="(has(self.trait) ? 1 : 0) + (has(self.aggregate) ? 1 : 0) == 1",message="exactly one group type must be set"
+type Group struct {
+	// +kubebuilder:validation:Optional
+	Trait *TraitGroup `json:"trait,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	Aggregate *AggregateGroup `json:"aggregate,omitempty"`
+}
+
+// HasTrait reports whether groups contains a trait entry with the given name.
+func HasTrait(groups []Group, name string) bool {
+	for _, g := range groups {
+		if g.Trait != nil && g.Trait.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// GetTraits returns all TraitGroup entries from groups.
+func GetTraits(groups []Group) []TraitGroup {
+	var out []TraitGroup
+	for _, g := range groups {
+		if g.Trait != nil {
+			out = append(out, *g.Trait)
+		}
+	}
+	return out
+}
+
+// HasAggregate reports whether groups contains an aggregate entry with the given UUID.
+func HasAggregate(groups []Group, uuid string) bool {
+	for _, g := range groups {
+		if g.Aggregate != nil && g.Aggregate.UUID == uuid {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAggregates returns all AggregateGroup entries from groups.
+func GetAggregates(groups []Group) []AggregateGroup {
+	var out []AggregateGroup
+	for _, g := range groups {
+		if g.Aggregate != nil {
+			out = append(out, *g.Aggregate)
+		}
+	}
+	return out
 }
 
 type HyperVisorUpdateStatus struct {
