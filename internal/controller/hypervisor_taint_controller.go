@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -84,8 +85,13 @@ func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, r.Status().Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(before,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorTaintControllerName))
+	// Only set the Tainted condition this controller owns
+	taintedCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTainted)
+	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hypervisor.Name, HypervisorTaintControllerName, func(h *kvmv1.Hypervisor) {
+		if taintedCondition != nil {
+			meta.SetStatusCondition(&h.Status.Conditions, *taintedCondition)
+		}
+	})
 }
 
 func (r *HypervisorTaintController) SetupWithManager(mgr ctrl.Manager) error {

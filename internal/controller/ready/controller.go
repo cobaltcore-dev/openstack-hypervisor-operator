@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 const (
@@ -114,8 +115,9 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	log.Info("Updating Ready condition", "status", readyCondition.Status, "reason", readyCondition.Reason)
-	return ctrl.Result{}, r.Status().Patch(ctx, hv, k8sclient.MergeFromWithOptions(base,
-		k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(ControllerName))
+	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, req.Name, ControllerName, func(h *kvmv1.Hypervisor) {
+		meta.SetStatusCondition(&h.Status.Conditions, readyCondition)
+	})
 }
 
 // ComputeReadyCondition determines the Ready condition based on other conditions
