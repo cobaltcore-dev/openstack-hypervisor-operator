@@ -503,7 +503,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 
 	imageRef, err := r.findTestImage(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not list networks: %w", err)
+		return nil, fmt.Errorf("could not find test image: %w", err)
 	}
 
 	networkRef, err := r.findTestNetwork(ctx)
