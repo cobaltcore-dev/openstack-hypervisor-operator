@@ -111,6 +111,13 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	if version {
+		fmt.Printf("%s %s (%s/%s) %s\n",
+			bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
+			bininfo.CommitOr("edge"))
+		os.Exit(0)
+	}
+
 	if certificateIssuerName == "" {
 		setupLog.Error(errors.New("certificate-issuer-name cannot be empty"), "invalid certificate issuer name")
 		os.Exit(1)
@@ -119,10 +126,6 @@ func main() {
 	if certificateNamespace == "" {
 		setupLog.Error(errors.New("certificate-namespace cannot be empty"), "invalid certificate namespace")
 		os.Exit(1)
-	}
-
-	if version {
-		os.Exit(0)
 	}
 
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&opts)))
