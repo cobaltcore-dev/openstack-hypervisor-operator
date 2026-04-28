@@ -63,7 +63,7 @@ func updateInstanceHA(hypervisor *kvmv1.Hypervisor, data string, acceptedCodes [
 	url := InstanceHaUrl(region, zone, hostname)
 	client := &http.Client{Timeout: 30 * time.Second}
 	// G107: Potential HTTP request made with variable url
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:gosec,bodyclose
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:bodyclose
 	if err != nil {
 		return fmt.Errorf("failed to send request to ha service due to %w", err)
 	}
