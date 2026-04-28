@@ -195,6 +195,8 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 			return fmt.Errorf("failed to parse global label selector: %w", err)
 		}
 
+		// Copy transferLabels before appending to avoid mutating the package-level slice
+		transferLabels = append([]string{}, transferLabels...)
 		for _, requirement := range requirements {
 			transferLabels = append(transferLabels, requirement.Key())
 		}
