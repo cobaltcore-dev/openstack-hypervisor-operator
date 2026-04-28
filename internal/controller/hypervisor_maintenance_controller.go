@@ -248,7 +248,6 @@ func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, 
 // SetupWithManager sets up the controller with the Manager.
 func (hec *HypervisorMaintenanceController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
 
 	var err error
 	if hec.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {

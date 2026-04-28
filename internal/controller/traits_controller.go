@@ -180,7 +180,6 @@ func getTraitCondition(err error, msg string) metav1.Condition {
 // SetupWithManager sets up the controller with the Manager.
 func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
 
 	var err error
 	if tc.serviceClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {
