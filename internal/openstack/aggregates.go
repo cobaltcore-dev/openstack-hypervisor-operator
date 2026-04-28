@@ -26,6 +26,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/aggregates"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 // ApplyAggregates ensures a host is in exactly the specified aggregates.
@@ -75,8 +76,8 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 		}
 	}
 
-	toAdd := difference(currentAggregates, desiredAggregates)
-	toRemove := difference(desiredAggregates, currentAggregates)
+	toAdd := utils.Difference(currentAggregates, desiredAggregates)
+	toRemove := utils.Difference(desiredAggregates, currentAggregates)
 
 	// Verify all desired aggregates exist
 	var missingAggregates []string
@@ -134,15 +135,4 @@ func ApplyAggregates(ctx context.Context, serviceClient *gophercloud.ServiceClie
 	}
 
 	return result, nil
-}
-
-// difference returns all elements in s2 that are not in s1
-func difference(s1, s2 []string) []string {
-	diff := make([]string, 0)
-	for _, item := range s2 {
-		if !slices.Contains(s1, item) {
-			diff = append(diff, item)
-		}
-	}
-	return diff
 }

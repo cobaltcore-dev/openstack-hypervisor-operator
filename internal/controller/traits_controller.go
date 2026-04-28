@@ -98,8 +98,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	toAdd := Difference(customTraitsApplied, hv.Spec.CustomTraits)
-	toRemove := Difference(hv.Spec.CustomTraits, customTraitsApplied)
+	toAdd := utils.Difference(customTraitsApplied, hv.Spec.CustomTraits)
+	toRemove := utils.Difference(hv.Spec.CustomTraits, customTraitsApplied)
 
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()

@@ -20,6 +20,8 @@ package controller
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 var _ = Describe("Utils", func() {
@@ -31,7 +33,7 @@ var _ = Describe("Utils", func() {
 			By("returning all elements in b not in a")
 			expectedDifference := []string{"e", "f"}
 
-			difference := Difference(sliceA, sliceB)
+			difference := utils.Difference(sliceA, sliceB)
 			Expect(difference).To(Equal(expectedDifference))
 		})
 	})
