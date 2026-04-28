@@ -172,8 +172,17 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 }
 
 func (r *EvictionReconciler) updateStatus(ctx context.Context, eviction, base *kvmv1.Eviction) error {
+	// Capture the desired status to re-apply on each retry attempt
+	desiredStatus := eviction.Status.DeepCopy()
 	return retry.RetryOnConflict(utils.StatusPatchBackoff, func() error {
-		return r.Status().Patch(ctx, eviction, client.MergeFromWithOptions(base,
+		// Re-fetch the latest version to get the current resourceVersion
+		freshEviction := &kvmv1.Eviction{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(eviction), freshEviction); err != nil {
+			return err
+		}
+		freshBase := freshEviction.DeepCopy()
+		freshEviction.Status = *desiredStatus
+		return r.Status().Patch(ctx, freshEviction, client.MergeFromWithOptions(freshBase,
 			client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
 	})
 }
