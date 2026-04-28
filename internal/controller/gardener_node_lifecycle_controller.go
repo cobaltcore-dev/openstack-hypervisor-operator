@@ -72,8 +72,12 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	}
 
 	hv := &kvmv1.Hypervisor{}
-	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, hv); k8sclient.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, hv); err != nil {
+		if k8sclient.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
+		}
+		// Hypervisor not found, nothing to do
+		return ctrl.Result{}, nil
 	}
 
 	if !hv.Spec.LifecycleEnabled {
