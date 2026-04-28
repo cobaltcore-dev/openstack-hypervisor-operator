@@ -32,12 +32,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
 // EvictionReconciler reconciles a Eviction object
@@ -170,8 +172,10 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 }
 
 func (r *EvictionReconciler) updateStatus(ctx context.Context, eviction, base *kvmv1.Eviction) error {
-	return r.Status().Patch(ctx, eviction, client.MergeFromWithOptions(base,
-		client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
+	return retry.RetryOnConflict(utils.StatusPatchBackoff, func() error {
+		return r.Status().Patch(ctx, eviction, client.MergeFromWithOptions(base,
+			client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
+	})
 }
 
 func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
