@@ -363,35 +363,32 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			Message: fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID),
 			Reason:  kvmv1.ConditionReasonFailed,
 		})
-		if err2 := r.updateStatus(ctx, eviction, base); err2 != nil {
-			return ctrl.Result{}, fmt.Errorf("could update status due to %w", err2)
+		if err := r.updateStatus(ctx, eviction, base); err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not update status due to %w", err)
 		}
+		return ctrl.Result{RequeueAfter: defaultPollTime}, nil
 	} else if vm.Status == "ACTIVE" || vm.PowerState == 1 {
 		log.Info("trigger live-migration")
-		err := r.liveMigrate(ctx, vm.ID, eviction)
-		if err != nil {
+		if err := r.liveMigrate(ctx, vm.ID, eviction); err != nil {
 			if err2 := r.handleNotFound(ctx, eviction, base, err); err2 != nil {
 				return ctrl.Result{}, err2
-			} else {
-				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
+			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 		}
 	} else {
 		log.Info("trigger cold-migration")
-		err := r.coldMigrate(ctx, vm.ID, eviction)
-		if err != nil {
+		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
 			if err2 := r.handleNotFound(ctx, eviction, base, err); err2 != nil {
 				return ctrl.Result{}, err2
-			} else {
-				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 			}
+			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
 		}
 	}
 
 	// Triggered a migration, give it a generous time to start, so we do not
 	// see the old state because the migration didn't start
 	log.Info("poll")
-	return ctrl.Result{RequeueAfter: defaultPollTime}, err
+	return ctrl.Result{RequeueAfter: defaultPollTime}, nil
 }
 
 func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {
