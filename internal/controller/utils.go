@@ -95,10 +95,11 @@ func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, condition
 }
 
 // FindNodeStatusCondition returns the condition of the given type if it exists.
+// Note: Returns a pointer into the original slice element, not a copy.
 func FindNodeStatusCondition(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) *corev1.NodeCondition {
-	for _, condition := range conditions {
-		if condition.Type == conditionType {
-			return &condition
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return &conditions[i]
 		}
 	}
 	return nil
