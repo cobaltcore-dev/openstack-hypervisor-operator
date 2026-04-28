@@ -209,7 +209,7 @@ func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context
 							WithStartupProbe(corev1ac.Probe().
 								WithExec(corev1ac.ExecAction().WithCommand(command)).
 								WithInitialDelaySeconds(0).
-								WithPeriodSeconds(0).
+								WithPeriodSeconds(1).
 								WithFailureThreshold(1).
 								WithSuccessThreshold(1))))))
 
