@@ -43,5 +43,6 @@ func (e *SanitizeReconcileErrorEncoder) EncodeEntry(entry zapcore.Entry, fields 
 func (e *SanitizeReconcileErrorEncoder) Clone() zapcore.Encoder {
 	return &SanitizeReconcileErrorEncoder{
 		Encoder: e.Encoder.Clone(),
+		cfg:     e.cfg,
 	}
 }
