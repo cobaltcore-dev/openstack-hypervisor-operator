@@ -26,6 +26,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,8 +59,9 @@ func updateInstanceHA(hypervisor *kvmv1.Hypervisor, data string, acceptedCodes [
 	}
 
 	url := InstanceHaUrl(region, zone, hostname)
+	client := &http.Client{Timeout: 30 * time.Second}
 	// G107: Potential HTTP request made with variable url
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:gosec,bodyclose
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:gosec,bodyclose
 	if err != nil {
 		return fmt.Errorf("failed to send request to ha service due to %w", err)
 	}
