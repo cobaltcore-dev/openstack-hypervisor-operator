@@ -153,9 +153,6 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *HypervisorInstanceHaController) SetupWithManager(mgr ctrl.Manager) error {
-	ctx := context.Background()
-	_ = logger.FromContext(ctx)
-
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(HypervisorInstanceHaControllerName).
 		For(&kvmv1.Hypervisor{}). // trigger the r.Reconcile whenever a hypervisor is created/updated/deleted.

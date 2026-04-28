@@ -221,7 +221,6 @@ func slicesEqualUnordered(a, b []string) bool {
 // SetupWithManager sets up the controller with the Manager.
 func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
 
 	var err error
 	if ac.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
