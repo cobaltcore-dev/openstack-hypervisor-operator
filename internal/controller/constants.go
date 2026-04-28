@@ -19,8 +19,6 @@ package controller
 
 // This should contain constants shared between controllers
 const (
-	labelEvictionRequired = "cloud.sap/hypervisor-eviction-required"
-	labelEvictionApproved = "cloud.sap/hypervisor-eviction-succeeded"
-	labelHypervisor       = "nova.openstack.cloud.sap/virt-driver"
-	testAggregateName     = "tenant_filter_tests"
+	labelHypervisor   = "nova.openstack.cloud.sap/virt-driver"
+	testAggregateName = "tenant_filter_tests"
 )

@@ -53,19 +53,3 @@ func PatchHypervisorStatusWithRetry(ctx context.Context, c k8sclient.Client, nam
 			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(fieldOwner))
 	})
 }
-
-// PatchEvictionStatusWithRetry patches eviction status with retry on conflict.
-// The updateFn receives a fresh copy of the eviction and should apply status changes to it.
-// It re-fetches the resource before each retry attempt to get the latest resourceVersion.
-func PatchEvictionStatusWithRetry(ctx context.Context, c k8sclient.Client, name, fieldOwner string, updateFn func(*kvmv1.Eviction)) error {
-	return retry.RetryOnConflict(StatusPatchBackoff, func() error {
-		eviction := &kvmv1.Eviction{}
-		if err := c.Get(ctx, k8sclient.ObjectKey{Name: name}, eviction); err != nil {
-			return err
-		}
-		base := eviction.DeepCopy()
-		updateFn(eviction)
-		return c.Status().Patch(ctx, eviction, k8sclient.MergeFromWithOptions(base,
-			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(fieldOwner))
-	})
-}
