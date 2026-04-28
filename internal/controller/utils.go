@@ -19,7 +19,6 @@ package controller
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,11 +84,6 @@ func disableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
 	return updateInstanceHA(hypervisor, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
 }
 
-// IsNodeConditionTrue returns true when the conditionType is present and set to `corev1.ConditionTrue`
-func IsNodeConditionTrue(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) bool {
-	return IsNodeConditionPresentAndEqual(conditions, conditionType, corev1.ConditionTrue)
-}
-
 // IsNodeConditionPresentAndEqual returns true when conditionType is present and equal to status.
 func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType, status corev1.ConditionStatus) bool {
 	for _, condition := range conditions {
@@ -110,15 +104,6 @@ func FindNodeStatusCondition(conditions []corev1.NodeCondition, conditionType co
 	return nil
 }
 
-func HasStatusCondition(conditions []metav1.Condition, conditionType string) bool {
-	for _, condition := range conditions {
-		if condition.Type == conditionType {
-			return true
-		}
-	}
-	return false
-}
-
 // returns a OwnerReference for the given object and groupversionkind info as returned by apiutil.GVKForObject
 func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.OwnerReferenceApplyConfiguration {
 	return v1ac.OwnerReference().
@@ -127,8 +112,6 @@ func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.Owner
 		WithName(obj.GetName()).
 		WithUID(obj.GetUID())
 }
-
-var ErrRetry = errors.New("ErrRetry")
 
 // returns if any ManagedField of the object has been modified by kubectl
 func HasKubectlManagedFields(object *metav1.ObjectMeta) bool {
