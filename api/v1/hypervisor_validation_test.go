@@ -441,7 +441,7 @@ var _ = Describe("Groups CEL Validation", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
 				Spec: HypervisorSpec{
 					Groups: []Group{
-						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"}},
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
 					},
 				},
 			}
@@ -454,7 +454,7 @@ var _ = Describe("Groups CEL Validation", func() {
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
-						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"}},
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
 						{Trait: &TraitGroup{Name: "COMPUTE_STATUS_DISABLED"}},
 					},
 				},
@@ -469,7 +469,7 @@ var _ = Describe("Groups CEL Validation", func() {
 					Groups: []Group{
 						{
 							Trait:     &TraitGroup{Name: "HW_CPU_X86_AVX2"},
-							Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "abc-123"},
+							Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"},
 						},
 					},
 				},
