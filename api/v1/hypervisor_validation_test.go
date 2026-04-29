@@ -506,6 +506,7 @@ var _ = Describe("Groups CEL Validation", func() {
 			}
 			err := k8sClient.Create(ctx, hypervisor)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.groups[0].trait.name"))
 		})
 
 		It("should reject an aggregate with empty name", func(ctx SpecContext) {
@@ -513,12 +514,13 @@ var _ = Describe("Groups CEL Validation", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
 				Spec: HypervisorSpec{
 					Groups: []Group{
-						{Aggregate: &AggregateGroup{Name: "", UUID: "uuid-1"}},
+						{Aggregate: &AggregateGroup{Name: "", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
 					},
 				},
 			}
 			err := k8sClient.Create(ctx, hypervisor)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.groups[0].aggregate.name"))
 		})
 
 		It("should reject an aggregate with empty UUID", func(ctx SpecContext) {
@@ -532,6 +534,7 @@ var _ = Describe("Groups CEL Validation", func() {
 			}
 			err := k8sClient.Create(ctx, hypervisor)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.groups[0].aggregate.uuid"))
 		})
 
 		It("should accept an aggregate without metadata", func(ctx SpecContext) {
@@ -539,7 +542,7 @@ var _ = Describe("Groups CEL Validation", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
 				Spec: HypervisorSpec{
 					Groups: []Group{
-						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "uuid-1"}},
+						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
 					},
 				},
 			}
@@ -553,13 +556,19 @@ var _ = Describe("Groups CEL Validation", func() {
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{
 							Name:     "fast-storage",
-							UUID:     "uuid-1",
+							UUID:     "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
 							Metadata: map[string]string{"ssd": "true"},
 						}},
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+
+			created := &Hypervisor{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(hypervisor), created)).To(Succeed())
+			Expect(created.Spec.Groups).To(HaveLen(1))
+			Expect(created.Spec.Groups[0].Aggregate).NotTo(BeNil())
+			Expect(created.Spec.Groups[0].Aggregate.Metadata).To(HaveKeyWithValue("ssd", "true"))
 		})
 
 		It("should accept an empty groups list", func(ctx SpecContext) {
@@ -578,8 +587,8 @@ var _ = Describe("Group Helper Functions", func() {
 	groups := []Group{
 		{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
 		{Trait: &TraitGroup{Name: "COMPUTE_STATUS_DISABLED"}},
-		{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "uuid-1", Metadata: map[string]string{"ssd": "true"}}},
-		{Aggregate: &AggregateGroup{Name: "slow-storage", UUID: "uuid-2"}},
+		{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", Metadata: map[string]string{"ssd": "true"}}},
+		{Aggregate: &AggregateGroup{Name: "slow-storage", UUID: "b1ffbc99-9c0b-4ef8-bb6d-6bb9bd380a22"}},
 	}
 
 	Context("HasTrait", func() {
@@ -605,7 +614,7 @@ var _ = Describe("Group Helper Functions", func() {
 		})
 
 		It("should return empty for a list with no traits", func() {
-			aggs := []Group{{Aggregate: &AggregateGroup{Name: "a", UUID: "u"}}}
+			aggs := []Group{{Aggregate: &AggregateGroup{Name: "a", UUID: "d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"}}}
 			Expect(GetTraits(aggs)).To(BeEmpty())
 		})
 
@@ -616,15 +625,15 @@ var _ = Describe("Group Helper Functions", func() {
 
 	Context("HasAggregate", func() {
 		It("should return true for an existing aggregate UUID", func() {
-			Expect(HasAggregate(groups, "uuid-1")).To(BeTrue())
+			Expect(HasAggregate(groups, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")).To(BeTrue())
 		})
 
 		It("should return false for a missing aggregate UUID", func() {
-			Expect(HasAggregate(groups, "uuid-999")).To(BeFalse())
+			Expect(HasAggregate(groups, "c2ffbc99-9c0b-4ef8-bb6d-6bb9bd380a99")).To(BeFalse())
 		})
 
 		It("should return false for an empty list", func() {
-			Expect(HasAggregate(nil, "uuid-1")).To(BeFalse())
+			Expect(HasAggregate(nil, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")).To(BeFalse())
 		})
 	})
 
@@ -633,10 +642,10 @@ var _ = Describe("Group Helper Functions", func() {
 			aggs := GetAggregates(groups)
 			Expect(aggs).To(HaveLen(2))
 			Expect(aggs[0].Name).To(Equal("fast-storage"))
-			Expect(aggs[0].UUID).To(Equal("uuid-1"))
+			Expect(aggs[0].UUID).To(Equal("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"))
 			Expect(aggs[0].Metadata).To(HaveKeyWithValue("ssd", "true"))
 			Expect(aggs[1].Name).To(Equal("slow-storage"))
-			Expect(aggs[1].UUID).To(Equal("uuid-2"))
+			Expect(aggs[1].UUID).To(Equal("b1ffbc99-9c0b-4ef8-bb6d-6bb9bd380a22"))
 		})
 
 		It("should return empty for a list with no aggregates", func() {

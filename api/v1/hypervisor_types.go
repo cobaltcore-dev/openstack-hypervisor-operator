@@ -244,7 +244,7 @@ type AggregateGroup struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
 	UUID string `json:"uuid"`
 
 	// +kubebuilder:validation:Optional
