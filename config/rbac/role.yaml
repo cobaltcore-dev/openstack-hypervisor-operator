@@ -48,7 +48,6 @@ rules:
   resources:
   - evictions
   - hypervisors
-  - hypervisors/status
   verbs:
   - create
   - delete
@@ -71,6 +70,16 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - kvm.cloud.sap
+  resources:
+  - hypervisors/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - policy
   resources:
