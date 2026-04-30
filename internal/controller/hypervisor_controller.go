@@ -48,7 +48,7 @@ const (
 	HypervisorControllerName = "hypervisor"
 )
 
-var transferLabels = []string{
+var defaultTransferLabels = []string{
 	corev1.LabelHostname,
 	"kubernetes.metal.cloud.sap/bb",
 	"kubernetes.metal.cloud.sap/cluster",
@@ -59,6 +59,8 @@ var transferLabels = []string{
 	corev1.LabelTopologyRegion,
 	corev1.LabelTopologyZone,
 }
+
+var transferLabels = append([]string{}, defaultTransferLabels...)
 
 type HypervisorController struct {
 	k8sclient.Client
@@ -195,8 +197,8 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 			return fmt.Errorf("failed to parse global label selector: %w", err)
 		}
 
-		// Copy transferLabels before appending to avoid mutating the package-level slice
-		transferLabels = append([]string{}, transferLabels...)
+		// Rebuild from immutable defaults to avoid accumulating state across repeated calls
+		transferLabels = append([]string{}, defaultTransferLabels...)
 		for _, requirement := range requirements {
 			transferLabels = append(transferLabels, requirement.Key())
 		}
