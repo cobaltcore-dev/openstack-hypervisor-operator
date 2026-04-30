@@ -823,7 +823,7 @@ var _ = Describe("Booking Helper Functions", func() {
 		{Consumer: &ConsumerBooking{
 			UUID:               "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
 			Resources:          map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2"), ResourceMemory: resource.MustParse("4Gi")},
-			ConsumerGeneration: ptr(int64(1)),
+			ConsumerGeneration: new(int64),
 			ConsumerType:       "INSTANCE",
 			ProjectID:          "proj-123",
 			UserID:             "user-456",
@@ -943,5 +943,3 @@ var _ = Describe("Booking Helper Functions", func() {
 		})
 	})
 })
-
-func ptr[T any](v T) *T { return &v }
