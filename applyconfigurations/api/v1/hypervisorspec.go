@@ -16,6 +16,7 @@ type HypervisorSpecApplyConfiguration struct {
 	SkipTests                    *bool                          `json:"skipTests,omitempty"`
 	CustomTraits                 []string                       `json:"customTraits,omitempty"`
 	Aggregates                   []string                       `json:"aggregates,omitempty"`
+	Groups                       []GroupApplyConfiguration      `json:"groups,omitempty"`
 	AllowedProjects              []string                       `json:"allowedProjects,omitempty"`
 	HighAvailability             *bool                          `json:"highAvailability,omitempty"`
 	CreateCertManagerCertificate *bool                          `json:"createCertManagerCertificate,omitempty"`
@@ -87,6 +88,19 @@ func (b *HypervisorSpecApplyConfiguration) WithCustomTraits(values ...string) *H
 func (b *HypervisorSpecApplyConfiguration) WithAggregates(values ...string) *HypervisorSpecApplyConfiguration {
 	for i := range values {
 		b.Aggregates = append(b.Aggregates, values[i])
+	}
+	return b
+}
+
+// WithGroups adds the given value to the Groups field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Groups field.
+func (b *HypervisorSpecApplyConfiguration) WithGroups(values ...*GroupApplyConfiguration) *HypervisorSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithGroups")
+		}
+		b.Groups = append(b.Groups, *values[i])
 	}
 	return b
 }
