@@ -200,7 +200,10 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 		// Rebuild from immutable defaults to avoid accumulating state across repeated calls
 		transferLabels = append([]string{}, defaultTransferLabels...)
 		for _, requirement := range requirements {
-			transferLabels = append(transferLabels, requirement.Key())
+			key := requirement.Key()
+			if !slices.Contains(transferLabels, key) {
+				transferLabels = append(transferLabels, key)
+			}
 		}
 	}
 
