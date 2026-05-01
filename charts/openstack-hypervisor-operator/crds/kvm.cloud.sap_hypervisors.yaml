@@ -146,7 +146,7 @@ spec:
                   (as used by PodSpec.volumes in core Kubernetes): exactly one
                   type-specific sub-field must be populated per entry.
 
-                  The Cortex Placement Shim and scheduler read group memberships
+                  The Cortex Placement shim and scheduler read group memberships
                   directly from this field.
 
                   Note: uniqueness of trait names and aggregate UUIDs is not enforced

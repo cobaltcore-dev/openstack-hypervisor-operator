@@ -19,6 +19,7 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // EvictionSpec defines the desired state of Eviction
@@ -112,5 +113,8 @@ type EvictionList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Eviction{}, &EvictionList{})
+	SchemeBuilder.Register(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(GroupVersion, &Eviction{}, &EvictionList{})
+		return nil
+	})
 }

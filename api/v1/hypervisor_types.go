@@ -20,6 +20,7 @@ package v1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ResourceName is the name identifying a hypervisor resource.
@@ -598,5 +599,8 @@ type HypervisorList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Hypervisor{}, &HypervisorList{})
+	SchemeBuilder.Register(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(GroupVersion, &Hypervisor{}, &HypervisorList{})
+		return nil
+	})
 }
