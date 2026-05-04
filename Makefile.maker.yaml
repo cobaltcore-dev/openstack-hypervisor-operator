@@ -9,7 +9,8 @@ controllerGen:
   enabled: true
   crdOutputPath: charts/openstack-hypervisor-operator/crds
   objectHeaderFile: hack/boilerplate.go.txt
-  rbacRoleName: manager-role
+  rbacRoleName: hypervisor-operator-manager-role
+  rbacOutputPath: charts/openstack-hypervisor-operator/templates
   allowDangerousTypes: true
 
 coverageTest:
