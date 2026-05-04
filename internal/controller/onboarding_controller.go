@@ -415,7 +415,7 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 		return errRequeue
 	}
 
-	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 1)[0]
+	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 2)[0]
 
 	hypervisorQuery := hypervisors.ListOpts{HypervisorHostnamePattern: &shortHypervisorAddress}
 	hypervisorPages, err := hypervisors.List(r.computeClient, hypervisorQuery).AllPages(ctx)
@@ -438,7 +438,7 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 	var found = false
 	var myHypervisor hypervisors.Hypervisor
 	for _, h := range hs {
-		short := strings.SplitN(h.HypervisorHostname, ".", 1)[0]
+		short := strings.SplitN(h.HypervisorHostname, ".", 2)[0]
 		if short == shortHypervisorAddress {
 			myHypervisor = h
 			found = true
@@ -503,7 +503,7 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 
 	imageRef, err := r.findTestImage(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not list networks: %w", err)
+		return nil, fmt.Errorf("could not find test image: %w", err)
 	}
 
 	networkRef, err := r.findTestNetwork(ctx)

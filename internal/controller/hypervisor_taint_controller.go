@@ -43,7 +43,7 @@ type HypervisorTaintController struct {
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
 func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hypervisor := &kvmv1.Hypervisor{

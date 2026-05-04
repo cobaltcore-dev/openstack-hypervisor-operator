@@ -171,7 +171,7 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 	})
 
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("could create certificate %w", err)
+		return ctrl.Result{}, fmt.Errorf("could not create certificate: %w", err)
 	}
 
 	return ctrl.Result{}, nil

@@ -19,13 +19,13 @@ package controller
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +37,9 @@ import (
 
 func InstanceHaUrl(region, zone, hostname string) string {
 	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
+		if !strings.HasSuffix(haURL, "/") {
+			haURL += "/"
+		}
 		return haURL + "api/hypervisors/" + hostname
 	}
 	return fmt.Sprintf("https://kvm-ha-service-%v.%v.cloud.sap/api/hypervisors/%v", zone, region, hostname)
@@ -58,8 +61,9 @@ func updateInstanceHA(hypervisor *kvmv1.Hypervisor, data string, acceptedCodes [
 	}
 
 	url := InstanceHaUrl(region, zone, hostname)
+	client := &http.Client{Timeout: 30 * time.Second}
 	// G107: Potential HTTP request made with variable url
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:gosec,bodyclose
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:bodyclose
 	if err != nil {
 		return fmt.Errorf("failed to send request to ha service due to %w", err)
 	}
@@ -80,11 +84,6 @@ func disableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
 	return updateInstanceHA(hypervisor, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
 }
 
-// IsNodeConditionTrue returns true when the conditionType is present and set to `corev1.ConditionTrue`
-func IsNodeConditionTrue(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) bool {
-	return IsNodeConditionPresentAndEqual(conditions, conditionType, corev1.ConditionTrue)
-}
-
 // IsNodeConditionPresentAndEqual returns true when conditionType is present and equal to status.
 func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType, status corev1.ConditionStatus) bool {
 	for _, condition := range conditions {
@@ -96,34 +95,14 @@ func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, condition
 }
 
 // FindNodeStatusCondition returns the condition of the given type if it exists.
+// Note: Returns a pointer into the original slice element, not a copy.
 func FindNodeStatusCondition(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) *corev1.NodeCondition {
-	for _, condition := range conditions {
-		if condition.Type == conditionType {
-			return &condition
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return &conditions[i]
 		}
 	}
 	return nil
-}
-
-func HasStatusCondition(conditions []metav1.Condition, conditionType string) bool {
-	for _, condition := range conditions {
-		if condition.Type == conditionType {
-			return true
-		}
-	}
-	return false
-}
-
-// returns all elements in b not in a
-func Difference[S ~[]E, E comparable](s1, s2 S) S {
-	diff := make(S, 0)
-	for item := range slices.Values(s2) {
-		if !slices.Contains(s1, item) {
-			diff = append(diff, item)
-		}
-	}
-
-	return diff
 }
 
 // returns a OwnerReference for the given object and groupversionkind info as returned by apiutil.GVKForObject
@@ -134,8 +113,6 @@ func OwnerReference(obj metav1.Object, gvk *schema.GroupVersionKind) *v1ac.Owner
 		WithName(obj.GetName()).
 		WithUID(obj.GetUID())
 }
-
-var ErrRetry = errors.New("ErrRetry")
 
 // returns if any ManagedField of the object has been modified by kubectl
 func HasKubectlManagedFields(object *metav1.ObjectMeta) bool {

@@ -15,10 +15,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package utils
 
-// This should contain constants shared between controllers
-const (
-	labelHypervisor   = "nova.openstack.cloud.sap/virt-driver"
-	testAggregateName = "tenant_filter_tests"
-)
+import "slices"
+
+// Difference returns all elements in s2 that are not in s1.
+func Difference[S ~[]E, E comparable](s1, s2 S) S {
+	diff := make(S, 0)
+	for item := range slices.Values(s2) {
+		if !slices.Contains(s1, item) {
+			diff = append(diff, item)
+		}
+	}
+
+	return diff
+}

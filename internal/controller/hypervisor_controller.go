@@ -48,7 +48,7 @@ const (
 	HypervisorControllerName = "hypervisor"
 )
 
-var transferLabels = []string{
+var defaultTransferLabels = []string{
 	corev1.LabelHostname,
 	"kubernetes.metal.cloud.sap/bb",
 	"kubernetes.metal.cloud.sap/cluster",
@@ -60,6 +60,8 @@ var transferLabels = []string{
 	corev1.LabelTopologyZone,
 }
 
+var transferLabels = append([]string{}, defaultTransferLabels...)
+
 type HypervisorController struct {
 	k8sclient.Client
 	Scheme *runtime.Scheme
@@ -68,7 +70,7 @@ type HypervisorController struct {
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
 func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logger.FromContext(ctx).WithName(req.Name)
@@ -195,8 +197,13 @@ func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager) error {
 			return fmt.Errorf("failed to parse global label selector: %w", err)
 		}
 
+		// Rebuild from immutable defaults to avoid accumulating state across repeated calls
+		transferLabels = append([]string{}, defaultTransferLabels...)
 		for _, requirement := range requirements {
-			transferLabels = append(transferLabels, requirement.Key())
+			key := requirement.Key()
+			if !slices.Contains(transferLabels, key) {
+				transferLabels = append(transferLabels, key)
+			}
 		}
 	}
 

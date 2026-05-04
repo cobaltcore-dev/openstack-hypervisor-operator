@@ -29,7 +29,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
 
@@ -49,7 +48,7 @@ type AggregatesController struct {
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
 func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hv := &kvmv1.Hypervisor{}
@@ -221,7 +220,6 @@ func slicesEqualUnordered(a, b []string) bool {
 // SetupWithManager sets up the controller with the Manager.
 func (ac *AggregatesController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
 
 	var err error
 	if ac.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {

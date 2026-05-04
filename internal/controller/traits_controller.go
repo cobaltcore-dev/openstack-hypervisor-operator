@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
@@ -51,7 +50,7 @@ type TraitsController struct {
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
 func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hv := &kvmv1.Hypervisor{}
@@ -98,8 +97,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	toAdd := Difference(customTraitsApplied, hv.Spec.CustomTraits)
-	toRemove := Difference(hv.Spec.CustomTraits, customTraitsApplied)
+	toAdd := utils.Difference(customTraitsApplied, hv.Spec.CustomTraits)
+	toRemove := utils.Difference(hv.Spec.CustomTraits, customTraitsApplied)
 
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
@@ -180,7 +179,6 @@ func getTraitCondition(err error, msg string) metav1.Condition {
 // SetupWithManager sets up the controller with the Manager.
 func (tc *TraitsController) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
-	_ = logger.FromContext(ctx)
 
 	var err error
 	if tc.serviceClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {

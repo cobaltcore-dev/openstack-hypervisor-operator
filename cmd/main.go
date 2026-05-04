@@ -101,6 +101,23 @@ func main() {
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
 		"Name of the certificate issuer.")
 
+	opts := ctrlzap.Options{
+		Development:     true,
+		TimeEncoder:     zapcore.ISO8601TimeEncoder,
+		Encoder:         logger.NewSanitizeReconcileErrorEncoder(zap.NewDevelopmentEncoderConfig()),
+		StacktraceLevel: zap.DPanicLevel,
+	}
+
+	opts.BindFlags(flag.CommandLine)
+	flag.Parse()
+
+	if version {
+		fmt.Printf("%s %s (%s/%s) %s\n",
+			bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
+			bininfo.CommitOr("edge"))
+		os.Exit(0)
+	}
+
 	if certificateIssuerName == "" {
 		setupLog.Error(errors.New("certificate-issuer-name cannot be empty"), "invalid certificate issuer name")
 		os.Exit(1)
@@ -109,20 +126,6 @@ func main() {
 	if certificateNamespace == "" {
 		setupLog.Error(errors.New("certificate-namespace cannot be empty"), "invalid certificate namespace")
 		os.Exit(1)
-	}
-
-	opts := ctrlzap.Options{
-		Development:     true,
-		TimeEncoder:     zapcore.ISO8601TimeEncoder,
-		Encoder:         logger.NewSanitzeReconcileErrorEncoder(zap.NewDevelopmentEncoderConfig()),
-		StacktraceLevel: zap.DPanicLevel,
-	}
-
-	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
-
-	if version {
-		os.Exit(0)
 	}
 
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&opts)))

@@ -22,16 +22,16 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func NewSanitzeReconcileErrorEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
-	return &SanitzeReconcileErrorEncoder{zapcore.NewConsoleEncoder(cfg), cfg}
+func NewSanitizeReconcileErrorEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
+	return &SanitizeReconcileErrorEncoder{zapcore.NewConsoleEncoder(cfg), cfg}
 }
 
-type SanitzeReconcileErrorEncoder struct {
+type SanitizeReconcileErrorEncoder struct {
 	zapcore.Encoder
 	cfg zapcore.EncoderConfig
 }
 
-func (e *SanitzeReconcileErrorEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+func (e *SanitizeReconcileErrorEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	if entry.Message == "Reconcile error" {
 		// Downgrade the log level to debug to avoid log spam
 		entry.Level = zapcore.WarnLevel
@@ -40,8 +40,9 @@ func (e *SanitzeReconcileErrorEncoder) EncodeEntry(entry zapcore.Entry, fields [
 	return e.Encoder.EncodeEntry(entry, fields)
 }
 
-func (e *SanitzeReconcileErrorEncoder) Clone() zapcore.Encoder {
-	return &SanitzeReconcileErrorEncoder{
+func (e *SanitizeReconcileErrorEncoder) Clone() zapcore.Encoder {
+	return &SanitizeReconcileErrorEncoder{
 		Encoder: e.Encoder.Clone(),
+		cfg:     e.cfg,
 	}
 }
