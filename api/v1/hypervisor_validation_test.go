@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -655,6 +656,290 @@ var _ = Describe("Group Helper Functions", func() {
 
 		It("should return nil for an empty list", func() {
 			Expect(GetAggregates(nil)).To(BeNil())
+		})
+	})
+})
+
+var _ = Describe("Bookings CEL Validation", func() {
+	var (
+		hypervisor     *Hypervisor
+		hypervisorName types.NamespacedName
+		counter        int
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		counter++
+		hypervisorName = types.NamespacedName{
+			Name: fmt.Sprintf("test-bookings-hv-%d", counter),
+		}
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		if hypervisor != nil {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+			hypervisor = nil
+		}
+	})
+
+	Context("Union rule: exactly one booking type per entry", func() {
+		It("should accept a booking with only consumer set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{Consumer: &ConsumerBooking{
+							UUID:      "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2")},
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept a booking with only reservation set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{Reservation: &ReservationBooking{
+							Name:      "nova-reserved",
+							Resources: map[ResourceName]resource.Quantity{ResourceMemory: resource.MustParse("512Mi")},
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should accept mixed consumer and reservation entries", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{Consumer: &ConsumerBooking{
+							UUID:      "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2")},
+						}},
+						{Reservation: &ReservationBooking{
+							Name:      "nova-reserved",
+							Resources: map[ResourceName]resource.Quantity{ResourceMemory: resource.MustParse("512Mi")},
+						}},
+						{Consumer: &ConsumerBooking{
+							UUID:      "b1ffbc99-9c0b-4ef8-bb6d-6bb9bd380a22",
+							Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("4")},
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should reject a booking with both consumer and reservation set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{
+							Consumer: &ConsumerBooking{
+								UUID:      "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+								Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2")},
+							},
+							Reservation: &ReservationBooking{
+								Name:      "nova-reserved",
+								Resources: map[ResourceName]resource.Quantity{ResourceMemory: resource.MustParse("512Mi")},
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exactly one booking type must be set"))
+		})
+
+		It("should reject a booking with neither consumer nor reservation set", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exactly one booking type must be set"))
+		})
+
+		It("should accept an empty bookings list", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+		})
+	})
+
+	Context("Field validation", func() {
+		It("should reject a consumer with invalid UUID", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{Consumer: &ConsumerBooking{
+							UUID:      "not-a-uuid",
+							Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2")},
+						}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should reject a reservation with empty name", func(ctx SpecContext) {
+			hypervisor = &Hypervisor{
+				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Spec: HypervisorSpec{
+					Bookings: []Booking{
+						{Reservation: &ReservationBooking{
+							Name:      "",
+							Resources: map[ResourceName]resource.Quantity{ResourceMemory: resource.MustParse("512Mi")},
+						}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, hypervisor)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+})
+
+var _ = Describe("Booking Helper Functions", func() {
+	bookings := []Booking{
+		{Consumer: &ConsumerBooking{
+			UUID:               "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			Resources:          map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2"), ResourceMemory: resource.MustParse("4Gi")},
+			ConsumerGeneration: new(int64),
+			ConsumerType:       "INSTANCE",
+			ProjectID:          "proj-123",
+			UserID:             "user-456",
+		}},
+		{Consumer: &ConsumerBooking{
+			UUID:      "b1ffbc99-9c0b-4ef8-bb6d-6bb9bd380a22",
+			Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("4"), ResourceMemory: resource.MustParse("8Gi")},
+		}},
+		{Reservation: &ReservationBooking{
+			Name:      "nova-reserved",
+			Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("2"), ResourceMemory: resource.MustParse("512Mi")},
+		}},
+	}
+
+	Context("GetConsumers", func() {
+		It("should return all consumer entries", func() {
+			consumers := GetConsumers(bookings)
+			Expect(consumers).To(HaveLen(2))
+			Expect(consumers[0].UUID).To(Equal("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"))
+			Expect(consumers[1].UUID).To(Equal("b1ffbc99-9c0b-4ef8-bb6d-6bb9bd380a22"))
+		})
+
+		It("should return empty for a list with no consumers", func() {
+			reservations := []Booking{{Reservation: &ReservationBooking{Name: "r", Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("1")}}}}
+			Expect(GetConsumers(reservations)).To(BeEmpty())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetConsumers(nil)).To(BeNil())
+		})
+	})
+
+	Context("GetConsumer", func() {
+		It("should find a consumer by UUID", func() {
+			c := GetConsumer(bookings, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+			Expect(c).NotTo(BeNil())
+			Expect(c.ProjectID).To(Equal("proj-123"))
+		})
+
+		It("should return nil for a missing UUID", func() {
+			Expect(GetConsumer(bookings, "c2ffbc99-9c0b-4ef8-bb6d-6bb9bd380a99")).To(BeNil())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetConsumer(nil, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")).To(BeNil())
+		})
+	})
+
+	Context("HasConsumer", func() {
+		It("should return true for an existing consumer UUID", func() {
+			Expect(HasConsumer(bookings, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")).To(BeTrue())
+		})
+
+		It("should return false for a missing consumer UUID", func() {
+			Expect(HasConsumer(bookings, "c2ffbc99-9c0b-4ef8-bb6d-6bb9bd380a99")).To(BeFalse())
+		})
+
+		It("should return false for an empty list", func() {
+			Expect(HasConsumer(nil, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")).To(BeFalse())
+		})
+	})
+
+	Context("GetReservations", func() {
+		It("should return all reservation entries", func() {
+			reservations := GetReservations(bookings)
+			Expect(reservations).To(HaveLen(1))
+			Expect(reservations[0].Name).To(Equal("nova-reserved"))
+		})
+
+		It("should return empty for a list with no reservations", func() {
+			consumers := []Booking{{Consumer: &ConsumerBooking{UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", Resources: map[ResourceName]resource.Quantity{ResourceCPU: resource.MustParse("1")}}}}
+			Expect(GetReservations(consumers)).To(BeEmpty())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetReservations(nil)).To(BeNil())
+		})
+	})
+
+	Context("GetReservation", func() {
+		It("should find a reservation by name", func() {
+			r := GetReservation(bookings, "nova-reserved")
+			Expect(r).NotTo(BeNil())
+			Expect(r.Resources).To(HaveKey(ResourceMemory))
+		})
+
+		It("should return nil for a missing name", func() {
+			Expect(GetReservation(bookings, "nonexistent")).To(BeNil())
+		})
+
+		It("should return nil for an empty list", func() {
+			Expect(GetReservation(nil, "nova-reserved")).To(BeNil())
+		})
+	})
+
+	Context("SumResources", func() {
+		It("should sum resources across all entries", func() {
+			sum := SumResources(bookings)
+			Expect(sum).To(HaveKey(ResourceCPU))
+			Expect(sum).To(HaveKey(ResourceMemory))
+			cpu := sum[ResourceCPU]
+			mem := sum[ResourceMemory]
+			// 2 + 4 + 2 = 8 CPU
+			Expect(cpu.Cmp(resource.MustParse("8"))).To(Equal(0))
+			// 4Gi + 8Gi + 512Mi = 12800Mi
+			Expect(mem.Cmp(resource.MustParse("12800Mi"))).To(Equal(0))
+		})
+
+		It("should return empty map for nil bookings", func() {
+			sum := SumResources(nil)
+			Expect(sum).To(BeEmpty())
+		})
+
+		It("should return empty map for empty bookings", func() {
+			sum := SumResources([]Booking{})
+			Expect(sum).To(BeEmpty())
 		})
 	})
 })

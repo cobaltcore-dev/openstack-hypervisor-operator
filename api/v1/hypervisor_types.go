@@ -152,6 +152,17 @@ type HypervisorSpec struct {
 	// +kubebuilder:validation:Optional
 	Groups []Group `json:"groups,omitempty"`
 
+	// Bookings records all resource claims on this hypervisor as seen
+	// by the Placement API. Each entry is either a consumer (instance
+	// allocation) or a reservation (capacity held back from scheduling).
+	//
+	// The Cortex Placement shim writes bookings via the Kubernetes API;
+	// they are not auto-discovered. Compare with status.allocation which
+	// reflects actual libvirt-reported usage.
+	//
+	// +kubebuilder:validation:Optional
+	Bookings []Booking `json:"bookings,omitempty"`
+
 	// +kubebuilder:default:={}
 	// AllowedProjects defines which openstack projects are allowed to schedule
 	// instances on this hypervisor. The values of this list should be project
@@ -305,6 +316,150 @@ func GetAggregates(groups []Group) []AggregateGroup {
 	for _, g := range groups {
 		if g.Aggregate != nil {
 			out = append(out, *g.Aggregate)
+		}
+	}
+	return out
+}
+
+// ConsumerBooking represents an instance allocation — a consumer that
+// holds resources on this hypervisor as recorded by the Placement API.
+//
+// Nova creates consumers via PUT /allocations/{consumer_uuid}. Each
+// consumer corresponds to an instance (or migration UUID) that holds
+// resources on this provider. A consumer can appear on multiple
+// Hypervisor CRs simultaneously during live migration.
+type ConsumerBooking struct {
+	// UUID is the Placement consumer UUID, typically the Nova instance
+	// UUID or a migration UUID.
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	UUID string `json:"uuid"`
+
+	// Resources maps resource names to the quantity claimed by this
+	// consumer on this hypervisor.
+	// +kubebuilder:validation:MinProperties=1
+	Resources map[ResourceName]resource.Quantity `json:"resources"`
+
+	// ConsumerGeneration is the Placement consumer generation counter
+	// used for optimistic concurrency control. Nil means the consumer
+	// was just created (first allocation).
+	// +kubebuilder:validation:Optional
+	ConsumerGeneration *int64 `json:"consumerGeneration,omitempty"`
+
+	// ConsumerType identifies the kind of consumer.
+	// See: https://docs.openstack.org/api-ref/placement/#update-allocations
+	// +kubebuilder:validation:Optional
+	ConsumerType string `json:"consumerType,omitempty"`
+
+	// ProjectID is the OpenStack project that owns this consumer.
+	// +kubebuilder:validation:Optional
+	ProjectID string `json:"projectID,omitempty"`
+
+	// UserID is the OpenStack user that owns this consumer.
+	// +kubebuilder:validation:Optional
+	UserID string `json:"userID,omitempty"`
+}
+
+// ReservationBooking represents capacity held back from scheduling,
+// corresponding to Nova's reserved_host_* configuration
+// (reserved_host_memory_mb, reserved_host_cpus, reserved_host_disk_mb).
+//
+// The Cortex Placement shim reads reservation bookings and serves them
+// as the "reserved" field in GET /resource_providers/{uuid}/inventories
+// responses. Reserved capacity is subtracted from available inventory
+// before scheduling decisions are made.
+type ReservationBooking struct {
+	// Name identifies this reservation (e.g. "nova-reserved").
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Resources maps resource names to the quantity reserved
+	// (held back from scheduling) on this hypervisor.
+	// +kubebuilder:validation:MinProperties=1
+	Resources map[ResourceName]resource.Quantity `json:"resources"`
+}
+
+// Booking is a typed resource claim entry on this hypervisor.
+//
+// This follows the field-presence union pattern (as used by
+// spec.groups and PodSpec.volumes in core Kubernetes): each entry
+// populates exactly one type-specific sub-field, and the populated
+// field identifies the booking type.
+//
+// +kubebuilder:validation:XValidation:rule="(has(self.consumer) ? 1 : 0) + (has(self.reservation) ? 1 : 0) == 1",message="exactly one booking type must be set"
+type Booking struct {
+	// +kubebuilder:validation:Optional
+	Consumer *ConsumerBooking `json:"consumer,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	Reservation *ReservationBooking `json:"reservation,omitempty"`
+}
+
+// GetConsumers returns all ConsumerBooking entries from bookings.
+func GetConsumers(bookings []Booking) []ConsumerBooking {
+	var out []ConsumerBooking
+	for _, b := range bookings {
+		if b.Consumer != nil {
+			out = append(out, *b.Consumer)
+		}
+	}
+	return out
+}
+
+// GetConsumer returns the ConsumerBooking with the given UUID, or nil.
+func GetConsumer(bookings []Booking, uuid string) *ConsumerBooking {
+	for _, b := range bookings {
+		if b.Consumer != nil && b.Consumer.UUID == uuid {
+			return b.Consumer
+		}
+	}
+	return nil
+}
+
+// HasConsumer reports whether bookings contains a consumer with the given UUID.
+func HasConsumer(bookings []Booking, uuid string) bool {
+	for _, b := range bookings {
+		if b.Consumer != nil && b.Consumer.UUID == uuid {
+			return true
+		}
+	}
+	return false
+}
+
+// GetReservations returns all ReservationBooking entries from bookings.
+func GetReservations(bookings []Booking) []ReservationBooking {
+	var out []ReservationBooking
+	for _, b := range bookings {
+		if b.Reservation != nil {
+			out = append(out, *b.Reservation)
+		}
+	}
+	return out
+}
+
+// GetReservation returns the ReservationBooking with the given name, or nil.
+func GetReservation(bookings []Booking, name string) *ReservationBooking {
+	for _, b := range bookings {
+		if b.Reservation != nil && b.Reservation.Name == name {
+			return b.Reservation
+		}
+	}
+	return nil
+}
+
+// SumResources sums resources across all booking entries (consumers and reservations).
+func SumResources(bookings []Booking) map[ResourceName]resource.Quantity {
+	out := make(map[ResourceName]resource.Quantity)
+	for _, b := range bookings {
+		var res map[ResourceName]resource.Quantity
+		if b.Consumer != nil {
+			res = b.Consumer.Resources
+		} else if b.Reservation != nil {
+			res = b.Reservation.Resources
+		}
+		for name, qty := range res {
+			existing := out[name]
+			existing.Add(qty)
+			out[name] = existing
 		}
 	}
 	return out
