@@ -184,11 +184,17 @@ func ComputeReadyCondition(hv *kvmv1.Hypervisor) metav1.Condition {
 
 	// Priority 5: Onboarding not started, aborted, or not succeeded
 	if onboardingCondition == nil {
+		message := "Onboarding not started"
+		if !hv.Spec.LifecycleEnabled {
+			message = "Onboarding not started: lifecycle management is disabled"
+		} else if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
+			message = "Onboarding not started: waiting for nova-compute to register the hypervisor in Nova (HypervisorID/ServiceID not yet available)"
+		}
 		return metav1.Condition{
 			Type:    kvmv1.ConditionTypeReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  kvmv1.ConditionReasonOnboarding,
-			Message: "Onboarding not started",
+			Message: message,
 		}
 	}
 

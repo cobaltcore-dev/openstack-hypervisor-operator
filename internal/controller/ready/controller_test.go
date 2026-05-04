@@ -278,13 +278,39 @@ var _ = Describe("ComputeReadyCondition", func() {
 	})
 
 	Context("Priority 5: Onboarding not started/aborted/not succeeded", func() {
-		It("should return Ready=False when no onboarding condition exists", func() {
+		It("should mention lifecycle disabled when lifecycleEnabled is false", func() {
+			hv.Spec.LifecycleEnabled = false
+
 			result := ComputeReadyCondition(hv)
 
 			Expect(result.Type).To(Equal(kvmv1.ConditionTypeReady))
 			Expect(result.Status).To(Equal(metav1.ConditionFalse))
 			Expect(result.Reason).To(Equal(kvmv1.ConditionReasonOnboarding))
-			Expect(result.Message).To(ContainSubstring("not started"))
+			Expect(result.Message).To(ContainSubstring("lifecycle management is disabled"))
+		})
+
+		It("should mention waiting for nova-compute when HypervisorID/ServiceID are missing", func() {
+			hv.Spec.LifecycleEnabled = true
+
+			result := ComputeReadyCondition(hv)
+
+			Expect(result.Type).To(Equal(kvmv1.ConditionTypeReady))
+			Expect(result.Status).To(Equal(metav1.ConditionFalse))
+			Expect(result.Reason).To(Equal(kvmv1.ConditionReasonOnboarding))
+			Expect(result.Message).To(ContainSubstring("waiting for nova-compute"))
+		})
+
+		It("should return generic not started when lifecycle is enabled and IDs are present", func() {
+			hv.Spec.LifecycleEnabled = true
+			hv.Status.HypervisorID = "some-id"
+			hv.Status.ServiceID = "some-service-id"
+
+			result := ComputeReadyCondition(hv)
+
+			Expect(result.Type).To(Equal(kvmv1.ConditionTypeReady))
+			Expect(result.Status).To(Equal(metav1.ConditionFalse))
+			Expect(result.Reason).To(Equal(kvmv1.ConditionReasonOnboarding))
+			Expect(result.Message).To(Equal("Onboarding not started"))
 		})
 
 		It("should return Ready=False when onboarding was aborted", func() {
