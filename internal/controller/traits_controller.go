@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -103,11 +105,8 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// fetch current traits, to ensure we don't add duplicates
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
-		condition := getTraitCondition(err, "Failed to get current traits from placement")
-		patchErr := utils.PatchHypervisorStatusWithRetry(ctx, tc.Client, hv.Name, TraitsControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		})
-		return ctrl.Result{}, errors.Join(err, patchErr)
+		return ctrl.Result{}, errors.Join(err,
+			tc.applyTraitsStatus(ctx, hv, hv.Status.Traits, getTraitCondition(err, "Failed to get current traits from placement")))
 	}
 
 	var targetTraits []string
@@ -131,22 +130,31 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			ResourceProviderGeneration: current.ResourceProviderGeneration,
 			Traits:                     targetTraits,
 		})
-		err = result.Err
-		if err != nil {
-			condition := getTraitCondition(err, "Failed to update traits in placement")
-			patchErr := utils.PatchHypervisorStatusWithRetry(ctx, tc.Client, hv.Name, TraitsControllerName, func(h *kvmv1.Hypervisor) {
-				meta.SetStatusCondition(&h.Status.Conditions, condition)
-			})
-			return ctrl.Result{}, errors.Join(err, patchErr)
+		if result.Err != nil {
+			return ctrl.Result{}, errors.Join(result.Err,
+				tc.applyTraitsStatus(ctx, hv, hv.Status.Traits, getTraitCondition(result.Err, "Failed to update traits in placement")))
 		}
 	}
 
 	// update status unconditionally, since we want always to propagate the current traits
-	err = utils.PatchHypervisorStatusWithRetry(ctx, tc.Client, hv.Name, TraitsControllerName, func(h *kvmv1.Hypervisor) {
-		h.Status.Traits = targetTraits
-		meta.SetStatusCondition(&h.Status.Conditions, getTraitCondition(nil, "Traits successfully updated"))
-	})
-	return ctrl.Result{}, err
+	return ctrl.Result{}, tc.applyTraitsStatus(ctx, hv, targetTraits, getTraitCondition(nil, "Traits successfully updated"))
+}
+
+func (tc *TraitsController) applyTraitsStatus(ctx context.Context, hv *kvmv1.Hypervisor, traits []string, cond metav1.Condition) error {
+	statusCfg := apiv1.HypervisorStatus()
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(cond.Type).
+			WithStatus(cond.Status).
+			WithReason(cond.Reason).
+			WithMessage(cond.Message))
+	if traits != nil {
+		statusCfg.WithTraits(traits...)
+	}
+	return tc.Status().Apply(ctx,
+		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(TraitsControllerName))
 }
 
 // getTraitCondition creates a Condition object for trait updates
