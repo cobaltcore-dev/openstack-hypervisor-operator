@@ -107,6 +107,7 @@ GO_COVERPKGS := $(shell go list ./... | grep -E '/internal')
 null :=
 space := $(null) $(null)
 comma := ,
+YEAR ?= $(shell date +%Y)
 
 check: FORCE static-check build/cover.html build-all
 	@printf "\e[1;32m>> All checks successful.\e[0m\n"
@@ -114,7 +115,7 @@ check: FORCE static-check build/cover.html build-all
 generate: install-controller-gen
 	@printf "\e[1;36m>> controller-gen\e[0m\n"
 	@controller-gen crd:allowDangerousTypes=true rbac:roleName=hypervisor-operator-manager-role webhook paths="./..." output:crd:artifacts:config=charts/openstack-hypervisor-operator/crds output:rbac:artifacts:config=charts/openstack-hypervisor-operator/templates
-	@controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	@controller-gen object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
 	@controller-gen applyconfiguration paths="./..."
 
 run-golangci-lint: FORCE install-golangci-lint
@@ -198,6 +199,7 @@ vars: FORCE
 	@printf "SED=$(SED)\n"
 	@printf "UNAME_S=$(UNAME_S)\n"
 	@printf "XARGS=$(XARGS)\n"
+	@printf "YEAR=$(YEAR)\n"
 help: FORCE
 	@printf "\n"
 	@printf "\e[1mUsage:\e[0m\n"
