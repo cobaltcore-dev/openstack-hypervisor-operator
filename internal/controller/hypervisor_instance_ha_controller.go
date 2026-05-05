@@ -21,15 +21,16 @@ import (
 	"context"
 	"errors"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
@@ -60,23 +61,20 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil // Onboarding not started, so no hypervisor and nothing to do
 	}
 
-	old := hv.DeepCopy()
-
 	// Determine if HA should be disabled and the reason
 	evicted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
 	testing := onboardingCondition.Status == metav1.ConditionTrue &&
-		onboardingCondition.Reason != kvmv1.ConditionReasonHandover // Onboarding still testing (not yet in Handover phase)
+		onboardingCondition.Reason != kvmv1.ConditionReasonHandover
 	aborted := onboardingCondition.Status == metav1.ConditionFalse &&
-		onboardingCondition.Reason == kvmv1.ConditionReasonAborted // Onboarding was aborted
-	shouldDisable := !hv.Spec.HighAvailability || // HA not requested
-		evicted || // HA not needed as it is empty
-		testing || // HA not needed for test VMs
-		aborted // HA not needed when onboarding aborted
+		onboardingCondition.Reason == kvmv1.ConditionReasonAborted
+	shouldDisable := !hv.Spec.HighAvailability || evicted || testing || aborted
+
+	var desiredStatus metav1.ConditionStatus
+	var reason, message string
 
 	if shouldDisable {
+		desiredStatus = metav1.ConditionFalse
 		// Determine the reason based on why HA is being disabled
-		var reason string
-		var message string
 		switch {
 		case evicted:
 			reason = kvmv1.ConditionReasonHaEvicted
@@ -88,73 +86,57 @@ func (r *HypervisorInstanceHaController) Reconcile(ctx context.Context, req ctrl
 			reason = kvmv1.ConditionReasonSucceeded
 			message = "HA disabled per spec"
 		}
-
-		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeHaEnabled,
-			Status:  metav1.ConditionFalse,
-			Message: message,
-			Reason:  reason,
-		}) {
-			// Desired state already achieved
-			return ctrl.Result{}, nil
-		}
-
-		if err := disableInstanceHA(hv); err != nil {
-			condition := metav1.Condition{
-				Type:    kvmv1.ConditionTypeHaEnabled,
-				Status:  metav1.ConditionUnknown,
-				Message: err.Error(),
-				Reason:  kvmv1.ConditionReasonFailed,
-			}
-
-			patchErr := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
-				meta.SetStatusCondition(&h.Status.Conditions, condition)
-			})
-			return ctrl.Result{}, errors.Join(err, patchErr)
-		}
 	} else {
-		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeHaEnabled,
-			Status:  metav1.ConditionTrue,
-			Message: "HA is enabled",
-			Reason:  kvmv1.ConditionReasonSucceeded,
-		}) {
-			// Desired state already achieved
-			return ctrl.Result{}, nil
-		}
-
-		if err := enableInstanceHA(hv); err != nil {
-			condition := metav1.Condition{
-				Type:    kvmv1.ConditionTypeHaEnabled,
-				Status:  metav1.ConditionUnknown,
-				Message: err.Error(),
-				Reason:  kvmv1.ConditionReasonFailed,
-			}
-
-			patchErr := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
-				meta.SetStatusCondition(&h.Status.Conditions, condition)
-			})
-			return ctrl.Result{}, errors.Join(err, patchErr)
-		}
+		desiredStatus = metav1.ConditionTrue
+		reason = kvmv1.ConditionReasonSucceeded
+		message = "HA is enabled"
 	}
 
-	if equality.Semantic.DeepEqual(hv, old) {
+	// Skip if already at desired state
+	existing := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled)
+	if existing != nil && existing.Status == desiredStatus &&
+		existing.Reason == reason && existing.Message == message {
 		return ctrl.Result{}, nil
 	}
 
+	// Perform the HA enable/disable action
+	var actionErr error
+	if shouldDisable {
+		actionErr = disableInstanceHA(hv)
+	} else {
+		actionErr = enableInstanceHA(hv)
+	}
+
+	condStatus := desiredStatus
+	condReason := reason
+	condMessage := message
+	if actionErr != nil {
+		condStatus = metav1.ConditionUnknown
+		condReason = kvmv1.ConditionReasonFailed
+		condMessage = actionErr.Error()
+	}
+
 	// Only set the HaEnabled condition this controller owns
-	haCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled)
-	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, HypervisorInstanceHaControllerName, func(h *kvmv1.Hypervisor) {
-		if haCondition != nil {
-			meta.SetStatusCondition(&h.Status.Conditions, *haCondition)
-		}
-	})
+	statusCfg := apiv1.HypervisorStatus()
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeHaEnabled).
+			WithStatus(condStatus).
+			WithReason(condReason).
+			WithMessage(condMessage))
+
+	applyErr := r.Status().Apply(ctx,
+		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorInstanceHaControllerName))
+
+	return ctrl.Result{}, errors.Join(actionErr, applyErr)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *HypervisorInstanceHaController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(HypervisorInstanceHaControllerName).
-		For(&kvmv1.Hypervisor{}). // trigger the r.Reconcile whenever a hypervisor is created/updated/deleted.
+		For(&kvmv1.Hypervisor{}).
 		Complete(r)
 }
