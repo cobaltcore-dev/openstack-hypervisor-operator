@@ -20,16 +20,17 @@ package controller
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
@@ -46,52 +47,45 @@ type HypervisorTaintController struct {
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
 func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	hypervisor := &kvmv1.Hypervisor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   req.Name,
-			Labels: map[string]string{},
-		},
-		Spec: kvmv1.HypervisorSpec{
-			HighAvailability:   true,
-			InstallCertificate: true,
-		},
-	}
-
-	// Check if hypervisor already exists
+	hypervisor := &kvmv1.Hypervisor{}
 	if err := r.Get(ctx, req.NamespacedName, hypervisor); err != nil {
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	before := hypervisor.DeepCopy()
+	var condStatus metav1.ConditionStatus
+	var reason, message string
 	if HasKubectlManagedFields(&hypervisor.ObjectMeta) {
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-			Type:               kvmv1.ConditionTypeTainted,
-			Status:             metav1.ConditionTrue,
-			Reason:             "Kubectl",
-			Message:            "⚠️",
-			ObservedGeneration: hypervisor.Generation,
-		})
+		condStatus = metav1.ConditionTrue
+		reason = "Kubectl"
+		message = "⚠️"
 	} else {
-		meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-			Type:               kvmv1.ConditionTypeTainted,
-			Status:             metav1.ConditionFalse,
-			Reason:             "NoKubectl",
-			Message:            "🟢",
-			ObservedGeneration: hypervisor.Generation,
-		})
+		condStatus = metav1.ConditionFalse
+		reason = "NoKubectl"
+		message = "🟢"
 	}
 
-	if equality.Semantic.DeepEqual(hypervisor, before) {
+	// Skip if already at the desired state
+	existing := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTainted)
+	if existing != nil && existing.Status == condStatus &&
+		existing.Reason == reason && existing.Message == message &&
+		existing.ObservedGeneration == hypervisor.Generation {
 		return ctrl.Result{}, nil
 	}
 
 	// Only set the Tainted condition this controller owns
-	taintedCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTainted)
-	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hypervisor.Name, HypervisorTaintControllerName, func(h *kvmv1.Hypervisor) {
-		if taintedCondition != nil {
-			meta.SetStatusCondition(&h.Status.Conditions, *taintedCondition)
-		}
-	})
+	statusCfg := apiv1.HypervisorStatus()
+	statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeTainted).
+			WithStatus(condStatus).
+			WithReason(reason).
+			WithMessage(message).
+			WithObservedGeneration(hypervisor.Generation))
+
+	return ctrl.Result{}, r.Status().Apply(ctx,
+		apiv1.Hypervisor(hypervisor.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorTaintControllerName))
 }
 
 func (r *HypervisorTaintController) SetupWithManager(mgr ctrl.Manager) error {
