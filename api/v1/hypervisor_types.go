@@ -553,7 +553,9 @@ type HypervisorStatus struct {
 	Evicted bool `json:"evicted,omitempty"`
 
 	// Represents the Hypervisor node conditions.
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	SpecHash string `json:"specHash,omitempty"`
 }

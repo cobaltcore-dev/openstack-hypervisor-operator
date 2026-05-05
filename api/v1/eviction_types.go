@@ -83,6 +83,8 @@ type EvictionStatus struct {
 	OutstandingInstances []string `json:"outstandingInstances"`
 
 	// Conditions is an array of current conditions
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
