@@ -26,10 +26,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -101,40 +102,43 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// continue with creation
 	} else {
 		// update Status if needed
-		base := hypervisor.DeepCopy()
 
 		// transfer internal IP
+		var newInternalIP string
 		for _, address := range node.Status.Addresses {
-			if address.Type == corev1.NodeInternalIP && hypervisor.Status.InternalIP != address.Address {
-				hypervisor.Status.InternalIP = address.Address
+			if address.Type == corev1.NodeInternalIP {
+				newInternalIP = address.Address
 				break
 			}
 		}
 
 		// update terminating condition
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
+
+		// Capture values to apply - only mutate fields this controller owns
+		statusCfg := apiv1.HypervisorStatus().WithInternalIP(newInternalIP)
+		statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
+		// Node might be terminating, propagate condition to hypervisor
 		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
-			// Node might be terminating, propagate condition to hypervisor
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeTerminating,
-				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
-				Reason:  nodeTerminationCondition.Reason,
-				Message: nodeTerminationCondition.Message,
-			})
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeTerminating).
+					WithStatus(metav1.ConditionStatus(nodeTerminationCondition.Status)).
+					WithReason(nodeTerminationCondition.Reason).
+					WithMessage(nodeTerminationCondition.Message))
 		}
 
-		if !equality.Semantic.DeepEqual(hypervisor, base) {
-			// Capture values to apply - only mutate fields this controller owns
-			newInternalIP := hypervisor.Status.InternalIP
-			terminatingCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
-
-			return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, hv.Client, hypervisor.Name, HypervisorControllerName, func(h *kvmv1.Hypervisor) {
-				h.Status.InternalIP = newInternalIP
-				if terminatingCondition != nil {
-					meta.SetStatusCondition(&h.Status.Conditions, *terminatingCondition)
-				}
-			})
+		if err := hv.Status().Apply(ctx,
+			apiv1.Hypervisor(hypervisor.Name, "").WithStatus(statusCfg),
+			k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+			return ctrl.Result{}, err
 		}
+
+		// Re-fetch after status apply so the spec patch has a fresh resourceVersion
+		if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to re-fetch hypervisor after status apply: %w", err)
+		}
+		base := hypervisor.DeepCopy()
 
 		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
 		if equality.Semantic.DeepEqual(hypervisor, base) {
