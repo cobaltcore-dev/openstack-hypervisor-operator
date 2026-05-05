@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -105,27 +107,13 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		// continue with creation
 	} else {
-		// First, propagate spec/metadata derived from the Node (labels,
-		// annotations -> aggregates/traits, lifecycle). This must run on
-		// every reconcile, including those where status will also change
-		// (e.g. AgentPodsEvicted=False during termination); otherwise the
-		// Hypervisor spec/labels go stale.
-		specBase := hypervisor.DeepCopy()
-		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
-		if !equality.Semantic.DeepEqual(hypervisor, specBase) {
-			if err := hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(specBase,
-				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-
-		// Then, compute and persist any status changes derived from the Node.
-		statusBase := hypervisor.DeepCopy()
+		// update Status if needed
 
 		// transfer internal IP
+		var newInternalIP string
 		for _, address := range node.Status.Addresses {
-			if address.Type == corev1.NodeInternalIP && hypervisor.Status.InternalIP != address.Address {
-				hypervisor.Status.InternalIP = address.Address
+			if address.Type == corev1.NodeInternalIP {
+				newInternalIP = address.Address
 				break
 			}
 		}
@@ -133,14 +121,19 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// update terminating condition — fired by either the legacy gardener
 		// node condition or the node's deletion timestamp (gardener's future path)
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
+
+		// Capture values to apply - only mutate fields this controller owns
+		statusCfg := apiv1.HypervisorStatus().WithInternalIP(newInternalIP)
+		statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
+		// Node might be terminating, propagate condition to hypervisor
 		if (nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue) ||
 			!node.DeletionTimestamp.IsZero() {
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeTerminating,
-				Status:  metav1.ConditionTrue,
-				Reason:  kvmv1.ConditionReasonTerminating,
-				Message: "Node is terminating",
-			})
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeTerminating).
+					WithStatus(metav1.ConditionTrue).
+					WithReason(kvmv1.ConditionReasonTerminating).
+					WithMessage("Node is terminating"))
 		}
 
 		// Only evaluate after VM eviction; a spurious True on a fresh node
@@ -153,33 +146,46 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to compute %s condition: %w", kvmv1.ConditionTypeAgentPodsEvicted, err)
 			}
-			meta.SetStatusCondition(&hypervisor.Status.Conditions, cond)
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(cond.Type).
+					WithStatus(metav1.ConditionStatus(cond.Status)).
+					WithReason(cond.Reason).
+					WithMessage(cond.Message))
 			if cond.Status == metav1.ConditionFalse {
 				// No pod watch — rely on periodic requeue.
 				statusRequeueAfter = defaultPollTime
 			}
 		}
 
-		if !equality.Semantic.DeepEqual(hypervisor, statusBase) {
-			// Capture values to apply - only mutate fields this controller owns
-			newInternalIP := hypervisor.Status.InternalIP
-			terminatingCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
-			agentPodsCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeAgentPodsEvicted)
-
-			if err := utils.PatchHypervisorStatusWithRetry(ctx, hv.Client, hypervisor.Name, HypervisorControllerName, func(h *kvmv1.Hypervisor) {
-				h.Status.InternalIP = newInternalIP
-				if terminatingCondition != nil {
-					meta.SetStatusCondition(&h.Status.Conditions, *terminatingCondition)
-				}
-				if agentPodsCondition != nil {
-					meta.SetStatusCondition(&h.Status.Conditions, *agentPodsCondition)
-				}
-			}); err != nil {
-				return ctrl.Result{}, err
-			}
+		if err := hv.Status().Apply(ctx,
+			apiv1.Hypervisor(hypervisor.Name, "").WithStatus(statusCfg),
+			k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{RequeueAfter: statusRequeueAfter}, nil
+		if statusRequeueAfter > 0 {
+			return ctrl.Result{RequeueAfter: statusRequeueAfter}, nil
+		}
+
+		// Re-fetch after status apply so the spec patch has a fresh resourceVersion
+		if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to re-fetch hypervisor after status apply: %w", err)
+		}
+
+		// First, propagate spec/metadata derived from the Node (labels,
+		// annotations -> aggregates/traits, lifecycle). This must run on
+		// every reconcile, including those where status will also change
+		// (e.g. AgentPodsEvicted=False during termination); otherwise the
+		// Hypervisor spec/labels go stale.
+		base := hypervisor.DeepCopy()
+		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
+		if equality.Semantic.DeepEqual(hypervisor, base) {
+			return ctrl.Result{}, nil
+		}
+
+		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
+			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
 	}
 
 	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
