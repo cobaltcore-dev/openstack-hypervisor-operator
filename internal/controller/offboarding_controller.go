@@ -29,11 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -146,15 +148,21 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 	return ctrl.Result{}, r.markOffboarded(ctx, hv)
 }
 
+func (r *HypervisorOffboardingReconciler) applyStatus(ctx context.Context, hv *kvmv1.Hypervisor, cond *k8sacmetav1.ConditionApplyConfiguration) error {
+	statusCfg := apiv1.HypervisorStatus()
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions, *cond)
+	return r.Status().Apply(ctx,
+		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(OffboardingControllerName))
+}
+
 func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
-	err := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OffboardingControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOffboarded,
-			Status:  metav1.ConditionFalse,
-			Reason:  "Offboarding",
-			Message: message,
-		})
-	})
+	err := r.applyStatus(ctx, hv, k8sacmetav1.Condition().
+		WithType(kvmv1.ConditionTypeOffboarded).
+		WithStatus(metav1.ConditionFalse).
+		WithReason("Offboarding").
+		WithMessage(message))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
@@ -162,14 +170,11 @@ func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Co
 }
 
 func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv *kvmv1.Hypervisor) error {
-	err := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OffboardingControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeOffboarded,
-			Status:  metav1.ConditionTrue,
-			Reason:  "Offboarded",
-			Message: "Offboarding successful",
-		})
-	})
+	err := r.applyStatus(ctx, hv, k8sacmetav1.Condition().
+		WithType(kvmv1.ConditionTypeOffboarded).
+		WithStatus(metav1.ConditionTrue).
+		WithReason("Offboarded").
+		WithMessage("Offboarding successful"))
 	if err != nil {
 		return fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
