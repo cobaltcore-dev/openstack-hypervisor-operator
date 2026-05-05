@@ -26,11 +26,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,6 +45,7 @@ import (
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -99,28 +100,30 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// We bail here out, because the openstack api is not the best to poll
 	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
-		if err := r.ensureNovaProperties(ctx, hv); err != nil {
+		hypervisorID, serviceID, err := r.lookupNovaProperties(ctx, hv)
+		if err != nil {
 			if errors.Is(err, errRequeue) {
 				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 			}
 			return ctrl.Result{}, err
 		}
+		statusCfg := apiv1.HypervisorStatus().
+			WithHypervisorID(hypervisorID).
+			WithServiceID(serviceID)
+		statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonInitial).
+				WithMessage("Initial onboarding"))
+		return ctrl.Result{}, r.Status().Apply(ctx,
+			apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
 	}
 
 	// check condition reason
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-	if status == nil {
-		condition := metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue,
-			Reason:  kvmv1.ConditionReasonInitial,
-			Message: "Initial onboarding",
-		}
-		return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		})
-	}
-
 	switch status.Reason {
 	case kvmv1.ConditionReasonInitial:
 		return ctrl.Result{}, r.initialOnboarding(ctx, hv)
@@ -138,6 +141,19 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 }
 
+// applyOnboardingCondition applies a single onboarding condition via SSA,
+// carrying all existing conditions and scalar fields forward.
+func (r *OnboardingController) applyOnboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, cond k8sacmetav1.ConditionApplyConfiguration) error {
+	statusCfg := apiv1.HypervisorStatus().
+		WithHypervisorID(hv.Status.HypervisorID).
+		WithServiceID(hv.Status.ServiceID)
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions, cond)
+	return r.Status().Apply(ctx,
+		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
+}
+
 func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string) error {
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Never onboarded
@@ -145,42 +161,28 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 		return nil
 	}
 
-	base := hv.DeepCopy()
-
-	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionFalse,
-		Reason:  kvmv1.ConditionReasonAborted,
-		Message: message,
-	})
-
-	if equality.Semantic.DeepEqual(hv, base) {
-		// Already aborted
+	// Already aborted with the same message — nothing to do
+	if status.Status == metav1.ConditionFalse &&
+		status.Reason == kvmv1.ConditionReasonAborted &&
+		status.Message == message {
 		return nil
 	}
 
-	condition := *meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if err := r.deleteTestServers(ctx, computeHost); err != nil {
-		condition = metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
-			Reason:  kvmv1.ConditionReasonAborted,
-			Message: err.Error(),
-		}
-
-		meta.SetStatusCondition(&hv.Status.Conditions, condition)
-		if equality.Semantic.DeepEqual(hv, base) {
-			return err
-		}
-
-		return errors.Join(err, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		}))
+		return errors.Join(err, r.applyOnboardingCondition(ctx, hv,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
+				WithReason(kvmv1.ConditionReasonAborted).
+				WithMessage(err.Error())))
 	}
 
-	return utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, condition)
-	})
+	return r.applyOnboardingCondition(ctx, hv,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeOnboarding).
+			WithStatus(metav1.ConditionFalse).
+			WithReason(kvmv1.ConditionReasonAborted).
+			WithMessage(message))
 }
 
 func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor) error {
@@ -190,7 +192,6 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 	}
 
 	// Wait for aggregates controller to apply the desired state (zone and test aggregate)
-	// Extract aggregate names for comparison
 	currentAggregateNames := make([]string, len(hv.Status.Aggregates))
 	for i, agg := range hv.Status.Aggregates {
 		currentAggregateNames[i] = agg.Name
@@ -212,15 +213,12 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return result.Err
 	}
 
-	condition := metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionTrue,
-		Reason:  kvmv1.ConditionReasonTesting,
-		Message: "Running onboarding tests",
-	}
-	return utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, condition)
-	})
+	return r.applyOnboardingCondition(ctx, hv,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeOnboarding).
+			WithStatus(metav1.ConditionTrue).
+			WithReason(kvmv1.ConditionReasonTesting).
+			WithMessage("Running onboarding tests"))
 }
 
 func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string) (ctrl.Result, error) {
@@ -237,21 +235,17 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		id := server.ID
 		server, err = servers.Get(ctx, r.testComputeClient, id).Extract()
 		if err != nil {
-			// should not happened
 			log.Error(err, "failed to get test instance, instance vanished", "id", id)
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
 		// Set condition back to testing
-		condition := metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue,
-			Reason:  kvmv1.ConditionReasonTesting,
-			Message: "Server ended up in error state: " + server.Fault.Message,
-		}
-		if err = utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		}); err != nil {
+		if err = r.applyOnboardingCondition(ctx, hv,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonTesting).
+				WithMessage("Server ended up in error state: "+server.Fault.Message)); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -261,37 +255,32 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		}
 
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+
 	case "ACTIVE":
 		consoleOutput, err := servers.
 			ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).
 			Extract()
 		if err != nil {
-			condition := metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionTrue,
-				Reason:  kvmv1.ConditionReasonTesting,
-				Message: fmt.Sprintf("could not get console output %v", err),
-			}
-			if err := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-				meta.SetStatusCondition(&h.Status.Conditions, condition)
-			}); err != nil {
-				return ctrl.Result{}, err
+			if err2 := r.applyOnboardingCondition(ctx, hv,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeOnboarding).
+					WithStatus(metav1.ConditionTrue).
+					WithReason(kvmv1.ConditionReasonTesting).
+					WithMessage(fmt.Sprintf("could not get console output %v", err))); err2 != nil {
+				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
 		if !strings.Contains(consoleOutput, server.Name) {
 			if !server.LaunchedAt.IsZero() && r.Clock.Now().After(server.LaunchedAt.Add(smokeTestTimeout)) {
-				condition := metav1.Condition{
-					Type:    kvmv1.ConditionTypeOnboarding,
-					Status:  metav1.ConditionTrue,
-					Reason:  kvmv1.ConditionReasonTesting,
-					Message: fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt),
-				}
-				if err := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-					meta.SetStatusCondition(&h.Status.Conditions, condition)
-				}); err != nil {
-					return ctrl.Result{}, err
+				if err2 := r.applyOnboardingCondition(ctx, hv,
+					*k8sacmetav1.Condition().
+						WithType(kvmv1.ConditionTypeOnboarding).
+						WithStatus(metav1.ConditionTrue).
+						WithReason(kvmv1.ConditionReasonTesting).
+						WithMessage(fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt))); err2 != nil {
+					return ctrl.Result{}, err2
 				}
 				if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
 					if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
@@ -303,28 +292,25 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		}
 
 		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
-			condition := metav1.Condition{
-				Type:    kvmv1.ConditionTypeOnboarding,
-				Status:  metav1.ConditionTrue,
-				Reason:  kvmv1.ConditionReasonTesting,
-				Message: fmt.Sprintf("failed to terminate instance %v", err),
-			}
-			if err := utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-				meta.SetStatusCondition(&h.Status.Conditions, condition)
-			}); err != nil {
-				return ctrl.Result{}, err
+			if err2 := r.applyOnboardingCondition(ctx, hv,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeOnboarding).
+					WithStatus(metav1.ConditionTrue).
+					WithReason(kvmv1.ConditionReasonTesting).
+					WithMessage(fmt.Sprintf("failed to terminate instance %v", err))); err2 != nil {
+				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
 		return r.completeOnboarding(ctx, host, hv)
+
 	default:
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 }
 
 func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
-	// Check if we're in the RemovingTestAggregate phase
 	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates and traits controllers to sync
@@ -340,44 +326,32 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			return ctrl.Result{}, nil
 		}
 
-		condition := metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionFalse,
-			Reason:  kvmv1.ConditionReasonSucceeded,
-			Message: "Onboarding completed",
-		}
-
-		return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		})
+		return ctrl.Result{}, r.applyOnboardingCondition(ctx, hv,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionFalse).
+				WithReason(kvmv1.ConditionReasonSucceeded).
+				WithMessage("Onboarding completed"))
 	}
 
 	// First time in completeOnboarding - clean up and prepare for aggregate sync
-	err := r.deleteTestServers(ctx, host)
-	if err != nil {
-		condition := metav1.Condition{
-			Type:    kvmv1.ConditionTypeOnboarding,
-			Status:  metav1.ConditionTrue, // No cleanup, so we are still "onboarding"
-			Reason:  kvmv1.ConditionReasonAborted,
-			Message: err.Error(),
-		}
-		return ctrl.Result{}, errors.Join(err, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-			meta.SetStatusCondition(&h.Status.Conditions, condition)
-		}))
+	if err := r.deleteTestServers(ctx, host); err != nil {
+		return ctrl.Result{}, errors.Join(err, r.applyOnboardingCondition(ctx, hv,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
+				WithReason(kvmv1.ConditionReasonAborted).
+				WithMessage(err.Error())))
 	}
 
 	// Mark onboarding as almost complete, triggers other controllers to do their part
-	condition := metav1.Condition{
-		Type:    kvmv1.ConditionTypeOnboarding,
-		Status:  metav1.ConditionTrue,
-		Reason:  kvmv1.ConditionReasonHandover,
-		Message: "Waiting for other controllers to take over",
-	}
-
 	// Patch status to signal aggregates controller
-	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, condition)
-	})
+	return ctrl.Result{}, r.applyOnboardingCondition(ctx, hv,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeOnboarding).
+			WithStatus(metav1.ConditionTrue).
+			WithReason(kvmv1.ConditionReasonHandover).
+			WithMessage("Waiting for other controllers to take over"))
 }
 
 func (r *OnboardingController) deleteTestServers(ctx context.Context, host string) error {
@@ -409,10 +383,10 @@ func (r *OnboardingController) deleteTestServers(ctx context.Context, host strin
 	return errors.Join(errs...)
 }
 
-func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) error {
+func (r *OnboardingController) lookupNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) (hypervisorID, serviceID string, err error) {
 	hypervisorAddress := hv.Labels[corev1.LabelHostname]
 	if hypervisorAddress == "" {
-		return errRequeue
+		return "", "", errRequeue
 	}
 
 	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 2)[0]
@@ -421,41 +395,27 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 	hypervisorPages, err := hypervisors.List(r.computeClient, hypervisorQuery).AllPages(ctx)
 	if err != nil {
 		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			return errRequeue
+			return "", "", errRequeue
 		}
-		return err
+		return "", "", err
 	}
 
 	hs, err := hypervisors.ExtractHypervisors(hypervisorPages)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	if len(hs) < 1 {
-		return errRequeue
+		return "", "", errRequeue
 	}
 
-	var found = false
-	var myHypervisor hypervisors.Hypervisor
 	for _, h := range hs {
-		short := strings.SplitN(h.HypervisorHostname, ".", 2)[0]
-		if short == shortHypervisorAddress {
-			myHypervisor = h
-			found = true
-			break
+		if strings.SplitN(h.HypervisorHostname, ".", 2)[0] == shortHypervisorAddress {
+			return h.ID, h.Service.ID, nil
 		}
 	}
 
-	if !found {
-		return fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
-	}
-
-	hypervisorID := myHypervisor.ID
-	serviceID := myHypervisor.Service.ID
-	return utils.PatchHypervisorStatusWithRetry(ctx, r.Client, hv.Name, OnboardingControllerName, func(h *kvmv1.Hypervisor) {
-		h.Status.HypervisorID = hypervisorID
-		h.Status.ServiceID = serviceID
-	})
+	return "", "", fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
 }
 
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {
@@ -476,9 +436,9 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 	}
 
 	log := logger.FromContext(ctx)
+	var foundServer *servers.Server
 	// Cleanup all other server with the same test prefix, except for the exact match
 	// as the cleanup after onboarding may leak resources
-	var foundServer *servers.Server
 	for _, server := range serverList {
 		// The query is a substring search, we are looking for a prefix
 		if !strings.HasPrefix(server.Name, serverPrefix) {
