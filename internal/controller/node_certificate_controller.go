@@ -24,14 +24,14 @@ import (
 	"time"
 
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	cmapplyv1 "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/certmanager/v1"
+	cmapplymetav1 "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/util/retry"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
@@ -59,95 +59,77 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 
 	secretName, certName := getSecretAndCertName(node.Name)
 
-	certificate := &cmapi.Certificate{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       cmapi.CertificateKind,
-			APIVersion: cmapi.SchemeGroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      certName,
-			Namespace: r.namespace,
-		},
+	ipAddressSet := make(map[string]bool)
+	dnsNameSet := make(map[string]bool)
+
+	dnsNameSet[computeHost] = true
+
+	for _, addr := range node.Status.Addresses {
+		if addr.Address == "" {
+			continue
+		}
+
+		switch addr.Type {
+		case corev1.NodeHostName, corev1.NodeInternalDNS, corev1.NodeExternalDNS:
+			dnsNameSet[addr.Address] = true
+		case corev1.NodeInternalIP, corev1.NodeExternalIP:
+			ipAddressSet[addr.Address] = true
+		}
 	}
 
-	update, err := controllerutil.CreateOrUpdate(ctx, r.Client, certificate, func() error {
-		if err := controllerutil.SetOwnerReference(node, certificate, r.Scheme); err != nil {
-			return err
-		}
+	ipAddresses := make([]string, 0, len(ipAddressSet))
+	for k := range ipAddressSet {
+		ipAddresses = append(ipAddresses, k)
+	}
+	slices.Sort(ipAddresses)
 
-		ipAddressSet := make(map[string]bool)
-		dnsNameSet := make(map[string]bool)
+	dnsNames := make([]string, 0, len(dnsNameSet))
+	for k := range dnsNameSet {
+		dnsNames = append(dnsNames, k)
+	}
+	slices.Sort(dnsNames)
 
-		dnsNameSet[computeHost] = true
+	ownerRef := k8sacmetav1.OwnerReference().
+		WithAPIVersion(corev1.SchemeGroupVersion.String()).
+		WithKind("Node").
+		WithName(node.Name).
+		WithUID(node.UID)
 
-		for _, addr := range node.Status.Addresses {
-			if addr.Address == "" {
-				continue
-			}
-
-			switch addr.Type {
-			case corev1.NodeHostName, corev1.NodeInternalDNS, corev1.NodeExternalDNS:
-				dnsNameSet[addr.Address] = true
-			case corev1.NodeInternalIP, corev1.NodeExternalIP:
-				ipAddressSet[addr.Address] = true
-			}
-		}
-
-		ipAddresses := make([]string, 0, len(ipAddressSet))
-		for k := range ipAddressSet {
-			ipAddresses = append(ipAddresses, k)
-		}
-
-		slices.Sort(ipAddresses)
-
-		dnsNames := make([]string, 0, len(dnsNameSet))
-		for k := range dnsNameSet {
-			dnsNames = append(dnsNames, k)
-		}
-
-		slices.Sort(dnsNames)
-
-		certificate.Spec = cmapi.CertificateSpec{
-			SecretName: secretName,
-			PrivateKey: &cmapi.CertificatePrivateKey{
-				Algorithm: cmapi.RSAKeyAlgorithm,
-				Encoding:  cmapi.PKCS1,
-				Size:      4096,
-			},
+	certApplyCfg := cmapplyv1.Certificate(certName, r.namespace).
+		WithOwnerReferences(ownerRef).
+		WithSpec(cmapplyv1.CertificateSpec().
+			WithSecretName(secretName).
+			WithPrivateKey(cmapplyv1.CertificatePrivateKey().
+				WithAlgorithm(cmapi.RSAKeyAlgorithm).
+				WithEncoding(cmapi.PKCS1).
+				WithSize(4096)).
 			// Matching the CA/Browser Forum's maximum duration for 2029
-			Duration:    &metav1.Duration{Duration: 47 * 24 * time.Hour},
-			RenewBefore: &metav1.Duration{Duration: 37 * 24 * time.Hour},
-			IsCA:        false,
-			Usages: []cmapi.KeyUsage{
+			WithDuration(metav1.Duration{Duration: 47 * 24 * time.Hour}).
+			WithRenewBefore(metav1.Duration{Duration: 37 * 24 * time.Hour}).
+			WithIsCA(false).
+			WithUsages(
 				cmapi.UsageServerAuth,
 				cmapi.UsageClientAuth,
 				cmapi.UsageCertSign, // Really?
 				cmapi.UsageDigitalSignature,
 				cmapi.UsageKeyEncipherment,
-			},
-			Subject: &cmapi.X509Subject{
-				Organizations: []string{"nova"},
-			},
-			CommonName:  computeHost,
-			DNSNames:    dnsNames,
-			IPAddresses: ipAddresses,
-			IssuerRef: cmmeta.IssuerReference{
-				Name:  r.issuerName,
-				Kind:  cmapi.IssuerKind,
-				Group: cmapi.SchemeGroupVersion.Group,
-			},
-		}
-		return nil
-	})
+			).
+			WithSubject(cmapplyv1.X509Subject().
+				WithOrganizations("nova")).
+			WithCommonName(computeHost).
+			WithDNSNames(dnsNames...).
+			WithIPAddresses(ipAddresses...).
+			WithIssuerRef(cmapplymetav1.IssuerReference().
+				WithName(r.issuerName).
+				WithKind(cmapi.IssuerKind).
+				WithGroup(cmapi.SchemeGroupVersion.Group)))
 
-	if err != nil {
+	if err := r.Apply(ctx, certApplyCfg,
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(NodeCertificateControllerName)); err != nil {
 		return err
 	}
 
-	if update != controllerutil.OperationResultNone {
-		log.Info(fmt.Sprintf("Certificate %s %s", certName, update))
-	}
-
+	log.Info(fmt.Sprintf("Applied Certificate %s", certName))
 	return nil
 }
 
@@ -166,12 +148,8 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return r.ensureCertificate(ctx, node, node.Name)
-	})
-
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not create certificate: %w", err)
+	if err := r.ensureCertificate(ctx, node, node.Name); err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not apply certificate: %w", err)
 	}
 
 	return ctrl.Result{}, nil
