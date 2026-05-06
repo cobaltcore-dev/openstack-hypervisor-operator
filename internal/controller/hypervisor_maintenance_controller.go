@@ -24,14 +24,12 @@ import (
 	"context"
 	"fmt"
 
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -238,25 +236,39 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(
 
 func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, eviction *kvmv1.Eviction, hypervisor *kvmv1.Hypervisor) (metav1.ConditionStatus, error) {
 	log := logger.FromContext(ctx)
+
+	// Build labels to transport from hypervisor (e.g. label-selector, if set)
+	evictionLabels := make(map[string]string)
+	for _, label := range transferLabels {
+		if v, ok := hypervisor.Labels[label]; ok {
+			evictionLabels[label] = v
+		}
+	}
+
+	ownerRef := k8sacmetav1.OwnerReference().
+		WithAPIVersion(kvmv1.GroupVersion.String()).
+		WithKind("Hypervisor").
+		WithName(hypervisor.Name).
+		WithUID(hypervisor.UID).
+		WithController(true).
+		WithBlockOwnerDeletion(true)
+
+	evictionApplyCfg := apiv1.Eviction(eviction.Name, eviction.Namespace).
+		WithLabels(evictionLabels).
+		WithOwnerReferences(ownerRef).
+		WithSpec(apiv1.EvictionSpec().
+			WithHypervisor(hypervisor.Name).
+			WithReason("openstack-hypervisor-operator maintenance"))
+
+	log.Info("Applying eviction", "name", eviction.Name)
+	if err := hec.Apply(ctx, evictionApplyCfg,
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorMaintenanceControllerName)); err != nil {
+		return metav1.ConditionUnknown, fmt.Errorf("failed to apply eviction due to %w", err)
+	}
+
+	// Re-fetch to read current eviction status
 	if err := hec.Get(ctx, k8sclient.ObjectKeyFromObject(eviction), eviction); err != nil {
-		if !k8serrors.IsNotFound(err) {
-			return metav1.ConditionUnknown, fmt.Errorf("failed to get eviction due to %w", err)
-		}
-		if err := controllerutil.SetControllerReference(hypervisor, eviction, hec.Scheme); err != nil {
-			return metav1.ConditionUnknown, err
-		}
-		log.Info("Creating new eviction", "name", eviction.Name)
-		eviction.Spec = kvmv1.EvictionSpec{
-			Hypervisor: hypervisor.Name,
-			Reason:     "openstack-hypervisor-operator maintenance",
-		}
-
-		// This also transports the label-selector, if set
-		transportLabels(&hypervisor.ObjectMeta, &eviction.ObjectMeta)
-
-		if err = hec.Create(ctx, eviction); err != nil {
-			return metav1.ConditionUnknown, fmt.Errorf("failed to create eviction due to %w", err)
-		}
+		return metav1.ConditionUnknown, fmt.Errorf("failed to get eviction status due to %w", err)
 	}
 
 	// check if we are still evicting (defaulting to yes)
