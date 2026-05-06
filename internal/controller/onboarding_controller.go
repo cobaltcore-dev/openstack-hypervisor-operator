@@ -88,14 +88,27 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	computeHost := hv.Name
 
+	// Build the status apply config upfront; sub-functions mutate it.
+	// HypervisorID and ServiceID are always retained so they are never pruned.
+	statusCfg := apiv1.HypervisorStatus().
+		WithHypervisorID(hv.Status.HypervisorID).
+		WithServiceID(hv.Status.ServiceID)
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+
+	apply := func() error {
+		return r.Status().Apply(ctx,
+			apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
+	}
+
 	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to LifecycleEnabled being false")
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to LifecycleEnabled being false", statusCfg, apply)
 	}
 
 	// check if hv is terminating
 	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to MaintenanceTermination")
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to MaintenanceTermination", statusCfg, apply)
 	}
 
 	// We bail here out, because the openstack api is not the best to poll
@@ -107,54 +120,36 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 			return ctrl.Result{}, err
 		}
-		statusCfg := apiv1.HypervisorStatus().
-			WithHypervisorID(hypervisorID).
-			WithServiceID(serviceID)
-		statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+		statusCfg.WithHypervisorID(hypervisorID).WithServiceID(serviceID)
 		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 			*k8sacmetav1.Condition().
 				WithType(kvmv1.ConditionTypeOnboarding).
 				WithStatus(metav1.ConditionTrue).
 				WithReason(kvmv1.ConditionReasonInitial).
 				WithMessage("Initial onboarding"))
-		return ctrl.Result{}, r.Status().Apply(ctx,
-			apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
-			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
+		return ctrl.Result{}, apply()
 	}
 
 	// check condition reason
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	switch status.Reason {
 	case kvmv1.ConditionReasonInitial:
-		return ctrl.Result{}, r.initialOnboarding(ctx, hv)
+		return ctrl.Result{}, r.initialOnboarding(ctx, hv, statusCfg, apply)
 	case kvmv1.ConditionReasonTesting:
 		if hv.Spec.SkipTests {
-			return r.completeOnboarding(ctx, computeHost, hv)
+			return r.completeOnboarding(ctx, computeHost, hv, statusCfg, apply)
 		} else {
-			return r.smokeTest(ctx, hv, computeHost)
+			return r.smokeTest(ctx, hv, computeHost, statusCfg, apply)
 		}
 	case kvmv1.ConditionReasonHandover:
-		return r.completeOnboarding(ctx, computeHost, hv)
+		return r.completeOnboarding(ctx, computeHost, hv, statusCfg, apply)
 	default:
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 }
 
-// applyOnboardingCondition applies a single onboarding condition via SSA,
-// carrying all existing conditions and scalar fields forward.
-func (r *OnboardingController) applyOnboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, cond k8sacmetav1.ConditionApplyConfiguration) error {
-	statusCfg := apiv1.HypervisorStatus().
-		WithHypervisorID(hv.Status.HypervisorID).
-		WithServiceID(hv.Status.ServiceID)
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
-	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions, cond)
-	return r.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
-		k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
-}
-
-func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string) error {
+func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) error {
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Never onboarded
 	if status == nil {
@@ -169,23 +164,25 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 	}
 
 	if err := r.deleteTestServers(ctx, computeHost); err != nil {
-		return errors.Join(err, r.applyOnboardingCondition(ctx, hv,
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 			*k8sacmetav1.Condition().
 				WithType(kvmv1.ConditionTypeOnboarding).
 				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
 				WithReason(kvmv1.ConditionReasonAborted).
-				WithMessage(err.Error())))
+				WithMessage(err.Error()))
+		return errors.Join(err, apply())
 	}
 
-	return r.applyOnboardingCondition(ctx, hv,
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(kvmv1.ConditionTypeOnboarding).
 			WithStatus(metav1.ConditionFalse).
 			WithReason(kvmv1.ConditionReasonAborted).
 			WithMessage(message))
+	return apply()
 }
 
-func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor) error {
+func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) error {
 	zone, found := hv.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
@@ -213,20 +210,31 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		return result.Err
 	}
 
-	return r.applyOnboardingCondition(ctx, hv,
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(kvmv1.ConditionTypeOnboarding).
 			WithStatus(metav1.ConditionTrue).
 			WithReason(kvmv1.ConditionReasonTesting).
 			WithMessage("Running onboarding tests"))
+	return apply()
 }
 
-func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string) (ctrl.Result, error) {
+func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 	zone := hv.Labels[corev1.LabelTopologyZone]
 	server, err := r.createOrGetTestServer(ctx, zone, host, hv.UID)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance: %w", err)
+	}
+
+	setTestingCondition := func(message string) error {
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonTesting).
+				WithMessage(message))
+		return apply()
 	}
 
 	switch server.Status {
@@ -240,12 +248,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		}
 
 		// Set condition back to testing
-		if err = r.applyOnboardingCondition(ctx, hv,
-			*k8sacmetav1.Condition().
-				WithType(kvmv1.ConditionTypeOnboarding).
-				WithStatus(metav1.ConditionTrue).
-				WithReason(kvmv1.ConditionReasonTesting).
-				WithMessage("Server ended up in error state: "+server.Fault.Message)); err != nil {
+		if err = setTestingCondition("Server ended up in error state: " + server.Fault.Message); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -261,12 +264,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).
 			Extract()
 		if err != nil {
-			if err2 := r.applyOnboardingCondition(ctx, hv,
-				*k8sacmetav1.Condition().
-					WithType(kvmv1.ConditionTypeOnboarding).
-					WithStatus(metav1.ConditionTrue).
-					WithReason(kvmv1.ConditionReasonTesting).
-					WithMessage(fmt.Sprintf("could not get console output %v", err))); err2 != nil {
+			if err2 := setTestingCondition(fmt.Sprintf("could not get console output %v", err)); err2 != nil {
 				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
@@ -274,12 +272,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 
 		if !strings.Contains(consoleOutput, server.Name) {
 			if !server.LaunchedAt.IsZero() && r.Clock.Now().After(server.LaunchedAt.Add(smokeTestTimeout)) {
-				if err2 := r.applyOnboardingCondition(ctx, hv,
-					*k8sacmetav1.Condition().
-						WithType(kvmv1.ConditionTypeOnboarding).
-						WithStatus(metav1.ConditionTrue).
-						WithReason(kvmv1.ConditionReasonTesting).
-						WithMessage(fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt))); err2 != nil {
+				if err2 := setTestingCondition(fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt)); err2 != nil {
 					return ctrl.Result{}, err2
 				}
 				if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
@@ -292,25 +285,20 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		}
 
 		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
-			if err2 := r.applyOnboardingCondition(ctx, hv,
-				*k8sacmetav1.Condition().
-					WithType(kvmv1.ConditionTypeOnboarding).
-					WithStatus(metav1.ConditionTrue).
-					WithReason(kvmv1.ConditionReasonTesting).
-					WithMessage(fmt.Sprintf("failed to terminate instance %v", err))); err2 != nil {
+			if err2 := setTestingCondition(fmt.Sprintf("failed to terminate instance %v", err)); err2 != nil {
 				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
-		return r.completeOnboarding(ctx, host, hv)
+		return r.completeOnboarding(ctx, host, hv, statusCfg, apply)
 
 	default:
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 }
 
-func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
+func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
 	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates and traits controllers to sync
@@ -326,32 +314,35 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			return ctrl.Result{}, nil
 		}
 
-		return ctrl.Result{}, r.applyOnboardingCondition(ctx, hv,
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 			*k8sacmetav1.Condition().
 				WithType(kvmv1.ConditionTypeOnboarding).
 				WithStatus(metav1.ConditionFalse).
 				WithReason(kvmv1.ConditionReasonSucceeded).
 				WithMessage("Onboarding completed"))
+		return ctrl.Result{}, apply()
 	}
 
 	// First time in completeOnboarding - clean up and prepare for aggregate sync
 	if err := r.deleteTestServers(ctx, host); err != nil {
-		return ctrl.Result{}, errors.Join(err, r.applyOnboardingCondition(ctx, hv,
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 			*k8sacmetav1.Condition().
 				WithType(kvmv1.ConditionTypeOnboarding).
 				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
 				WithReason(kvmv1.ConditionReasonAborted).
-				WithMessage(err.Error())))
+				WithMessage(err.Error()))
+		return ctrl.Result{}, errors.Join(err, apply())
 	}
 
 	// Mark onboarding as almost complete, triggers other controllers to do their part
 	// Patch status to signal aggregates controller
-	return ctrl.Result{}, r.applyOnboardingCondition(ctx, hv,
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(kvmv1.ConditionTypeOnboarding).
 			WithStatus(metav1.ConditionTrue).
 			WithReason(kvmv1.ConditionReasonHandover).
 			WithMessage("Waiting for other controllers to take over"))
+	return ctrl.Result{}, apply()
 }
 
 func (r *OnboardingController) deleteTestServers(ctx context.Context, host string) error {
