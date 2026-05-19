@@ -226,7 +226,19 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 	zone := hv.Labels[corev1.LabelTopologyZone]
 	server, err := r.createOrGetTestServer(ctx, zone, host, hv.UID)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create or get test instance: %w", err)
+		// Surface the failure in the Onboarding condition so the user can see
+		// the latest error and confirm the controller is still retrying.
+		// Returning a bare error here would leave the previously-set message
+		// in place and the resource looks frozen even though we keep retrying.
+		if err2 := r.applyOnboardingCondition(ctx, hv,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonTesting).
+				WithMessage(fmt.Sprintf("failed to create or get test instance: %v", err))); err2 != nil {
+			return ctrl.Result{}, err2
+		}
+		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 	}
 
 	switch server.Status {
@@ -239,13 +251,16 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 		}
 
-		// Set condition back to testing
+		// Set condition back to testing. Include the server ID so each retry
+		// (which creates a fresh instance with a new UUID) yields a different
+		// message — otherwise SetApplyConfigurationStatusCondition would treat
+		// the update as a no-op when Nova keeps reporting the same fault text.
 		if err = r.applyOnboardingCondition(ctx, hv,
 			*k8sacmetav1.Condition().
 				WithType(kvmv1.ConditionTypeOnboarding).
 				WithStatus(metav1.ConditionTrue).
 				WithReason(kvmv1.ConditionReasonTesting).
-				WithMessage("Server ended up in error state: "+server.Fault.Message)); err != nil {
+				WithMessage(fmt.Sprintf("Server %s ended up in error state: %s", id, server.Fault.Message))); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -266,7 +281,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 					WithType(kvmv1.ConditionTypeOnboarding).
 					WithStatus(metav1.ConditionTrue).
 					WithReason(kvmv1.ConditionReasonTesting).
-					WithMessage(fmt.Sprintf("could not get console output %v", err))); err2 != nil {
+					WithMessage(fmt.Sprintf("could not get console output for server %s: %v", server.ID, err))); err2 != nil {
 				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
@@ -279,7 +294,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 						WithType(kvmv1.ConditionTypeOnboarding).
 						WithStatus(metav1.ConditionTrue).
 						WithReason(kvmv1.ConditionReasonTesting).
-						WithMessage(fmt.Sprintf("timeout waiting for console output since %v", server.LaunchedAt))); err2 != nil {
+						WithMessage(fmt.Sprintf("timeout waiting for console output of server %s since %v", server.ID, server.LaunchedAt))); err2 != nil {
 					return ctrl.Result{}, err2
 				}
 				if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
@@ -297,7 +312,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 					WithType(kvmv1.ConditionTypeOnboarding).
 					WithStatus(metav1.ConditionTrue).
 					WithReason(kvmv1.ConditionReasonTesting).
-					WithMessage(fmt.Sprintf("failed to terminate instance %v", err))); err2 != nil {
+					WithMessage(fmt.Sprintf("failed to terminate instance %s: %v", server.ID, err))); err2 != nil {
 				return ctrl.Result{}, err2
 			}
 			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
