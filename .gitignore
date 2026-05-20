@@ -31,3 +31,6 @@ go.work
 *~
 
 charts/**/*.tgz
+
+# Claude Code local settings
+.claude/
