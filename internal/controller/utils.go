@@ -18,71 +18,13 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"slices"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
-
-	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
-
-func InstanceHaUrl(region, zone, hostname string) string {
-	if haURL, found := os.LookupEnv("KVM_HA_SERVICE_URL"); found {
-		if !strings.HasSuffix(haURL, "/") {
-			haURL += "/"
-		}
-		return haURL + "api/hypervisors/" + hostname
-	}
-	return fmt.Sprintf("https://kvm-ha-service-%v.%v.cloud.sap/api/hypervisors/%v", zone, region, hostname)
-}
-
-func updateInstanceHA(hypervisor *kvmv1.Hypervisor, data string, acceptedCodes []int) error {
-	zone, found := hypervisor.Labels[corev1.LabelTopologyZone]
-	if !found {
-		return fmt.Errorf("could not find label %v for node", corev1.LabelTopologyZone)
-	}
-	region, found := hypervisor.Labels[corev1.LabelTopologyRegion]
-	if !found {
-		return fmt.Errorf("could not find label %v for node", corev1.LabelTopologyRegion)
-	}
-
-	hostname, found := hypervisor.Labels[corev1.LabelHostname]
-	if !found {
-		return fmt.Errorf("could not find label %v for node", corev1.LabelHostname)
-	}
-
-	url := InstanceHaUrl(region, zone, hostname)
-	client := &http.Client{Timeout: 30 * time.Second}
-	// G107: Potential HTTP request made with variable url
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer([]byte(data))) //nolint:bodyclose
-	if err != nil {
-		return fmt.Errorf("failed to send request to ha service due to %w", err)
-	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
-	if !slices.Contains(acceptedCodes, resp.StatusCode) {
-		return fmt.Errorf("ha service answered with unexpected response %v for %v from %v", resp.StatusCode, data, url)
-	}
-	return nil
-}
-
-func enableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
-	return updateInstanceHA(hypervisor, `{"enabled": true}`, []int{http.StatusOK})
-}
-
-func disableInstanceHA(hypervisor *kvmv1.Hypervisor) error {
-	return updateInstanceHA(hypervisor, `{"enabled": false}`, []int{http.StatusOK, http.StatusNotFound})
-}
 
 // IsNodeConditionPresentAndEqual returns true when conditionType is present and equal to status.
 func IsNodeConditionPresentAndEqual(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType, status corev1.ConditionStatus) bool {

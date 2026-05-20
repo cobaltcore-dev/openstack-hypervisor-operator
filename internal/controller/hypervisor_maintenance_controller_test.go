@@ -160,7 +160,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			}) // Spec.Maintenance=""
 		})
 
-		for _, mode := range []string{"auto", "manual", "ha"} {
+		for _, mode := range []string{"auto", "manual"} {
 			Context(fmt.Sprintf("Spec.Maintenance=\"%v\"", mode), func() {
 				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
@@ -181,6 +181,23 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 				})
 			}) // Spec.Maintenance="<mode>"
 		}
+
+		Context("Spec.Maintenance=\"ha\"", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceHA
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should not call the Nova API (kvm-ha-service owns enable/disable for ha mode)", func(ctx SpecContext) {
+				// The controller takes no action for ha mode; kvm-ha-service handles it.
+				// Verify the hypervisor is still accessible and no condition is set by this controller.
+				updated := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+				Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)).To(BeFalse())
+			})
+		}) // Spec.Maintenance="ha"
 
 		Describe("Eviction reconciliation", func() {
 			Context("Spec.Maintenance=\"\"", func() {
@@ -227,8 +244,6 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = "ha"
 					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-					expectedBody := `{"disabled_reason": "Hypervisor CRD: spec.maintenance=ha", "status": "disabled"}`
-					mockServiceUpdate(expectedBody)
 				})
 				It("should not create an eviction resource", func(ctx SpecContext) {
 					eviction := &kvmv1.Eviction{}
