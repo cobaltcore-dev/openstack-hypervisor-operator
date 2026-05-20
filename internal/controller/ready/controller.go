@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
@@ -104,20 +106,21 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
-	base := hv.DeepCopy()
-
 	// Compute Ready condition based on other conditions
 	readyCondition := ComputeReadyCondition(hv)
-	meta.SetStatusCondition(&hv.Status.Conditions, readyCondition)
-
-	if equality.Semantic.DeepEqual(hv.Status, base.Status) {
-		return ctrl.Result{}, nil
-	}
 
 	log.Info("Updating Ready condition", "status", readyCondition.Status, "reason", readyCondition.Reason)
-	return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, r.Client, req.Name, ControllerName, func(h *kvmv1.Hypervisor) {
-		meta.SetStatusCondition(&h.Status.Conditions, readyCondition)
-	})
+	statusCfg := apiv1.HypervisorStatus()
+	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(readyCondition.Type).
+			WithStatus(readyCondition.Status).
+			WithReason(readyCondition.Reason).
+			WithMessage(readyCondition.Message))
+	return ctrl.Result{}, r.Status().Apply(ctx,
+		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(ControllerName))
 }
 
 // ComputeReadyCondition determines the Ready condition based on other conditions
