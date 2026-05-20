@@ -326,12 +326,24 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 
 	if currentHypervisor != eviction.Spec.Hypervisor {
 		log.Info("migrated")
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeMigration,
-			Status:  metav1.ConditionFalse,
-			Message: fmt.Sprintf("Migration of instance %s finished", vm.ID),
-			Reason:  kvmv1.ConditionReasonSucceeded,
-		})
+		// Don't overwrite a sticky Failed migration condition with Succeeded
+		// while there are still other outstanding VMs - an earlier ERROR VM
+		// has been moved to the back of the queue and the eviction is not
+		// actually clean. The condition is reset only when the whole
+		// eviction completes (OutstandingInstances becomes empty).
+		remaining, _ := popInstance(eviction.Status.OutstandingInstances)
+		prior := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeMigration)
+		stickyFailure := len(remaining) > 0 && prior != nil &&
+			prior.Status == metav1.ConditionFalse &&
+			prior.Reason == kvmv1.ConditionReasonFailed
+		if !stickyFailure {
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionFalse,
+				Message: fmt.Sprintf("Migration of instance %s finished", vm.ID),
+				Reason:  kvmv1.ConditionReasonSucceeded,
+			})
+		}
 
 		// So, it is already off this one, do we need to verify it?
 		if vm.Status == "VERIFY_RESIZE" {
