@@ -131,11 +131,8 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 		if err != nil {
 			return fmt.Errorf("failed to enable hypervisor due to %w", err)
 		}
-	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceHA, kvmv1.MaintenanceTermination:
-		// Disable the compute service:
-		// Also in case of HA, as it doesn't hurt to disable it twice, and this
-		// allows us to enable the service again, when the maintenance field is
-		// cleared in the case above.
+	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceTermination:
+		// Disable the compute service.
 		if !meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 			Type:    kvmv1.ConditionTypeHypervisorDisabled,
 			Status:  metav1.ConditionTrue,
