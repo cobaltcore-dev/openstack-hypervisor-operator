@@ -439,5 +439,165 @@ var _ = Describe("Eviction Controller", func() {
 				})
 			})
 		})
+
+		Context("Mixed VM Eviction", func() {
+			// serverTpl renders a single server response. The eviction controller
+			// reads OS-EXT-SRV-ATTR:hypervisor_hostname (compared against the
+			// short-form hypervisor name from spec) plus status/task_state/power_state.
+			const serverTpl = `{
+    "server": {
+        "id": "%[1]s",
+        "status": "%[2]s",
+        "OS-EXT-SRV-ATTR:hypervisor_hostname": "%[3]s",
+        "OS-EXT-STS:task_state": "%[4]s",
+        "OS-EXT-STS:power_state": %[5]d,
+        "fault": {"code": 500, "message": "%[6]s"}
+    }
+}`
+
+			// migratedVMs is updated as the test simulates successful migrations.
+			// When a VM has been "migrated", its hypervisor_hostname response
+			// changes to a different host, signalling the controller it has left.
+			var migratedVMs map[string]bool
+			var liveMigrateCalls map[string]int
+
+			BeforeEach(func(ctx SpecContext) {
+				migratedVMs = map[string]bool{}
+				liveMigrateCalls = map[string]int{}
+
+				By("Seeding the eviction status with a list of VMs to evict")
+				// OutstandingInstances is processed from the END (peekInstance returns
+				// last). With [good-1, error-1, good-2], processing order is:
+				//   1) good-2 (last) - migrate, then drop
+				//   2) error-1 (now last) - skipped via moveToBack
+				//   3) good-1 - migrate, then drop
+				//   4) error-1 (alone) - keeps erroring
+				eviction := &kvmv1.Eviction{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, eviction)).To(Succeed())
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionTrue,
+					Message: "Running",
+					Reason:  kvmv1.ConditionReasonRunning,
+				})
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypePreflight,
+					Status:  metav1.ConditionTrue,
+					Message: "preflight passed",
+					Reason:  kvmv1.ConditionReasonSucceeded,
+				})
+				eviction.Status.HypervisorServiceId = serviceId
+				eviction.Status.OutstandingInstances = []string{"good-1", "error-1", "good-2"}
+				eviction.Status.OutstandingRamMb = 4096
+				Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+
+				By("Mocking GET /servers/{id} to return per-VM state")
+				fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+					serverID := r.PathValue("server_id")
+					w.Header().Add("Content-Type", "application/json")
+
+					// hypervisor_hostname uses the FQDN-style name; the controller
+					// only compares the short prefix (before the first ".") against
+					// eviction.Spec.Hypervisor. After we mark a VM as migrated,
+					// pretend it lives on a different host so the controller treats
+					// it as "already moved" and removes it from the list.
+					hvHost := hypervisorName + ".example.local"
+					if migratedVMs[serverID] {
+						hvHost = "other-host.example.local"
+					}
+
+					switch serverID {
+					case "good-1", "good-2":
+						status := "ACTIVE"
+						if migratedVMs[serverID] {
+							// Once migrated, status doesn't really matter, but
+							// keep it ACTIVE so we exercise the "different host"
+							// branch rather than VERIFY_RESIZE.
+							status = "ACTIVE"
+						}
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprintf(w, serverTpl, serverID, status, hvHost, "", 1, "")
+						Expect(err).NotTo(HaveOccurred())
+					case "error-1":
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprintf(w, serverTpl, serverID, "ERROR", hvHost, "", 0,
+							"manual intervention required")
+						Expect(err).NotTo(HaveOccurred())
+					default:
+						Fail("unexpected server id: " + serverID)
+					}
+				})
+
+				By("Mocking POST /servers/{id}/action for live-migration")
+				fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+					serverID := r.PathValue("server_id")
+					liveMigrateCalls[serverID]++
+					// Mark this VM as migrated so the next GET reports a different host.
+					migratedVMs[serverID] = true
+					w.WriteHeader(http.StatusAccepted)
+				})
+			})
+
+			It("skips errored VMs, evicts healthy ones, and retries errored VMs in subsequent loops", func(ctx SpecContext) {
+				resource := &kvmv1.Eviction{}
+
+				// Reconcile loop until the list is empty or we've gone too long.
+				// We expect: good-2 migrated, error-1 skipped, good-1 migrated, then
+				// only error-1 remains and keeps erroring.
+				By("Running reconciliations until only the errored VM remains")
+				const maxLoops = 20
+				for i := range maxLoops {
+					// Tolerate errors here: when the controller hits the ERROR
+					// VM it returns an error (joined with the status update).
+					// That is part of the pattern under test, not a test failure.
+					_, reconcileErr := evictionReconciler.Reconcile(ctx, reconcileRequest)
+					_ = reconcileErr // expected on ERROR-VM iterations
+					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+
+					// Once both healthy VMs have been migrated and removed, we are
+					// in the steady "only errored VM left" state.
+					remaining := resource.Status.OutstandingInstances
+					if len(remaining) == 1 && remaining[0] == "error-1" {
+						By(fmt.Sprintf("Reached steady state after %d reconciliations", i+1))
+						break
+					}
+				}
+
+				By("Both healthy VMs were live-migrated exactly once")
+				Expect(liveMigrateCalls["good-1"]).To(Equal(1),
+					"good-1 should have been migrated once")
+				Expect(liveMigrateCalls["good-2"]).To(Equal(1),
+					"good-2 should have been migrated once")
+
+				By("The errored VM is still outstanding and never received a migrate call")
+				Expect(resource.Status.OutstandingInstances).To(Equal([]string{"error-1"}))
+				Expect(liveMigrateCalls).NotTo(HaveKey("error-1"))
+
+				By("The migration condition reflects the most recent failure")
+				Expect(resource.Status.Conditions).To(ContainElement(SatisfyAll(
+					HaveField("Type", kvmv1.ConditionTypeMigration),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", kvmv1.ConditionReasonFailed),
+					HaveField("Message", ContainSubstring("error-1")),
+				)))
+
+				By("The eviction is NOT marked successful while the errored VM remains")
+				Expect(resource.Status.Conditions).NotTo(ContainElement(SatisfyAll(
+					HaveField("Type", kvmv1.ConditionTypeEvicting),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+				)))
+
+				By("Subsequent reconciliations keep retrying the errored VM (and surfacing the error)")
+				_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+				// The controller returns an error when it encounters a VM in ERROR
+				// state. The reconcile error should mention the errored UUID.
+				if err != nil {
+					Expect(err.Error()).To(ContainSubstring("error-1"))
+				}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				Expect(resource.Status.OutstandingInstances).To(Equal([]string{"error-1"}))
+			})
+		})
 	})
 })
