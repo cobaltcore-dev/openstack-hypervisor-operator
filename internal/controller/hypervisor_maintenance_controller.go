@@ -124,8 +124,13 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 			return nil
 		}
 
-		// We need to enable the host as per spec
-		enableService := services.UpdateOpts{Status: services.ServiceEnabled}
+		// We need to enable the host as per spec and clear forced_down
+		// in case it was set by the HA service during maintenance.
+		falseVal := false
+		enableService := openstack.UpdateServiceOpts{
+			Status:     services.ServiceEnabled,
+			ForcedDown: &falseVal,
+		}
 		log.Info("Enabling hypervisor", "id", serviceId)
 		_, err := services.Update(ctx, hec.computeClient, serviceId, enableService).Extract()
 		if err != nil {
