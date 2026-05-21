@@ -148,7 +148,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 					hypervisor.Spec.Maintenance = ""
 					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
-					expectedBody := `{"status": "enabled"}`
+					expectedBody := `{"status": "enabled", "forced_down": false}`
 					mockServiceUpdate(expectedBody)
 				})
 
@@ -215,7 +215,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 							Message: "dontcare",
 						})
 					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
-					expectedBody := `{"status": "enabled"}`
+					expectedBody := `{"status": "enabled", "forced_down": false}`
 					mockServiceUpdate(expectedBody)
 
 					eviction := &kvmv1.Eviction{
