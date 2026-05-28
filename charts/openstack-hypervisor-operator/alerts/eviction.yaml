@@ -11,6 +11,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/evictionfailed
     annotations:
       summary: "Eviction {{ $labels.name }} has failed"
       description: "The eviction {{ $labels.name }} for hypervisor {{ $labels.hypervisor }} has reached a terminal failure state. Manual intervention is required — check if the hypervisor exists in OpenStack."
@@ -24,6 +25,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/evictionmigrationfailing
     annotations:
       summary: "Eviction {{ $labels.name }} has failing instance migrations for over 1 hour"
       description: "The eviction {{ $labels.name }} has had MigratingInstance=Failed for more than 1 hour while still running. Instances may be in ERROR state, blocking eviction progress."
@@ -37,6 +39,7 @@ groups:
     labels:
       severity: warning
       type: hypervisor_operator
+      playbook: docs/compute/kvm/playbooks/evictionoutstandingram
     annotations:
       summary: "Eviction {{ $labels.name }} has outstanding RAM for over 6 hours"
       description: "The eviction {{ $labels.name }} has had {{ $value }}MB of outstanding RAM for more than 6 hours. Check for stuck live-migrations or instances that cannot be moved."
