@@ -33,7 +33,9 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -179,7 +181,24 @@ func main() {
 		bininfo.CommitOr("edge"))
 
 	leaderElectionID := "4c28796a.cloud.sap"
-	var cacheOptions cache.Options
+	// Deployments and PodDisruptionBudgets owned by the maintenance controller
+	// always live in kube-system and carry the cobaltcore-maintenance-controller
+	// label; restrict the cache to exactly those objects.
+	maintenanceSelector, err := labels.Parse(controller.MaintenanceLabelKey)
+	if err != nil {
+		setupLog.Error(err, "unable to parse maintenance label selector")
+		os.Exit(1)
+	}
+	maintenanceCacheConfig := cache.ByObject{
+		Namespaces: map[string]cache.Config{controller.MaintenanceNamespace: {}},
+		Label:      maintenanceSelector,
+	}
+	cacheOptions := cache.Options{
+		ByObject: map[client.Object]cache.ByObject{
+			&appsv1.Deployment{}:            maintenanceCacheConfig,
+			&policyv1.PodDisruptionBudget{}: maintenanceCacheConfig,
+		},
+	}
 	if global.LabelSelector != "" {
 		setupLog.Info("setting up cache with label selector", "selector", global.LabelSelector)
 		selector, err := labels.Parse(global.LabelSelector)
@@ -188,16 +207,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		cacheOptions = cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Node{}: {
-					Label: selector,
-				},
-				&kvmv1.Hypervisor{}: {
-					Label: selector,
-				},
-			},
-		}
+		cacheOptions.ByObject[&corev1.Node{}] = cache.ByObject{Label: selector}
+		cacheOptions.ByObject[&kvmv1.Hypervisor{}] = cache.ByObject{Label: selector}
 
 		h := sha256.New()
 		h.Write([]byte(leaderElectionID)) // Seed it with something "unique" to the project
