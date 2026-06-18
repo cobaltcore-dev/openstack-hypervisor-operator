@@ -21,13 +21,17 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -69,6 +73,7 @@ type HypervisorController struct {
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
+// +kubebuilder:rbac:groups="",resources=pods,verbs=list
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors/status,verbs=get;update;patch
 
@@ -100,8 +105,22 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		// continue with creation
 	} else {
-		// update Status if needed
-		base := hypervisor.DeepCopy()
+		// First, propagate spec/metadata derived from the Node (labels,
+		// annotations -> aggregates/traits, lifecycle). This must run on
+		// every reconcile, including those where status will also change
+		// (e.g. AgentPodsEvicted=False during termination); otherwise the
+		// Hypervisor spec/labels go stale.
+		specBase := hypervisor.DeepCopy()
+		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
+		if !equality.Semantic.DeepEqual(hypervisor, specBase) {
+			if err := hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(specBase,
+				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		// Then, compute and persist any status changes derived from the Node.
+		statusBase := hypervisor.DeepCopy()
 
 		// transfer internal IP
 		for _, address := range node.Status.Addresses {
@@ -123,26 +142,43 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 		}
 
-		if !equality.Semantic.DeepEqual(hypervisor, base) {
+		// Only evaluate after VM eviction; a spurious True on a fresh node
+		// (agents not yet scheduled) would be misleading.
+		var statusRequeueAfter time.Duration
+		if hypervisor.Spec.Maintenance == kvmv1.MaintenanceTermination &&
+			meta.IsStatusConditionFalse(hypervisor.Status.Conditions, kvmv1.ConditionTypeEvicting) &&
+			nodeHasOffboardingTaint(node) {
+			cond, err := hv.computeAgentPodsEvictedCondition(ctx, log, node.Name)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to compute %s condition: %w", kvmv1.ConditionTypeAgentPodsEvicted, err)
+			}
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, cond)
+			if cond.Status == metav1.ConditionFalse {
+				// No pod watch — rely on periodic requeue.
+				statusRequeueAfter = defaultPollTime
+			}
+		}
+
+		if !equality.Semantic.DeepEqual(hypervisor, statusBase) {
 			// Capture values to apply - only mutate fields this controller owns
 			newInternalIP := hypervisor.Status.InternalIP
 			terminatingCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTerminating)
+			agentPodsCondition := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeAgentPodsEvicted)
 
-			return ctrl.Result{}, utils.PatchHypervisorStatusWithRetry(ctx, hv.Client, hypervisor.Name, HypervisorControllerName, func(h *kvmv1.Hypervisor) {
+			if err := utils.PatchHypervisorStatusWithRetry(ctx, hv.Client, hypervisor.Name, HypervisorControllerName, func(h *kvmv1.Hypervisor) {
 				h.Status.InternalIP = newInternalIP
 				if terminatingCondition != nil {
 					meta.SetStatusCondition(&h.Status.Conditions, *terminatingCondition)
 				}
-			})
+				if agentPodsCondition != nil {
+					meta.SetStatusCondition(&h.Status.Conditions, *agentPodsCondition)
+				}
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 
-		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
-		if equality.Semantic.DeepEqual(hypervisor, base) {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
-			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
+		return ctrl.Result{RequeueAfter: statusRequeueAfter}, nil
 	}
 
 	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
@@ -261,4 +297,90 @@ func transportLabels(source, destination *metav1.ObjectMeta) {
 			destination.Labels[transferLabel] = label
 		}
 	}
+}
+
+// nodeHasOffboardingTaint reports whether the offboarding NoExecute taint has
+// been applied to the node. The pod list is only meaningful after that point —
+// before it, no agents have been evicted yet.
+func nodeHasOffboardingTaint(node *corev1.Node) bool {
+	for _, t := range node.Spec.Taints {
+		if t.Key == taintKeyOffboarding && t.Effect == corev1.TaintEffectNoExecute {
+			return true
+		}
+	}
+	return false
+}
+
+// computeAgentPodsEvictedCondition checks whether pods that would be evicted
+// by the offboarding taint are still running. Only call once Evicting=False.
+func (hv *HypervisorController) computeAgentPodsEvictedCondition(ctx context.Context, log logr.Logger, nodeName string) (metav1.Condition, error) {
+	offboardingTaint := corev1.Taint{
+		Key:    taintKeyOffboarding,
+		Effect: corev1.TaintEffectNoExecute,
+	}
+
+	var agentPods []string
+	for _, ns := range global.AgentNamespaces {
+		var continueToken string
+		for {
+			pods := &corev1.PodList{}
+			if err := hv.List(ctx, pods,
+				k8sclient.InNamespace(ns),
+				k8sclient.MatchingFieldsSelector{
+					Selector: fields.OneTermEqualSelector("spec.nodeName", nodeName),
+				},
+				&k8sclient.ListOptions{Limit: 100, Continue: continueToken},
+			); err != nil {
+				return metav1.Condition{}, fmt.Errorf("failed to list pods on node %s in namespace %q: %w", nodeName, ns, err)
+			}
+
+			for _, pod := range pods.Items {
+				if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+					continue
+				}
+				if podToleratesTaint(log, &pod, &offboardingTaint) {
+					continue
+				}
+				agentPods = append(agentPods, pod.Namespace+"/"+pod.Name)
+			}
+
+			if pods.Continue == "" {
+				break
+			}
+			continueToken = pods.Continue
+		}
+	}
+
+	if len(agentPods) == 0 {
+		return metav1.Condition{
+			Type:    kvmv1.ConditionTypeAgentPodsEvicted,
+			Status:  metav1.ConditionTrue,
+			Reason:  "NoAgentPods",
+			Message: "No agent pods are running on this node",
+		}, nil
+	}
+
+	sort.Strings(agentPods)
+	return metav1.Condition{
+		Type:    kvmv1.ConditionTypeAgentPodsEvicted,
+		Status:  metav1.ConditionFalse,
+		Reason:  "AgentPodsRunning",
+		Message: fmt.Sprintf("%d agent pod(s) still running on node: %s", len(agentPods), strings.Join(agentPods, ", ")),
+	}, nil
+}
+
+// podToleratesTaint reports whether the pod tolerates the taint indefinitely.
+// Tolerations with a finite TolerationSeconds are excluded: the pod will
+// eventually be evicted and must not be treated as safe to ignore.
+func podToleratesTaint(log logr.Logger, pod *corev1.Pod, taint *corev1.Taint) bool {
+	for i := range pod.Spec.Tolerations {
+		t := &pod.Spec.Tolerations[i]
+		if t.TolerationSeconds != nil {
+			continue
+		}
+		if t.ToleratesTaint(log, taint, false) {
+			return true
+		}
+	}
+	return false
 }

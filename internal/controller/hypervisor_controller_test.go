@@ -18,16 +18,27 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
+	"sync/atomic"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
+	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 )
+
+// envtest does not actually GC pods when their namespace is deleted, so
+// each spec gets a fresh namespace via this counter to keep them isolated.
+var agentNamespaceCounter atomic.Uint64
 
 var _ = Describe("Hypervisor Controller", func() {
 	const (
@@ -401,5 +412,339 @@ var _ = Describe("Hypervisor Controller", func() {
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			Expect(hypervisor.Status.InternalIP).To(Equal("192.168.1.100"))
 		})
+	})
+
+	Context("AgentPodsEvicted condition", func() {
+		var agentNamespace string
+
+		BeforeEach(func(ctx SpecContext) {
+			agentNamespace = fmt.Sprintf("agent-ns-%d", agentNamespaceCounter.Add(1))
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: agentNamespace}}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, ns))).To(Succeed())
+			})
+
+			// Restrict pod listing to the test namespace.
+			global.AgentNamespaces = []string{agentNamespace}
+			DeferCleanup(func() { global.AgentNamespaces = nil })
+
+			// The condition is only computed during termination.
+			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: resource.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			hypervisor.Spec.LifecycleEnabled = true
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			// Default for these specs: VM eviction is done. Subcontexts
+			// that exercise the "not yet done" path override this.
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeEvicting,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Succeeded",
+				Message: "All VMs evicted",
+			})
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+			// The pod list is only issued once the offboarding taint is on the node.
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+			base := node.DeepCopy()
+			node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+				Key:    taintKeyOffboarding,
+				Effect: corev1.TaintEffectNoExecute,
+			})
+			Expect(k8sClient.Patch(ctx, node, client.MergeFrom(base))).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				fresh := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, fresh); err == nil {
+					base := fresh.DeepCopy()
+					taints := fresh.Spec.Taints[:0]
+					for _, t := range fresh.Spec.Taints {
+						if t.Key != taintKeyOffboarding {
+							taints = append(taints, t)
+						}
+					}
+					fresh.Spec.Taints = taints
+					Expect(client.IgnoreNotFound(k8sClient.Patch(ctx, fresh, client.MergeFrom(base)))).To(Succeed())
+				}
+			})
+		})
+
+		createPod := func(ctx SpecContext, name, namespace string, phase corev1.PodPhase, tolerations ...corev1.Toleration) *corev1.Pod {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: corev1.PodSpec{
+					NodeName: resource.Name,
+					Containers: []corev1.Container{
+						{Name: "main", Image: "registry.example.com/whatever:latest"},
+					},
+					Tolerations: tolerations,
+				},
+				Status: corev1.PodStatus{Phase: phase},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pod)).To(Succeed())
+			pod.Status.Phase = phase
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, pod))).To(Succeed())
+			})
+			return pod
+		}
+
+		When("only pods that tolerate the offboarding taint are running", func() {
+			BeforeEach(func(ctx SpecContext) {
+				createPod(ctx, "tolerator", agentNamespace, corev1.PodRunning, corev1.Toleration{
+					Key:      taintKeyOffboarding,
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoExecute,
+				})
+				// Phase=Succeeded must not count regardless of tolerations.
+				createPod(ctx, "old-job", agentNamespace, corev1.PodSucceeded)
+			})
+
+			It("should set AgentPodsEvicted=True without requeue", func(ctx SpecContext) {
+				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeZero())
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeAgentPodsEvicted),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", "NoAgentPods"),
+					),
+				))
+			})
+		})
+
+		When("an agent pod is running on the node and VM eviction is done", func() {
+			BeforeEach(func(ctx SpecContext) {
+				createPod(ctx, "nova-compute-xyz", agentNamespace, corev1.PodRunning)
+			})
+
+			It("should set AgentPodsEvicted=False with reason AgentPodsRunning and requeue", func(ctx SpecContext) {
+				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeAgentPodsEvicted),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", "AgentPodsRunning"),
+						HaveField("Message", ContainSubstring("nova-compute-xyz")),
+					),
+				))
+			})
+
+			It("should also flush InternalIP and Terminating in the same reconcile", func(ctx SpecContext) {
+				// Stage a fresh InternalIP and a node-level Terminating condition
+				// that the same reconcile pass would normally pick up. The
+				// AgentPodsEvicted=False branch must not skip persisting these
+				// fields; otherwise the Hypervisor status remains stale until a
+				// later reconcile.
+				node := &corev1.Node{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+				base := node.DeepCopy()
+				node.Status.Addresses = []corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: "192.168.42.7"},
+				}
+				node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:    "Terminating",
+					Status:  corev1.ConditionTrue,
+					Reason:  terminatingReason,
+					Message: "Node is terminating",
+				})
+				Expect(k8sClient.Status().Patch(ctx, node, client.MergeFrom(base))).To(Succeed())
+
+				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+				By("persisting AgentPodsEvicted=False")
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeAgentPodsEvicted),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", "AgentPodsRunning"),
+					),
+				))
+
+				By("persisting the freshly observed InternalIP")
+				Expect(hypervisor.Status.InternalIP).To(Equal("192.168.42.7"))
+
+				By("persisting the propagated Terminating condition")
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeTerminating),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", terminatingReason),
+					),
+				))
+			})
+
+			It("should still propagate node label changes to the Hypervisor", func(ctx SpecContext) {
+				// Stage a node label that the reconcile pass would normally
+				// transport to the Hypervisor metadata via
+				// syncLabelsAndAnnotations. The AgentPodsEvicted=False branch
+				// must not skip this propagation; otherwise the Hypervisor
+				// labels remain stale during termination.
+				//
+				// (The Hypervisor spec is immutable while
+				// maintenance=='termination', so only metadata.Labels — not
+				// spec-derived fields like aggregates/customTraits — can
+				// legitimately change in this state.)
+				node := &corev1.Node{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+				base := node.DeepCopy()
+				node.Labels[workerGroupLabel] = workerGroupValue
+				Expect(k8sClient.Patch(ctx, node, client.MergeFrom(base))).To(Succeed())
+
+				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultPollTime),
+					"AgentPodsEvicted=False must still drive a periodic requeue")
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+				By("transporting the node label to the Hypervisor")
+				Expect(hypervisor.Labels).To(HaveKeyWithValue(workerGroupLabel, workerGroupValue))
+			})
+		})
+
+		When("the only non-tolerating pod is already being deleted", func() {
+			// A finalizer keeps the API object around with DeletionTimestamp
+			// set, simulating a pod whose containers are shutting down but
+			// whose deletion is blocked on some unrelated finalizer.
+			const finalizer = "test.kvm.cloud.sap/keep-alive"
+
+			BeforeEach(func(ctx SpecContext) {
+				pod := createPod(ctx, "nova-compute-deleting", agentNamespace, corev1.PodRunning)
+				pod.Finalizers = []string{finalizer}
+				Expect(k8sClient.Update(ctx, pod)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+
+				DeferCleanup(func(ctx SpecContext) {
+					fresh := &corev1.Pod{}
+					if err := k8sClient.Get(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, fresh); err == nil {
+						fresh.Finalizers = nil
+						Expect(client.IgnoreNotFound(k8sClient.Update(ctx, fresh))).To(Succeed())
+					}
+				})
+
+				// Sanity: the pod must still exist with DeletionTimestamp.
+				fresh := &corev1.Pod{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, fresh)).To(Succeed())
+				Expect(fresh.DeletionTimestamp).NotTo(BeNil())
+			})
+
+			It("should set AgentPodsEvicted=False (deletion-pending pod still counts as running)", func(ctx SpecContext) {
+				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeAgentPodsEvicted),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", "AgentPodsRunning"),
+						HaveField("Message", ContainSubstring("nova-compute-deleting")),
+					),
+				))
+			})
+		})
+	})
+})
+
+var _ = Describe("computeAgentPodsEvictedCondition field selector", func() {
+	// This test verifies that the pod list issued by computeAgentPodsEvictedCondition
+	// uses the spec.nodeName field selector so that only pods on the target node
+	// are returned, not all pods in the cluster.
+	It("should only list pods scheduled on the target node", func(ctx SpecContext) {
+		// Use a client with DisableFor pods, mirroring production config.
+		uncachedClient, err := client.New(cfg, client.Options{
+			Scheme: k8sscheme.Scheme,
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{&corev1.Pod{}},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "field-selector-test"}}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, ns))).To(Succeed())
+		})
+
+		// Create a pod on "target-node".
+		onTarget := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "on-target", Namespace: ns.Name},
+			Spec: corev1.PodSpec{
+				NodeName:   "target-node",
+				Containers: []corev1.Container{{Name: "c", Image: "registry.example.com/img:latest"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, onTarget)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, onTarget))).To(Succeed())
+		})
+
+		// Create a pod on a different node — must not appear in results.
+		onOther := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "on-other", Namespace: ns.Name},
+			Spec: corev1.PodSpec{
+				NodeName:   "other-node",
+				Containers: []corev1.Container{{Name: "c", Image: "registry.example.com/img:latest"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, onOther)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, onOther))).To(Succeed())
+		})
+
+		pods := &corev1.PodList{}
+		Expect(uncachedClient.List(ctx, pods,
+			client.MatchingFieldsSelector{
+				Selector: fields.OneTermEqualSelector("spec.nodeName", "target-node"),
+			},
+		)).To(Succeed())
+
+		names := make([]string, len(pods.Items))
+		for i, p := range pods.Items {
+			names[i] = p.Name
+		}
+		Expect(names).To(ConsistOf("on-target"),
+			"field selector spec.nodeName must filter server-side; got pods: %v", names)
 	})
 })
