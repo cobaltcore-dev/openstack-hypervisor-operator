@@ -71,6 +71,11 @@ const (
 
 	// ConditionTypeAggregatesUpdated is the type of condition for aggregates updated status of a hypervisor
 	ConditionTypeAggregatesUpdated = "AggregatesUpdated"
+
+	// ConditionTypeAgentPodsEvicted gates compute-service deletion during
+	// offboarding: a running nova-compute pod would otherwise re-register
+	// the service we are about to delete.
+	ConditionTypeAgentPodsEvicted = "AgentPodsEvicted"
 )
 
 // Condition Reasons

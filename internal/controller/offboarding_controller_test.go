@@ -141,6 +141,13 @@ var _ = Describe("Offboarding Controller", func() {
 						Reason:  "dontcare",
 						Message: "dontcare",
 					})
+					// HypervisorController-side signal that agent pods are gone.
+					meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeAgentPodsEvicted,
+						Status:  metav1.ConditionTrue,
+						Reason:  "NoAgentPods",
+						Message: "No agent pods are running on this node",
+					})
 					Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
 
 					By("Mocking OpenStack API endpoints")
@@ -312,6 +319,14 @@ var _ = Describe("Offboarding Controller", func() {
 				Reason:  "Offboarding",
 				Message: "Hypervisor is being offboarded, removing host from nova",
 			})
+			// Bypass the pod-eviction gate; it is exercised by its own
+			// case below.
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeAgentPodsEvicted,
+				Status:  metav1.ConditionTrue,
+				Reason:  "NoAgentPods",
+				Message: "No agent pods are running on this node",
+			})
 			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
 		})
 
@@ -397,6 +412,52 @@ var _ = Describe("Offboarding Controller", func() {
 				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
 				sharedOffboardingErrorCheck(ctx, "Waiting for aggregates to be removed")
+			})
+		})
+
+		Context("When agent pods are still running on the node", func() {
+			var getHypervisorsCalled int
+
+			BeforeEach(func(ctx SpecContext) {
+				getHypervisorsCalled = 0
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+					getHypervisorsCalled++
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, `{
+						"hypervisors": [{
+							"id": "c48f6247-abe4-4a24-824e-ea39e108874f",
+							"hypervisor_hostname": "node-test",
+							"hypervisor_version": 2002000,
+							"state": "up",
+							"status": "enabled",
+							"running_vms": 0,
+							"service": {
+								"id": "service-1234",
+								"host": "node-test"
+							}
+						}]
+					}`)
+				})
+
+				By("Overriding AgentPodsEvicted to False")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeAgentPodsEvicted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "AgentPodsRunning",
+					Message: "1 agent pod(s) still running on node: monsoon3/nova-compute-xyz",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should wait for the agent pods to be evicted and not delete the compute service", func(ctx SpecContext) {
+				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				sharedOffboardingErrorCheck(ctx, "Waiting for agent pods to be evicted")
+				Expect(getHypervisorsCalled).To(Equal(0),
+					"external hypervisor lookup must be short-circuited by the AgentPodsEvicted gate")
 			})
 		})
 

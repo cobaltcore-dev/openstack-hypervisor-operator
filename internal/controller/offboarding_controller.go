@@ -93,6 +93,18 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, nil
 	}
 
+	// A still-running nova-compute agent would re-register the service we
+	// are about to delete, undoing the offboarding. This gate must be checked
+	// before any external OpenStack call so that ErrNoHypervisor cannot mark
+	// offboarding complete while agent pods are still running on the node.
+	if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeAgentPodsEvicted) {
+		msg := "Waiting for agent pods (nova-compute, neutron) to be evicted from node"
+		if cond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeAgentPodsEvicted); cond != nil && cond.Message != "" {
+			msg = "Waiting for agent pods to be evicted: " + cond.Message
+		}
+		return r.setOffboardingCondition(ctx, hv, msg)
+	}
+
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
 	if err != nil {
 		if errors.Is(err, openstack.ErrNoHypervisor) {
@@ -127,7 +139,6 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 		return r.setOffboardingCondition(ctx, hv, msg)
 	}
 
-	// Deleting and evicted, so better delete the service
 	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		msg := fmt.Sprintf("cannot delete service %s due to %v", hypervisor.Service.ID, err)
