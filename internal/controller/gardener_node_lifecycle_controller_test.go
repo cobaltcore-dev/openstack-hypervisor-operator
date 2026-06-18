@@ -207,4 +207,63 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
 		})
 	})
+
+	Context("Offboarding taint", func() {
+		findOffboardingTaint := func(node *corev1.Node) *corev1.Taint {
+			for i := range node.Spec.Taints {
+				t := &node.Spec.Taints[i]
+				if t.Key == taintKeyOffboarding && t.Effect == corev1.TaintEffectNoExecute {
+					return t
+				}
+			}
+			return nil
+		}
+
+		When("the hypervisor is in maintenance termination and the VMs have been evicted", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "Succeeded",
+					Message: "All VMs evicted",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should add the offboarding NoExecute taint to the node", func(ctx SpecContext) {
+				_, err := controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				node := &corev1.Node{}
+				Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
+				taint := findOffboardingTaint(node)
+				Expect(taint).NotTo(BeNil())
+				Expect(taint.Key).To(Equal(taintKeyOffboarding))
+				Expect(taint.Effect).To(Equal(corev1.TaintEffectNoExecute))
+			})
+
+			It("should be idempotent: a second reconcile must not add a duplicate taint", func(ctx SpecContext) {
+				_, err := controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = controller.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				node := &corev1.Node{}
+				Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
+
+				count := 0
+				for _, t := range node.Spec.Taints {
+					if t.Key == taintKeyOffboarding {
+						count++
+					}
+				}
+				Expect(count).To(Equal(1))
+			})
+		})
+	})
 })

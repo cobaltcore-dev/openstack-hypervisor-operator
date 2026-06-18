@@ -21,4 +21,9 @@ package controller
 const (
 	labelHypervisor   = "nova.openstack.cloud.sap/virt-driver"
 	testAggregateName = "tenant_filter_tests"
+
+	// taintKeyOffboarding is used as a NoExecute taint. nova-compute and
+	// neutron agent pods do not tolerate it (the kvm-node-agent and the
+	// signalling pod do), so applying it forces those agents off the node.
+	taintKeyOffboarding = "kvm.cloud.sap/offboarding"
 )
