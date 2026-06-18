@@ -20,4 +20,9 @@ package global
 var (
 	// LabelSelector is a custom label that is used to select resources managed by the operator.
 	LabelSelector = ""
+
+	// AgentNamespaces is the list of namespaces in which agent pods (nova-compute,
+	// neutron) are scheduled. The pod list during offboarding is restricted to
+	// these namespaces. Must be non-empty; set via --agent-namespaces.
+	AgentNamespaces []string
 )

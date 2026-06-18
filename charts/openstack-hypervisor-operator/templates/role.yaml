@@ -21,6 +21,12 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+- apiGroups:
   - apps
   resources:
   - deployments
