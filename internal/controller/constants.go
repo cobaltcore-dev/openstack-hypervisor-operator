@@ -21,4 +21,11 @@ package controller
 const (
 	labelHypervisor   = "nova.openstack.cloud.sap/virt-driver"
 	testAggregateName = "tenant_filter_tests"
+
+	// MaintenanceLabelKey is the label key applied to Deployments and
+	// PodDisruptionBudgets owned by the maintenance controller.
+	MaintenanceLabelKey = "cobaltcore-maintenance-controller"
+	// MaintenanceNamespace is the namespace where the maintenance controller
+	// creates its Deployments and PodDisruptionBudgets.
+	MaintenanceNamespace = "kube-system"
 )

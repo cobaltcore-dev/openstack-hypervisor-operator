@@ -47,8 +47,6 @@ type GardenerNodeLifecycleController struct {
 }
 
 const (
-	labelDeployment           = "cobaltcore-maintenance-controller"
-	maintenancePodsNamespace  = "kube-system"
 	labelCriticalComponent    = "node.gardener.cloud/critical-component"
 	valueReasonTerminating    = "terminating"
 	MaintenanceControllerName = "maintenance"
@@ -123,7 +121,7 @@ func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx 
 		return err
 	}
 
-	podDisruptionBudget := policyv1ac.PodDisruptionBudget(name, maintenancePodsNamespace).
+	podDisruptionBudget := policyv1ac.PodDisruptionBudget(name, MaintenanceNamespace).
 		WithLabels(nodeLabels).
 		WithOwnerReferences(OwnerReference(node, &gvk)).
 		WithSpec(policyv1ac.PodDisruptionBudgetSpec().
@@ -155,7 +153,7 @@ func nameForNode(node *corev1.Node) string {
 
 func labelsForNode(node *corev1.Node) map[string]string {
 	return map[string]string{
-		labelDeployment: nameForNode(node),
+		MaintenanceLabelKey: nameForNode(node),
 	}
 }
 
@@ -178,7 +176,7 @@ func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context
 		return err
 	}
 
-	deployment := apps1ac.Deployment(name, maintenancePodsNamespace).
+	deployment := apps1ac.Deployment(name, MaintenanceNamespace).
 		WithOwnerReferences(OwnerReference(node, &gvk)).
 		WithLabels(labels).
 		WithSpec(apps1ac.DeploymentSpec().
