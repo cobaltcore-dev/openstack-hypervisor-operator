@@ -6,10 +6,10 @@ module github.com/cobaltcore-dev/openstack-hypervisor-operator
 go 1.26.0
 
 require (
-	github.com/gophercloud/gophercloud/v2 v2.12.0
-	github.com/gophercloud/utils/v2 v2.0.0-20260424064311-2eeed4ceb3e9
-	github.com/onsi/ginkgo/v2 v2.31.0
-	github.com/onsi/gomega v1.42.0
+	github.com/gophercloud/gophercloud/v2 v2.13.0
+	github.com/gophercloud/utils/v2 v2.0.0-20260626221802-4ae35253ac13
+	github.com/onsi/ginkgo/v2 v2.32.0
+	github.com/onsi/gomega v1.42.1
 	github.com/sapcc/go-api-declarations v1.24.0
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
@@ -35,7 +35,7 @@ require (
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
-	github.com/cert-manager/cert-manager v1.20.2
+	github.com/cert-manager/cert-manager v1.20.3
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
