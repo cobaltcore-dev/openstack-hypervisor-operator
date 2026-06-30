@@ -7,6 +7,7 @@ controllerManager:
     - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
     - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
     - --label-selector=$(LABEL_SELECTOR)
+    - --agent-namespaces=$(AGENT_NAMESPACES)
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -16,6 +17,7 @@ controllerManager:
       certificateIssuerName: nova-hypervisor-agents-ca-issuer
       certificateNamespace: monsoon3
       labelSelector: ""
+      agentNamespaces: "monsoon3"
       osAuthUrl: ""
       osProjectDomainName: ""
       osProjectName: ""

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	gruntime "runtime"
+	"strings"
 
 	"github.com/sapcc/go-api-declarations/bininfo"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -97,6 +98,10 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&global.LabelSelector, "label-selector", "", "Label selector to filter watched resources (namely nodes).")
 
+	var agentNamespacesFlag string
+	flag.StringVar(&agentNamespacesFlag, "agent-namespaces", "",
+		"Comma-separated list of namespaces to search for agent pods (nova-compute, neutron) during offboarding.")
+
 	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
 		"Name of the certificate issuer.")
@@ -111,11 +116,36 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	// Handle --version before validating required runtime flags so that
+	// `./manager --version` works without providing --agent-namespaces.
 	if version {
 		fmt.Printf("%s %s (%s/%s) %s\n",
 			bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
 			bininfo.CommitOr("edge"))
 		os.Exit(0)
+	}
+
+	if agentNamespacesFlag != "" {
+		// Deduplicate. Without this, repeated entries (e.g. from templated
+		// values) would cause redundant pod-list calls and inflate the
+		// AgentPodsEvicted condition message with duplicate pod names.
+		seen := map[string]struct{}{}
+		for ns := range strings.SplitSeq(agentNamespacesFlag, ",") {
+			ns = strings.TrimSpace(ns)
+			if ns == "" {
+				continue
+			}
+			if _, ok := seen[ns]; ok {
+				continue
+			}
+			seen[ns] = struct{}{}
+			global.AgentNamespaces = append(global.AgentNamespaces, ns)
+		}
+	}
+
+	if len(global.AgentNamespaces) == 0 {
+		setupLog.Error(errors.New("--agent-namespaces is required"), "invalid configuration")
+		os.Exit(1)
 	}
 
 	if certificateIssuerName == "" {
@@ -226,6 +256,13 @@ func main() {
 
 		// Optionally configure the cache to listen/watch for specific labeled resources only
 		Cache: cacheOptions,
+		// Pods are listed directly (not cached) to avoid a cluster-wide pod
+		// informer — a single large namespace would cause an OOM on startup.
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{&corev1.Pod{}},
+			},
+		},
 	})
 
 	if err != nil {

@@ -33,9 +33,13 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	policyv1ac "k8s.io/client-go/applyconfigurations/policy/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -85,6 +89,19 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, nil
 	}
 
+	// Apply the offboarding taint once VMs are gone; gate on Evicting=False
+	// to avoid racing with live-migration.
+	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination &&
+		meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
+		patched, err := r.ensureOffboardingTaint(ctx, node)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to ensure offboarding taint: %w", err)
+		}
+		if patched {
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// We do not care about the particular value, as long as it isn't an error
 	var minAvailable int32 = 1
 
@@ -113,6 +130,30 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ensureOffboardingTaint adds the offboarding NoExecute taint if not already
+// present. Returns true when a patch was issued (caller should return early).
+func (r *GardenerNodeLifecycleController) ensureOffboardingTaint(ctx context.Context, node *corev1.Node) (bool, error) {
+	for _, t := range node.Spec.Taints {
+		if t.Key == taintKeyOffboarding && t.Effect == corev1.TaintEffectNoExecute {
+			return false, nil
+		}
+	}
+
+	log := logger.FromContext(ctx)
+	log.Info("Adding offboarding taint to node",
+		"node", node.Name,
+		"taint", taintKeyOffboarding,
+		"effect", corev1.TaintEffectNoExecute)
+
+	// StrategicMergeFrom merges taints by key, preserving concurrent additions.
+	patch := k8sclient.StrategicMergeFrom(node.DeepCopy())
+	node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+		Key:    taintKeyOffboarding,
+		Effect: corev1.TaintEffectNoExecute,
+	})
+	return true, r.Patch(ctx, node, patch, k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
 func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx context.Context, node *corev1.Node, minAvailable int32) error {
@@ -226,10 +267,48 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 	_ = logger.FromContext(ctx)
 	r.namespace = namespace
 
+	hypervisorToNode := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &corev1.Node{})
+
+	// Maintenance=termination bumps generation; Evicting status changes do not.
+	hypervisorRelevantChange := predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		evictingConditionChangedPredicate{},
+	)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(MaintenanceControllerName).
 		For(&corev1.Node{}).
-		Owns(&appsv1.Deployment{}). // trigger the r.Reconcile whenever an Own-ed deployment is created/updated/deleted
+		Watches(&kvmv1.Hypervisor{}, hypervisorToNode,
+			builder.WithPredicates(hypervisorRelevantChange),
+		).
+		Owns(&appsv1.Deployment{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Complete(r)
+}
+
+// evictingConditionChangedPredicate complements GenerationChangedPredicate,
+// which ignores status-only updates.
+type evictingConditionChangedPredicate struct {
+	predicate.Funcs
+}
+
+func (evictingConditionChangedPredicate) Update(e event.UpdateEvent) bool {
+	if e.ObjectOld == nil || e.ObjectNew == nil {
+		return false
+	}
+	oldHv, ok1 := e.ObjectOld.(*kvmv1.Hypervisor)
+	newHv, ok2 := e.ObjectNew.(*kvmv1.Hypervisor)
+	if !ok1 || !ok2 {
+		return false
+	}
+	oldCond := meta.FindStatusCondition(oldHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+	newCond := meta.FindStatusCondition(newHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+	switch {
+	case oldCond == nil && newCond == nil:
+		return false
+	case oldCond == nil || newCond == nil:
+		return true
+	default:
+		return oldCond.Status != newCond.Status
+	}
 }
