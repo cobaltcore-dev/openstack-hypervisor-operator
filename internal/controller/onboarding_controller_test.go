@@ -336,6 +336,7 @@ var _ = Describe("Onboarding Controller", func() {
 	Context("running tests after initial setup", func() {
 		var (
 			serverActionHandler func(http.ResponseWriter, *http.Request)
+			serverCreateHandler func(http.ResponseWriter, *http.Request)
 			serverDeleteHandler func(http.ResponseWriter, *http.Request)
 			serverDetailHandler func(http.ResponseWriter, *http.Request)
 		)
@@ -397,11 +398,14 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			fakeServer.Mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+			serverCreateHandler = func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprint(w, createServerBody)
 				Expect(err).NotTo(HaveOccurred())
+			}
+			fakeServer.Mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+				serverCreateHandler(w, r)
 			})
 
 			serverActionHandler = func(w http.ResponseWriter, _ *http.Request) {
@@ -632,13 +636,126 @@ var _ = Describe("Onboarding Controller", func() {
 				By("Verifying the timed-out server was deleted")
 				Expect(serverDeletedCalled).To(BeTrue())
 
-				By("Verifying the onboarding condition message indicates a timeout")
+				By("Verifying the onboarding condition message indicates a timeout and includes the server ID")
 				hv := &kvmv1.Hypervisor{}
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 				Expect(onboardingCond).NotTo(BeNil())
 				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
 				Expect(onboardingCond.Message).To(ContainSubstring("timeout"))
+				Expect(onboardingCond.Message).To(ContainSubstring("server-id"))
+			})
+		})
+
+		When("test server creation fails", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Overriding HV status to Testing state")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonTesting,
+					Message: "previously stuck on something else",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("should surface the error in the Onboarding condition and requeue without returning an error", func(ctx SpecContext) {
+				By("Overriding the POST /servers handler to return 500")
+				serverCreateHandler = func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, err := fmt.Fprint(w, `{"computeFault": {"message": "Cinder volume backend is degraded"}}`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				By("Reconciling: createOrGetTestServer should fail at POST /servers")
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultWaitTime))
+
+				By("Verifying the Onboarding condition reflects the create error")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(onboardingCond).NotTo(BeNil())
+				Expect(onboardingCond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
+				Expect(onboardingCond.Message).To(ContainSubstring("failed to create or get test instance"))
+			})
+		})
+
+		When("test server is in ERROR state", func() {
+			var (
+				serverGetCalled    bool
+				serverDeleteCalled bool
+			)
+
+			BeforeEach(func(ctx SpecContext) {
+				By("Overriding HV status to Testing state")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonTesting,
+					Message: "Running onboarding tests",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				serverName := fmt.Sprintf("%s-%s-%s", testPrefixName, hypervisorName, string(hv.UID))
+				serverGetCalled = false
+				serverDeleteCalled = false
+
+				// GET /servers/detail returns a single ERROR-state server with the
+				// expected name so createOrGetTestServer returns it as foundServer.
+				serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
+					_, err := fmt.Fprintf(w,
+						`{"servers": [{"id": "server-id", "name": %q, "status": "ERROR"}], "servers_links": []}`,
+						serverName)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				// GET /servers/server-id returns the ERROR server with a fault
+				// message so smokeTest can record it.
+				fakeServer.Mux.HandleFunc("GET /servers/server-id", func(w http.ResponseWriter, _ *http.Request) {
+					serverGetCalled = true
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprintf(w,
+						`{"server": {"id": "server-id", "name": %q, "status": "ERROR", "fault": {"message": "Build of instance aborted: volume creation failed"}}}`,
+						serverName)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				serverDeleteHandler = func(w http.ResponseWriter, _ *http.Request) {
+					serverDeleteCalled = true
+					w.WriteHeader(http.StatusAccepted)
+				}
+			})
+
+			It("should record the failure with the server UUID and issue a delete, without returning an error", func(ctx SpecContext) {
+				By("Reconciling once to enter the ERROR branch")
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(defaultWaitTime))
+
+				By("Verifying GET on the server happened so the fault could be read")
+				Expect(serverGetCalled).To(BeTrue())
+
+				By("Verifying the server delete was attempted")
+				Expect(serverDeleteCalled).To(BeTrue())
+
+				By("Verifying the Onboarding condition message includes the server UUID and the fault text")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(onboardingCond).NotTo(BeNil())
+				Expect(onboardingCond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
+				Expect(onboardingCond.Message).To(ContainSubstring("server-id"))
+				Expect(onboardingCond.Message).To(ContainSubstring("ended up in error state"))
+				Expect(onboardingCond.Message).To(ContainSubstring("Build of instance aborted"))
 			})
 		})
 
