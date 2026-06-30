@@ -119,6 +119,113 @@ spec:
                 items:
                   type: string
                 type: array
+              bookings:
+                description: |-
+                  Bookings records all resource claims on this hypervisor as seen
+                  by the Placement API. Each entry is either a consumer (instance
+                  allocation) or a reservation (capacity held back from scheduling).
+
+                  The Cortex Placement shim writes bookings via the Kubernetes API;
+                  they are not auto-discovered. Compare with status.allocation which
+                  reflects actual libvirt-reported usage.
+                items:
+                  description: |-
+                    Booking is a typed resource claim entry on this hypervisor.
+
+                    This follows the field-presence union pattern (as used by
+                    spec.groups and PodSpec.volumes in core Kubernetes): each entry
+                    populates exactly one type-specific sub-field, and the populated
+                    field identifies the booking type.
+                  properties:
+                    consumer:
+                      description: |-
+                        ConsumerBooking represents an instance allocation — a consumer that
+                        holds resources on this hypervisor as recorded by the Placement API.
+
+                        Nova creates consumers via PUT /allocations/{consumer_uuid}. Each
+                        consumer corresponds to an instance (or migration UUID) that holds
+                        resources on this provider. A consumer can appear on multiple
+                        Hypervisor CRs simultaneously during live migration.
+                      properties:
+                        consumerGeneration:
+                          description: |-
+                            ConsumerGeneration is the Placement consumer generation counter
+                            used for optimistic concurrency control. Nil means the consumer
+                            was just created (first allocation).
+                          format: int64
+                          type: integer
+                        consumerType:
+                          description: |-
+                            ConsumerType identifies the kind of consumer.
+                            See: https://docs.openstack.org/api-ref/placement/#update-allocations
+                          type: string
+                        projectID:
+                          description: ProjectID is the OpenStack project that owns
+                            this consumer.
+                          type: string
+                        resources:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          description: |-
+                            Resources maps resource names to the quantity claimed by this
+                            consumer on this hypervisor.
+                          minProperties: 1
+                          type: object
+                        userID:
+                          description: UserID is the OpenStack user that owns this
+                            consumer.
+                          type: string
+                        uuid:
+                          description: |-
+                            UUID is the Placement consumer UUID, typically the Nova instance
+                            UUID or a migration UUID.
+                          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                          type: string
+                      required:
+                      - resources
+                      - uuid
+                      type: object
+                    reservation:
+                      description: |-
+                        ReservationBooking represents capacity held back from scheduling,
+                        corresponding to Nova's reserved_host_* configuration
+                        (reserved_host_memory_mb, reserved_host_cpus, reserved_host_disk_mb).
+
+                        The Cortex Placement shim reads reservation bookings and serves them
+                        as the "reserved" field in GET /resource_providers/{uuid}/inventories
+                        responses. Reserved capacity is subtracted from available inventory
+                        before scheduling decisions are made.
+                      properties:
+                        name:
+                          description: Name identifies this reservation (e.g. "nova-reserved").
+                          minLength: 1
+                          type: string
+                        resources:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          description: |-
+                            Resources maps resource names to the quantity reserved
+                            (held back from scheduling) on this hypervisor.
+                          minProperties: 1
+                          type: object
+                      required:
+                      - name
+                      - resources
+                      type: object
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one booking type must be set
+                    rule: '(has(self.consumer) ? 1 : 0) + (has(self.reservation) ?
+                      1 : 0) == 1'
+                type: array
               createCertManagerCertificate:
                 default: false
                 description: |-

@@ -17,6 +17,7 @@ type HypervisorSpecApplyConfiguration struct {
 	CustomTraits                 []string                       `json:"customTraits,omitempty"`
 	Aggregates                   []string                       `json:"aggregates,omitempty"`
 	Groups                       []GroupApplyConfiguration      `json:"groups,omitempty"`
+	Bookings                     []BookingApplyConfiguration    `json:"bookings,omitempty"`
 	AllowedProjects              []string                       `json:"allowedProjects,omitempty"`
 	HighAvailability             *bool                          `json:"highAvailability,omitempty"`
 	CreateCertManagerCertificate *bool                          `json:"createCertManagerCertificate,omitempty"`
@@ -101,6 +102,19 @@ func (b *HypervisorSpecApplyConfiguration) WithGroups(values ...*GroupApplyConfi
 			panic("nil value passed to WithGroups")
 		}
 		b.Groups = append(b.Groups, *values[i])
+	}
+	return b
+}
+
+// WithBookings adds the given value to the Bookings field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Bookings field.
+func (b *HypervisorSpecApplyConfiguration) WithBookings(values ...*BookingApplyConfiguration) *HypervisorSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithBookings")
+		}
+		b.Bookings = append(b.Bookings, *values[i])
 	}
 	return b
 }

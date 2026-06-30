@@ -20,10 +20,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.AggregateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("AggregateGroup"):
 		return &apiv1.AggregateGroupApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("Booking"):
+		return &apiv1.BookingApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Capabilities"):
 		return &apiv1.CapabilitiesApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Cell"):
 		return &apiv1.CellApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ConsumerBooking"):
+		return &apiv1.ConsumerBookingApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DomainCapabilities"):
 		return &apiv1.DomainCapabilitiesApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Eviction"):
@@ -46,6 +50,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.InstanceApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("OperatingSystemStatus"):
 		return &apiv1.OperatingSystemStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ReservationBooking"):
+		return &apiv1.ReservationBookingApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("TraitGroup"):
 		return &apiv1.TraitGroupApplyConfiguration{}
 
