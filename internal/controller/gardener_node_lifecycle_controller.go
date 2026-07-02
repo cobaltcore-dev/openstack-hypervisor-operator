@@ -207,7 +207,7 @@ func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context
 						corev1ac.Container().
 							WithName("sleep").
 							WithImage("keppel.global.cloud.sap/ccloud-dockerhub-mirror/library/busybox:latest").
-							WithCommand("sleep", "inf").
+							WithCommand("sh", "-c", "trap 'exit 0' TERM; sleep infinity & wait").
 							WithStartupProbe(corev1ac.Probe().
 								WithExec(corev1ac.ExecAction().WithCommand(command)).
 								WithInitialDelaySeconds(0).
