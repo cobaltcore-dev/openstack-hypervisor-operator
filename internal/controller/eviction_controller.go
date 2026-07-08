@@ -87,7 +87,7 @@ func moveToBack(instances []string) []string {
 }
 
 // evictionStatusCfg builds an EvictionStatusApplyConfiguration pre-populated
-// with the current scalar fields and conditions from the fetched eviction.
+// with the current scalar fields and the conditions this controller owns.
 // Call sites upsert the single condition they are setting via
 // utils.SetApplyConfigurationStatusCondition, then apply.
 func evictionStatusCfg(eviction *kvmv1.Eviction) *apiv1.EvictionStatusApplyConfiguration {
@@ -95,7 +95,12 @@ func evictionStatusCfg(eviction *kvmv1.Eviction) *apiv1.EvictionStatusApplyConfi
 		WithHypervisorServiceId(eviction.Status.HypervisorServiceId).
 		WithOutstandingRamMb(eviction.Status.OutstandingRamMb)
 	cfg.OutstandingInstances = eviction.Status.OutstandingInstances
-	cfg.Conditions = utils.ConditionsFromStatus(eviction.Status.Conditions)
+	// Seed all conditions this controller owns so they are not pruned on Apply.
+	for _, t := range []string{kvmv1.ConditionTypeEvicting, kvmv1.ConditionTypePreflight, kvmv1.ConditionTypeMigration} {
+		if c := meta.FindStatusCondition(eviction.Status.Conditions, t); c != nil {
+			cfg.WithConditions(utils.ConditionFromStatus(*c))
+		}
+	}
 	return cfg
 }
 

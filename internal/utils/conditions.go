@@ -22,24 +22,26 @@ import (
 	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// ConditionsFromStatus converts a []metav1.Condition (as stored in a status
-// subresource) into a []k8sacmetav1.ConditionApplyConfiguration suitable for
-// use with server-side apply. All fields including LastTransitionTime and
-// ObservedGeneration are preserved verbatim.
-func ConditionsFromStatus(conditions []metav1.Condition) []k8sacmetav1.ConditionApplyConfiguration {
-	result := make([]k8sacmetav1.ConditionApplyConfiguration, len(conditions))
-	for i := range conditions {
-		c := &conditions[i]
-		result[i] = k8sacmetav1.ConditionApplyConfiguration{
-			Type:               &c.Type,
-			Status:             &c.Status,
-			Reason:             &c.Reason,
-			Message:            &c.Message,
-			LastTransitionTime: &c.LastTransitionTime,
-			ObservedGeneration: &c.ObservedGeneration,
-		}
+// ConditionFromStatus converts a single metav1.Condition into a
+// *k8sacmetav1.ConditionApplyConfiguration, preserving all fields verbatim
+// (including LastTransitionTime and ObservedGeneration).
+//
+// Controllers must seed their apply-config payload with the conditions they
+// own before mutating them. With +listType=map / +listMapKey=type on the CRD,
+// SSA merges conditions by the "type" key: conditions owned by other field
+// managers are left untouched, and conditions previously written by this
+// field manager that are absent from the payload are pruned. Therefore each
+// controller should include all conditions it has previously set — and only
+// those — in every Apply call.
+func ConditionFromStatus(c metav1.Condition) *k8sacmetav1.ConditionApplyConfiguration {
+	return &k8sacmetav1.ConditionApplyConfiguration{
+		Type:               &c.Type,
+		Status:             &c.Status,
+		Reason:             &c.Reason,
+		Message:            &c.Message,
+		LastTransitionTime: &c.LastTransitionTime,
+		ObservedGeneration: &c.ObservedGeneration,
 	}
-	return result
 }
 
 // SetApplyConfigurationStatusCondition sets the corresponding condition in

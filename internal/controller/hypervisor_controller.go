@@ -131,7 +131,12 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		if newInternalIP != "" {
 			statusCfg.WithInternalIP(newInternalIP)
 		}
-		statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
+		// Seed the conditions this controller owns so they are not pruned.
+		for _, t := range []string{kvmv1.ConditionTypeTerminating, kvmv1.ConditionTypeAgentPodsEvicted} {
+			if c := meta.FindStatusCondition(hypervisor.Status.Conditions, t); c != nil {
+				statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+			}
+		}
 		// Node might be terminating, propagate condition to hypervisor
 		if (nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue) ||
 			!node.DeletionTimestamp.IsZero() {

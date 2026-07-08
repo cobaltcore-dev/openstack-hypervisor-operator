@@ -101,7 +101,10 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	statusCfg := apiv1.HypervisorStatus().
 		WithHypervisorID(hv.Status.HypervisorID).
 		WithServiceID(hv.Status.ServiceID)
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	// Seed the Onboarding condition this controller owns so it is not pruned.
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 
 	apply := func() error {
 		return r.Status().Apply(ctx,

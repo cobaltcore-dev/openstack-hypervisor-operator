@@ -68,8 +68,14 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 	}
 
 	// Build status apply config upfront; sub-functions mutate it directly.
+	// Seed only the HypervisorDisabled condition (the only one always retained).
+	// reconcileEviction conditionally seeds ConditionTypeEvicting: it is included
+	// when maintenance is active, and intentionally omitted when MaintenanceUnset
+	// so that SSA prunes it from the field manager's managed fields.
 	statusCfg := apiv1.HypervisorStatus().WithEvicted(hv.Status.Evicted)
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 
 	if err := hec.reconcileComputeService(ctx, hv, statusCfg); err != nil {
 		return ctrl.Result{}, err
@@ -156,14 +162,8 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 		if err := k8sclient.IgnoreNotFound(hec.Delete(ctx, eviction)); err != nil {
 			return err
 		}
-		// Remove ConditionTypeEvicting by omitting it — SSA prunes sole-owned entries.
-		filtered := statusCfg.Conditions[:0]
-		for _, c := range statusCfg.Conditions {
-			if c.Type == nil || *c.Type != kvmv1.ConditionTypeEvicting {
-				filtered = append(filtered, c)
-			}
-		}
-		statusCfg.Conditions = filtered
+		// ConditionTypeEvicting is intentionally absent from statusCfg — SSA
+		// will prune it from this field manager's managed fields on Apply.
 		statusCfg.WithEvicted(false)
 
 	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceTermination:
@@ -173,6 +173,8 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 				// We are done here, no need to look at the eviction any more
 				return nil
 			}
+			// Seed the existing evicting condition so it is not pruned
+			statusCfg.WithConditions(utils.ConditionFromStatus(*cond))
 		}
 
 		status, err := hec.ensureEviction(ctx, eviction, hv)

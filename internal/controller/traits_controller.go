@@ -142,7 +142,9 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (tc *TraitsController) applyTraitsStatus(ctx context.Context, hv *kvmv1.Hypervisor, traits []string, cond metav1.Condition) error {
 	statusCfg := apiv1.HypervisorStatus()
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(cond.Type).

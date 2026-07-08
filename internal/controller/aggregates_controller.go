@@ -82,7 +82,9 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			// Set error condition, preserving current aggregate ownership
 			statusCfg := apiv1.HypervisorStatus()
-			statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+			if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated); c != nil {
+				statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+			}
 			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 				*k8sacmetav1.Condition().
 					WithType(kvmv1.ConditionTypeAggregatesUpdated).
@@ -124,7 +126,9 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	statusCfg := apiv1.HypervisorStatus()
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(desiredCondition.Type).

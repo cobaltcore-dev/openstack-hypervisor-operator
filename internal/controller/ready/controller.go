@@ -111,7 +111,9 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	log.Info("Updating Ready condition", "status", readyCondition.Status, "reason", readyCondition.Reason)
 	statusCfg := apiv1.HypervisorStatus()
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeReady); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(readyCondition.Type).

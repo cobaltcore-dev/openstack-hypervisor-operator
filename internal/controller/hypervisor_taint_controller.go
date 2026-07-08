@@ -74,7 +74,9 @@ func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Only set the Tainted condition this controller owns
 	statusCfg := apiv1.HypervisorStatus()
-	statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
+	if c := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeTainted); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 		*k8sacmetav1.Condition().
 			WithType(kvmv1.ConditionTypeTainted).

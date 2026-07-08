@@ -161,7 +161,9 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 
 func (r *HypervisorOffboardingReconciler) applyStatus(ctx context.Context, hv *kvmv1.Hypervisor, cond *k8sacmetav1.ConditionApplyConfiguration) error {
 	statusCfg := apiv1.HypervisorStatus()
-	statusCfg.Conditions = utils.ConditionsFromStatus(hv.Status.Conditions)
+	if c := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded); c != nil {
+		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
+	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions, *cond)
 	return r.Status().Apply(ctx,
 		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
