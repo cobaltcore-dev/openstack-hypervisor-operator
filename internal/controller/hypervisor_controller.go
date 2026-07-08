@@ -122,8 +122,15 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// node condition or the node's deletion timestamp (gardener's future path)
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
 
-		// Capture values to apply - only mutate fields this controller owns
-		statusCfg := apiv1.HypervisorStatus().WithInternalIP(newInternalIP)
+		// Capture values to apply - only mutate fields this controller owns.
+		// Only set InternalIP when non-empty: an empty string combined with
+		// ForceOwnership would overwrite a valid previously-stored IP during
+		// transient node states (kubelet restart, bootstrap) where no
+		// NodeInternalIP address is present yet.
+		statusCfg := apiv1.HypervisorStatus()
+		if newInternalIP != "" {
+			statusCfg.WithInternalIP(newInternalIP)
+		}
 		statusCfg.Conditions = utils.ConditionsFromStatus(hypervisor.Status.Conditions)
 		// Node might be terminating, propagate condition to hypervisor
 		if (nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue) ||
@@ -149,7 +156,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
 				*k8sacmetav1.Condition().
 					WithType(cond.Type).
-					WithStatus(metav1.ConditionStatus(cond.Status)).
+					WithStatus(cond.Status).
 					WithReason(cond.Reason).
 					WithMessage(cond.Message))
 			if cond.Status == metav1.ConditionFalse {
