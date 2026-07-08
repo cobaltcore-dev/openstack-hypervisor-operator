@@ -24,8 +24,8 @@ import (
 
 // ConditionsFromStatus converts a []metav1.Condition (as stored in a status
 // subresource) into a []k8sacmetav1.ConditionApplyConfiguration suitable for
-// use with server-side apply. All fields including LastTransitionTime are
-// preserved verbatim.
+// use with server-side apply. All fields including LastTransitionTime and
+// ObservedGeneration are preserved verbatim.
 func ConditionsFromStatus(conditions []metav1.Condition) []k8sacmetav1.ConditionApplyConfiguration {
 	result := make([]k8sacmetav1.ConditionApplyConfiguration, len(conditions))
 	for i := range conditions {
@@ -36,6 +36,7 @@ func ConditionsFromStatus(conditions []metav1.Condition) []k8sacmetav1.Condition
 			Reason:             &c.Reason,
 			Message:            &c.Message,
 			LastTransitionTime: &c.LastTransitionTime,
+			ObservedGeneration: &c.ObservedGeneration,
 		}
 	}
 	return result
@@ -53,6 +54,9 @@ func ConditionsFromStatus(conditions []metav1.Condition) []k8sacmetav1.Condition
 //     preserved.
 func SetApplyConfigurationStatusCondition(conditions *[]k8sacmetav1.ConditionApplyConfiguration, newCondition k8sacmetav1.ConditionApplyConfiguration) (changed bool) {
 	if conditions == nil {
+		return false
+	}
+	if newCondition.Type == nil || *newCondition.Type == "" {
 		return false
 	}
 
@@ -99,6 +103,10 @@ func SetApplyConfigurationStatusCondition(conditions *[]k8sacmetav1.ConditionApp
 		existing.Message = newCondition.Message
 		changed = true
 	}
+	if int64Changed(&existing.ObservedGeneration, newCondition.ObservedGeneration) {
+		existing.ObservedGeneration = newCondition.ObservedGeneration
+		changed = true
+	}
 
 	return changed
 }
@@ -106,6 +114,18 @@ func SetApplyConfigurationStatusCondition(conditions *[]k8sacmetav1.ConditionApp
 // strChanged reports whether the pointer value of b differs from the current
 // value at a.
 func strChanged(a **string, b *string) bool {
+	if *a == nil && b == nil {
+		return false
+	}
+	if *a == nil || b == nil {
+		return true
+	}
+	return **a != *b
+}
+
+// int64Changed reports whether the pointer value of b differs from the current
+// value at a.
+func int64Changed(a **int64, b *int64) bool {
 	if *a == nil && b == nil {
 		return false
 	}

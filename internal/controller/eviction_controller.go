@@ -350,7 +350,6 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	if currentHypervisor != eviction.Spec.Hypervisor {
 		log.Info("migrated")
 
-
 		// So, it is already off this one, do we need to verify it?
 		if vm.Status == "VERIFY_RESIZE" {
 			err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr()
