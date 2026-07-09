@@ -187,6 +187,15 @@ func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv
 	return nil
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (r *HypervisorOffboardingReconciler) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(OffboardingControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Complete(r)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *HypervisorOffboardingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
@@ -204,8 +213,5 @@ func (r *HypervisorOffboardingReconciler) SetupWithManager(mgr ctrl.Manager) err
 	}
 	r.placementClient.Microversion = "1.39" // yoga, or later
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(OffboardingControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Complete(r)
+	return r.registerWithManager(mgr)
 }
