@@ -122,8 +122,9 @@ spec:
               createCertManagerCertificate:
                 default: false
                 description: |-
-                  Requires issuing a certificate from cert-manager for the hypervisor, to be used for
-                  secure communication with the libvirt API.
+                  CreateCertManagerCertificate requests that a certificate be issued from
+                  cert-manager for the hypervisor, to be used for secure communication
+                  with the libvirt API.
                 type: boolean
               customTraits:
                 default: []
@@ -205,8 +206,8 @@ spec:
                 type: boolean
               installCertificate:
                 default: true
-                description: InstallCertificate is used to enable the installation
-                  of the certificates via kvm-node-agent.
+                description: InstallCertificate enables installation of certificates
+                  via kvm-node-agent.
                 type: boolean
               lifecycleEnabled:
                 default: true
