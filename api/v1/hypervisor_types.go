@@ -168,12 +168,13 @@ type HypervisorSpec struct {
 	HighAvailability bool `json:"highAvailability"`
 
 	// +kubebuilder:default:=false
-	// Requires issuing a certificate from cert-manager for the hypervisor, to be used for
-	// secure communication with the libvirt API.
+	// CreateCertManagerCertificate requests that a certificate be issued from
+	// cert-manager for the hypervisor, to be used for secure communication
+	// with the libvirt API.
 	CreateCertManagerCertificate bool `json:"createCertManagerCertificate"`
 
 	// +kubebuilder:default:=true
-	// InstallCertificate is used to enable the installation of the certificates via kvm-node-agent.
+	// InstallCertificate enables installation of certificates via kvm-node-agent.
 	InstallCertificate bool `json:"installCertificate"`
 
 	// +kubebuilder:optional

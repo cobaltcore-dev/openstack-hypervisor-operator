@@ -47,10 +47,11 @@ type HypervisorSpecApplyConfiguration struct {
 	AllowedProjects []string `json:"allowedProjects,omitempty"`
 	// HighAvailability is used to enable the high availability handling of the hypervisor.
 	HighAvailability *bool `json:"highAvailability,omitempty"`
-	// Requires issuing a certificate from cert-manager for the hypervisor, to be used for
-	// secure communication with the libvirt API.
+	// CreateCertManagerCertificate requests that a certificate be issued from
+	// cert-manager for the hypervisor, to be used for secure communication
+	// with the libvirt API.
 	CreateCertManagerCertificate *bool `json:"createCertManagerCertificate,omitempty"`
-	// InstallCertificate is used to enable the installation of the certificates via kvm-node-agent.
+	// InstallCertificate enables installation of certificates via kvm-node-agent.
 	InstallCertificate *bool `json:"installCertificate,omitempty"`
 	// Maintenance indicates whether the hypervisor is in maintenance mode.
 	Maintenance *string `json:"maintenance,omitempty"`
