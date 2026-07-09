@@ -8,6 +8,11 @@ import (
 
 // HypervisorConfigSetSpecApplyConfiguration represents a declarative configuration of the HypervisorConfigSetSpec type for use
 // with apply.
+//
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+// Important: Run "make" to regenerate code after modifying this file
+// HypervisorConfigOverrideSpec overrides the desired state of Hypervisor
 type HypervisorConfigSetSpecApplyConfiguration struct {
 	Selector *metav1.LabelSelectorApplyConfiguration        `json:"selector,omitempty"`
 	Template *HypervisorConfigSetTemplateApplyConfiguration `json:"template,omitempty"`

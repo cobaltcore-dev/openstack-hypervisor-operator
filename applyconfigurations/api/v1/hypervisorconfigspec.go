@@ -4,18 +4,32 @@ package v1
 
 // HypervisorConfigSpecApplyConfiguration represents a declarative configuration of the HypervisorConfigSpec type for use
 // with apply.
+//
+// HypervisorConfigSpec defines (in parts) the desired state of Hypervisor
 type HypervisorConfigSpecApplyConfiguration struct {
-	OperatingSystemVersion       *string   `json:"version,omitempty"`
-	Reboot                       *bool     `json:"reboot,omitempty"`
-	EvacuateOnReboot             *bool     `json:"evacuateOnReboot,omitempty"`
-	LifecycleEnabled             *bool     `json:"lifecycleEnabled,omitempty"`
-	SkipTests                    *bool     `json:"skipTests,omitempty"`
-	CustomTraits                 *[]string `json:"customTraits,omitempty"`
-	Aggregates                   *[]string `json:"aggregates,omitempty"`
-	HighAvailability             *bool     `json:"highAvailability,omitempty"`
-	CreateCertManagerCertificate *bool     `json:"createCertManagerCertificate,omitempty"`
-	InstallCertificate           *bool     `json:"installCertificate,omitempty"`
-	Maintenance                  *string   `json:"maintenance,omitempty"`
+	// OperatingSystemVersion represents the desired operating system version.
+	OperatingSystemVersion *string `json:"version,omitempty"`
+	// Reboot request an reboot after successful installation of an upgrade.
+	Reboot *bool `json:"reboot,omitempty"`
+	// EvacuateOnReboot request an evacuation of all instances before reboot.
+	EvacuateOnReboot *bool `json:"evacuateOnReboot,omitempty"`
+	// LifecycleEnabled enables the lifecycle management of the hypervisor via hypervisor-operator.
+	LifecycleEnabled *bool `json:"lifecycleEnabled,omitempty"`
+	// SkipTests skips the tests during the onboarding process.
+	SkipTests *bool `json:"skipTests,omitempty"`
+	// CustomTraits are used to apply custom traits to the hypervisor.
+	CustomTraits *[]string `json:"customTraits,omitempty"`
+	// Aggregates are used to apply aggregates to the hypervisor.
+	Aggregates *[]string `json:"aggregates,omitempty"`
+	// HighAvailability is used to enable the high availability handling of the hypervisor.
+	HighAvailability *bool `json:"highAvailability,omitempty"`
+	// Require to issue a certificate from cert-manager for the hypervisor, to be used for
+	// secure communication with the libvirt API.
+	CreateCertManagerCertificate *bool `json:"createCertManagerCertificate,omitempty"`
+	// InstallCertificate is used to enable the installations of the certificates via kvm-node-agent.
+	InstallCertificate *bool `json:"installCertificate,omitempty"`
+	// Maintenance indicates whether the hypervisor is in maintenance mode.
+	Maintenance *string `json:"maintenance,omitempty"`
 }
 
 // HypervisorConfigSpecApplyConfiguration constructs a declarative configuration of the HypervisorConfigSpec type for use with

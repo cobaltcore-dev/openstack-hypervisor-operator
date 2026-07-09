@@ -4,7 +4,13 @@ package v1
 
 // HypervisorConfigOverrideSpecApplyConfiguration represents a declarative configuration of the HypervisorConfigOverrideSpec type for use
 // with apply.
+//
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+// Important: Run "make" to regenerate code after modifying this file
+// HypervisorConfigOverrideSpec overrides the desired state of Hypervisor
 type HypervisorConfigOverrideSpecApplyConfiguration struct {
+	// Reason describes the reason for the override
 	Reason   *string                                 `json:"reason,omitempty"`
 	Override *HypervisorConfigSpecApplyConfiguration `json:"override,omitempty"`
 }

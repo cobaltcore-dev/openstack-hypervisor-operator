@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [default.extend-words]
+# Standard Kubernetes label selector wording in generated CRD YAML
+ANDed = "ANDed"
 
 
 [files]
