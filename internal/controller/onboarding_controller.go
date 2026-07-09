@@ -71,6 +71,14 @@ type OnboardingController struct {
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
 	testNetworkClient *gophercloud.ServiceClient
+	requeueInterval   time.Duration
+}
+
+func (r *OnboardingController) getRequeueInterval() time.Duration {
+	if r.requeueInterval > 0 {
+		return r.requeueInterval
+	}
+	return defaultWaitTime
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;patch
@@ -101,7 +109,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	if hv.Status.HypervisorID == "" || hv.Status.ServiceID == "" {
 		if err := r.ensureNovaProperties(ctx, hv); err != nil {
 			if errors.Is(err, errRequeue) {
-				return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+				return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -239,7 +247,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		if err != nil {
 			// should not happened
 			log.Error(err, "failed to get test instance, instance vanished", "id", id)
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
 		// Set condition back to testing
@@ -260,7 +268,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			log.Error(err, "failed to delete test instance", "id", id)
 		}
 
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 	case "ACTIVE":
 		consoleOutput, err := servers.
 			ShowConsoleOutput(ctx, r.testComputeClient, server.ID, servers.ShowConsoleOutputOpts{Length: 11}).
@@ -277,7 +285,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			}); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
 		if !strings.Contains(consoleOutput, server.Name) {
@@ -299,7 +307,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 					}
 				}
 			}
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
 		if err = servers.Delete(ctx, r.testComputeClient, server.ID).ExtractErr(); err != nil {
@@ -314,12 +322,12 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			}); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
 		return r.completeOnboarding(ctx, host, hv)
 	default:
-		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+		return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 	}
 }
 
@@ -332,7 +340,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			return ctrl.Result{}, nil
 		}
 		if !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated) {
-			return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
 		// Wait for HypervisorInstanceHa controller to enable HA
@@ -582,6 +590,15 @@ func (r *OnboardingController) findTestImage(ctx context.Context) (string, error
 	return "", fmt.Errorf("couldn't find image with name %v", testImageName)
 }
 
+// registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
+// This is useful for testing where clients are injected directly.
+func (r *OnboardingController) registerWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(OnboardingControllerName).
+		For(&kvmv1.Hypervisor{}).
+		Complete(r)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 	if r.TestFlavorID == "" {
@@ -621,8 +638,5 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 		r.Clock = clock.RealClock{}
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(OnboardingControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Complete(r)
+	return r.registerWithManager(mgr)
 }
