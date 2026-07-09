@@ -3,13 +3,18 @@
 package v1
 
 import (
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	internal "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // HypervisorConfigOverrideApplyConfiguration represents a declarative configuration of the HypervisorConfigOverride type for use
 // with apply.
+//
+// HypervisorConfigOverride is the Schema for overriding the config of one hypervisor crd API
 type HypervisorConfigOverrideApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
@@ -19,14 +24,54 @@ type HypervisorConfigOverrideApplyConfiguration struct {
 
 // HypervisorConfigOverride constructs a declarative configuration of the HypervisorConfigOverride type for use with
 // apply.
-func HypervisorConfigOverride(name, namespace string) *HypervisorConfigOverrideApplyConfiguration {
+func HypervisorConfigOverride(name string) *HypervisorConfigOverrideApplyConfiguration {
 	b := &HypervisorConfigOverrideApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("HypervisorConfigOverride")
 	b.WithAPIVersion("kvm.cloud.sap/v1")
 	return b
 }
+
+// ExtractHypervisorConfigOverrideFrom extracts the applied configuration owned by fieldManager from
+// hypervisorConfigOverride for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// hypervisorConfigOverride must be a unmodified HypervisorConfigOverride API object that was retrieved from the Kubernetes API.
+// ExtractHypervisorConfigOverrideFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractHypervisorConfigOverrideFrom(hypervisorConfigOverride *apiv1.HypervisorConfigOverride, fieldManager string, subresource string) (*HypervisorConfigOverrideApplyConfiguration, error) {
+	b := &HypervisorConfigOverrideApplyConfiguration{}
+	err := managedfields.ExtractInto(hypervisorConfigOverride, internal.Parser().Type("com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverride"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(hypervisorConfigOverride.Name)
+
+	b.WithKind("HypervisorConfigOverride")
+	b.WithAPIVersion("kvm.cloud.sap/v1")
+	return b, nil
+}
+
+// ExtractHypervisorConfigOverride extracts the applied configuration owned by fieldManager from
+// hypervisorConfigOverride. If no managedFields are found in hypervisorConfigOverride for fieldManager, a
+// HypervisorConfigOverrideApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// hypervisorConfigOverride must be a unmodified HypervisorConfigOverride API object that was retrieved from the Kubernetes API.
+// ExtractHypervisorConfigOverride provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractHypervisorConfigOverride(hypervisorConfigOverride *apiv1.HypervisorConfigOverride, fieldManager string) (*HypervisorConfigOverrideApplyConfiguration, error) {
+	return ExtractHypervisorConfigOverrideFrom(hypervisorConfigOverride, fieldManager, "")
+}
+
+// ExtractHypervisorConfigOverrideStatus extracts the applied configuration owned by fieldManager from
+// hypervisorConfigOverride for the status subresource.
+func ExtractHypervisorConfigOverrideStatus(hypervisorConfigOverride *apiv1.HypervisorConfigOverride, fieldManager string) (*HypervisorConfigOverrideApplyConfiguration, error) {
+	return ExtractHypervisorConfigOverrideFrom(hypervisorConfigOverride, fieldManager, "status")
+}
+
 func (b HypervisorConfigOverrideApplyConfiguration) IsApplyConfiguration() {}
 
 // WithKind sets the Kind field in the declarative configuration to the given value

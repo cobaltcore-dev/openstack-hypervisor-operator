@@ -4,6 +4,8 @@ package v1
 
 // HypervisorConfigSetTemplateApplyConfiguration represents a declarative configuration of the HypervisorConfigSetTemplate type for use
 // with apply.
+//
+// A template for the hypervisor defining the values for a whole set
 type HypervisorConfigSetTemplateApplyConfiguration struct {
 	Spec *HypervisorConfigSpecApplyConfiguration `json:"spec,omitempty"`
 }

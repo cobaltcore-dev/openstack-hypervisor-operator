@@ -8,7 +8,10 @@ import (
 
 // HypervisorConfigOverrideStatusApplyConfiguration represents a declarative configuration of the HypervisorConfigOverrideStatus type for use
 // with apply.
+//
+// HypervisorConfigOverrideStatus defines the observed state of HypervisorConfigOverride
 type HypervisorConfigOverrideStatusApplyConfiguration struct {
+	// Represents the Hypervisor node conditions.
 	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	SpecHash   *string                              `json:"specHash,omitempty"`
 }

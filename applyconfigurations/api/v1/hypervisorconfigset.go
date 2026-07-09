@@ -3,13 +3,18 @@
 package v1
 
 import (
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	internal "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // HypervisorConfigSetApplyConfiguration represents a declarative configuration of the HypervisorConfigSet type for use
 // with apply.
+//
+// HypervisorConfigSet is the Schema for a set of hypervisor configs
 type HypervisorConfigSetApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
@@ -19,14 +24,54 @@ type HypervisorConfigSetApplyConfiguration struct {
 
 // HypervisorConfigSet constructs a declarative configuration of the HypervisorConfigSet type for use with
 // apply.
-func HypervisorConfigSet(name, namespace string) *HypervisorConfigSetApplyConfiguration {
+func HypervisorConfigSet(name string) *HypervisorConfigSetApplyConfiguration {
 	b := &HypervisorConfigSetApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("HypervisorConfigSet")
 	b.WithAPIVersion("kvm.cloud.sap/v1")
 	return b
 }
+
+// ExtractHypervisorConfigSetFrom extracts the applied configuration owned by fieldManager from
+// hypervisorConfigSet for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// hypervisorConfigSet must be a unmodified HypervisorConfigSet API object that was retrieved from the Kubernetes API.
+// ExtractHypervisorConfigSetFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractHypervisorConfigSetFrom(hypervisorConfigSet *apiv1.HypervisorConfigSet, fieldManager string, subresource string) (*HypervisorConfigSetApplyConfiguration, error) {
+	b := &HypervisorConfigSetApplyConfiguration{}
+	err := managedfields.ExtractInto(hypervisorConfigSet, internal.Parser().Type("com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSet"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(hypervisorConfigSet.Name)
+
+	b.WithKind("HypervisorConfigSet")
+	b.WithAPIVersion("kvm.cloud.sap/v1")
+	return b, nil
+}
+
+// ExtractHypervisorConfigSet extracts the applied configuration owned by fieldManager from
+// hypervisorConfigSet. If no managedFields are found in hypervisorConfigSet for fieldManager, a
+// HypervisorConfigSetApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// hypervisorConfigSet must be a unmodified HypervisorConfigSet API object that was retrieved from the Kubernetes API.
+// ExtractHypervisorConfigSet provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractHypervisorConfigSet(hypervisorConfigSet *apiv1.HypervisorConfigSet, fieldManager string) (*HypervisorConfigSetApplyConfiguration, error) {
+	return ExtractHypervisorConfigSetFrom(hypervisorConfigSet, fieldManager, "")
+}
+
+// ExtractHypervisorConfigSetStatus extracts the applied configuration owned by fieldManager from
+// hypervisorConfigSet for the status subresource.
+func ExtractHypervisorConfigSetStatus(hypervisorConfigSet *apiv1.HypervisorConfigSet, fieldManager string) (*HypervisorConfigSetApplyConfiguration, error) {
+	return ExtractHypervisorConfigSetFrom(hypervisorConfigSet, fieldManager, "status")
+}
+
 func (b HypervisorConfigSetApplyConfiguration) IsApplyConfiguration() {}
 
 // WithKind sets the Kind field in the declarative configuration to the given value
