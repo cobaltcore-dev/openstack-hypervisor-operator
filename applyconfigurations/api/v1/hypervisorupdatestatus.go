@@ -5,9 +5,12 @@ package v1
 // HyperVisorUpdateStatusApplyConfiguration represents a declarative configuration of the HyperVisorUpdateStatus type for use
 // with apply.
 type HyperVisorUpdateStatusApplyConfiguration struct {
-	InProgress *bool   `json:"inProgress,omitempty"`
-	Installed  *string `json:"installed,omitempty"`
-	Retry      *int    `json:"retry,omitempty"`
+	// Represents a running Operating System update.
+	InProgress *bool `json:"inProgress,omitempty"`
+	// Represents the Operating System installed update version.
+	Installed *string `json:"installed,omitempty"`
+	// Represents the number of retries.
+	Retry *int `json:"retry,omitempty"`
 }
 
 // HyperVisorUpdateStatusApplyConfiguration constructs a declarative configuration of the HyperVisorUpdateStatus type for use with

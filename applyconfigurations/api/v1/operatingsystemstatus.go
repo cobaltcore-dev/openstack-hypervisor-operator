@@ -9,21 +9,36 @@ import (
 // OperatingSystemStatusApplyConfiguration represents a declarative configuration of the OperatingSystemStatus type for use
 // with apply.
 type OperatingSystemStatusApplyConfiguration struct {
-	Version             *string      `json:"version,omitempty"`
-	VariantID           *string      `json:"variantID,omitempty"`
-	PrettyVersion       *string      `json:"prettyVersion,omitempty"`
-	KernelName          *string      `json:"kernelName,omitempty"`
-	KernelRelease       *string      `json:"kernelRelease,omitempty"`
-	KernelVersion       *string      `json:"kernelVersion,omitempty"`
-	KernelCommandLine   *string      `json:"kernelCommandLine,omitempty"`
-	HardwareVendor      *string      `json:"hardwareVendor,omitempty"`
-	HardwareModel       *string      `json:"hardwareModel,omitempty"`
-	HardwareSerial      *string      `json:"hardwareSerial,omitempty"`
-	FirmwareVersion     *string      `json:"firmwareVersion,omitempty"`
-	FirmwareVendor      *string      `json:"firmwareVendor,omitempty"`
-	FirmwareDate        *metav1.Time `json:"firmwareDate,omitempty"`
-	GardenLinuxCommitID *string      `json:"gardenLinuxCommitID,omitempty"`
-	GardenLinuxFeatures []string     `json:"gardenLinuxFeatures,omitempty"`
+	// Represents the Operating System version.
+	Version *string `json:"version,omitempty"`
+	// Identifying a specific variant or edition of the operating system
+	VariantID *string `json:"variantID,omitempty"`
+	// PrettyVersion
+	PrettyVersion *string `json:"prettyVersion,omitempty"`
+	// KernelName
+	KernelName *string `json:"kernelName,omitempty"`
+	// KernelRelease
+	KernelRelease *string `json:"kernelRelease,omitempty"`
+	// KernelVersion
+	KernelVersion *string `json:"kernelVersion,omitempty"`
+	// KernelCommandLine contains the raw kernel boot parameters from /proc/cmdline.
+	KernelCommandLine *string `json:"kernelCommandLine,omitempty"`
+	// HardwareVendor
+	HardwareVendor *string `json:"hardwareVendor,omitempty"`
+	// HardwareModel
+	HardwareModel *string `json:"hardwareModel,omitempty"`
+	// HardwareSerial
+	HardwareSerial *string `json:"hardwareSerial,omitempty"`
+	// FirmwareVersion
+	FirmwareVersion *string `json:"firmwareVersion,omitempty"`
+	// FirmwareVendor
+	FirmwareVendor *string `json:"firmwareVendor,omitempty"`
+	// FirmwareDate
+	FirmwareDate *metav1.Time `json:"firmwareDate,omitempty"`
+	// Represents the Garden Linux build commit id
+	GardenLinuxCommitID *string `json:"gardenLinuxCommitID,omitempty"`
+	// Represents the Garden Linux Feature Set
+	GardenLinuxFeatures []string `json:"gardenLinuxFeatures,omitempty"`
 }
 
 // OperatingSystemStatusApplyConfiguration constructs a declarative configuration of the OperatingSystemStatus type for use with

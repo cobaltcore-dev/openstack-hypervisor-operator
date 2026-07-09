@@ -4,6 +4,13 @@ package v1
 
 // GroupApplyConfiguration represents a declarative configuration of the Group type for use
 // with apply.
+//
+// Group is a typed group membership entry for a hypervisor.
+//
+// This follows the field-presence union pattern (as used by
+// PodSpec.volumes in core Kubernetes): each entry populates exactly
+// one type-specific sub-field, and the populated field identifies
+// the group type.
 type GroupApplyConfiguration struct {
 	Trait     *TraitGroupApplyConfiguration     `json:"trait,omitempty"`
 	Aggregate *AggregateGroupApplyConfiguration `json:"aggregate,omitempty"`

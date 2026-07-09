@@ -4,6 +4,9 @@ package v1
 
 // AggregateGroupApplyConfiguration represents a declarative configuration of the AggregateGroup type for use
 // with apply.
+//
+// AggregateGroup represents an administrative grouping, such as an
+// OpenStack host aggregate.
 type AggregateGroupApplyConfiguration struct {
 	Name     *string           `json:"name,omitempty"`
 	UUID     *string           `json:"uuid,omitempty"`

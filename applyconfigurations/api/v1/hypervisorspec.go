@@ -8,22 +8,68 @@ import (
 
 // HypervisorSpecApplyConfiguration represents a declarative configuration of the HypervisorSpec type for use
 // with apply.
+//
+// HypervisorSpec defines the desired state of Hypervisor
 type HypervisorSpecApplyConfiguration struct {
-	OperatingSystemVersion       *string                        `json:"version,omitempty"`
-	Reboot                       *bool                          `json:"reboot,omitempty"`
-	EvacuateOnReboot             *bool                          `json:"evacuateOnReboot,omitempty"`
-	LifecycleEnabled             *bool                          `json:"lifecycleEnabled,omitempty"`
-	SkipTests                    *bool                          `json:"skipTests,omitempty"`
-	CustomTraits                 []string                       `json:"customTraits,omitempty"`
-	Aggregates                   []string                       `json:"aggregates,omitempty"`
-	Groups                       []GroupApplyConfiguration      `json:"groups,omitempty"`
-	AllowedProjects              []string                       `json:"allowedProjects,omitempty"`
-	HighAvailability             *bool                          `json:"highAvailability,omitempty"`
-	CreateCertManagerCertificate *bool                          `json:"createCertManagerCertificate,omitempty"`
-	InstallCertificate           *bool                          `json:"installCertificate,omitempty"`
-	Maintenance                  *string                        `json:"maintenance,omitempty"`
-	MaintenanceReason            *string                        `json:"maintenanceReason,omitempty"`
-	Overcommit                   map[apiv1.ResourceName]float64 `json:"overcommit,omitempty"`
+	// OperatingSystemVersion represents the desired operating system version.
+	OperatingSystemVersion *string `json:"version,omitempty"`
+	// Reboot requests a reboot after successful installation of an upgrade.
+	Reboot *bool `json:"reboot,omitempty"`
+	// EvacuateOnReboot requests an evacuation of all instances before reboot.
+	EvacuateOnReboot *bool `json:"evacuateOnReboot,omitempty"`
+	// LifecycleEnabled enables the lifecycle management of the hypervisor via hypervisor-operator.
+	LifecycleEnabled *bool `json:"lifecycleEnabled,omitempty"`
+	// SkipTests skips the tests during the onboarding process.
+	SkipTests *bool `json:"skipTests,omitempty"`
+	// CustomTraits are used to apply custom traits to the hypervisor.
+	CustomTraits []string `json:"customTraits,omitempty"`
+	// Aggregates are used to apply aggregates to the hypervisor.
+	Aggregates []string `json:"aggregates,omitempty"`
+	// Groups defines typed group memberships for this hypervisor.
+	//
+	// Both traits and aggregates are forms of grouping: traits group
+	// hypervisors by capability, aggregates group them by administrative
+	// assignment. Each entry follows the field-presence union pattern
+	// (as used by PodSpec.volumes in core Kubernetes): exactly one
+	// type-specific sub-field must be populated per entry.
+	//
+	// The Cortex Placement shim and scheduler read group memberships
+	// directly from this field.
+	//
+	// Note: uniqueness of trait names and aggregate UUIDs is not enforced
+	// via CEL because the required O(n^2) comparison exceeds the
+	// Kubernetes CEL cost budget. Enforce uniqueness in the consuming
+	// controller or via a validating webhook if needed.
+	Groups []GroupApplyConfiguration `json:"groups,omitempty"`
+	// AllowedProjects defines which openstack projects are allowed to schedule
+	// instances on this hypervisor. The values of this list should be project
+	// uuids. If left empty, all projects are allowed.
+	AllowedProjects []string `json:"allowedProjects,omitempty"`
+	// HighAvailability is used to enable the high availability handling of the hypervisor.
+	HighAvailability *bool `json:"highAvailability,omitempty"`
+	// Requires issuing a certificate from cert-manager for the hypervisor, to be used for
+	// secure communication with the libvirt API.
+	CreateCertManagerCertificate *bool `json:"createCertManagerCertificate,omitempty"`
+	// InstallCertificate is used to enable the installation of the certificates via kvm-node-agent.
+	InstallCertificate *bool `json:"installCertificate,omitempty"`
+	// Maintenance indicates whether the hypervisor is in maintenance mode.
+	Maintenance *string `json:"maintenance,omitempty"`
+	// MaintenanceReason provides the reason for manual maintenance mode.
+	MaintenanceReason *string `json:"maintenanceReason,omitempty"`
+	// Overcommit specifies the desired overcommit ratio by resource type.
+	//
+	// If no overcommit is specified for a resource type, the default overcommit
+	// ratio of 1.0 should be applied, i.e. the effective capacity is the same
+	// as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity,
+	// the effective capacity is expected to be rounded down. This allows
+	// gradually adjusting the hypervisor capacity.
+	//
+	// It is validated that all overcommit ratios are greater than or equal to
+	// 1.0, if specified. For this we don't need extra validating webhooks.
+	// See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
+	Overcommit map[apiv1.ResourceName]float64 `json:"overcommit,omitempty"`
 }
 
 // HypervisorSpecApplyConfiguration constructs a declarative configuration of the HypervisorSpec type for use with

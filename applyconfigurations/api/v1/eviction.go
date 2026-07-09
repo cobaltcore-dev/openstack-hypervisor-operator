@@ -3,13 +3,18 @@
 package v1
 
 import (
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	internal "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // EvictionApplyConfiguration represents a declarative configuration of the Eviction type for use
 // with apply.
+//
+// Eviction is the Schema for the evictions API
 type EvictionApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
@@ -19,14 +24,54 @@ type EvictionApplyConfiguration struct {
 
 // Eviction constructs a declarative configuration of the Eviction type for use with
 // apply.
-func Eviction(name, namespace string) *EvictionApplyConfiguration {
+func Eviction(name string) *EvictionApplyConfiguration {
 	b := &EvictionApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("Eviction")
 	b.WithAPIVersion("kvm.cloud.sap/v1")
 	return b
 }
+
+// ExtractEvictionFrom extracts the applied configuration owned by fieldManager from
+// eviction for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// eviction must be a unmodified Eviction API object that was retrieved from the Kubernetes API.
+// ExtractEvictionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEvictionFrom(eviction *apiv1.Eviction, fieldManager string, subresource string) (*EvictionApplyConfiguration, error) {
+	b := &EvictionApplyConfiguration{}
+	err := managedfields.ExtractInto(eviction, internal.Parser().Type("com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Eviction"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(eviction.Name)
+
+	b.WithKind("Eviction")
+	b.WithAPIVersion("kvm.cloud.sap/v1")
+	return b, nil
+}
+
+// ExtractEviction extracts the applied configuration owned by fieldManager from
+// eviction. If no managedFields are found in eviction for fieldManager, a
+// EvictionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// eviction must be a unmodified Eviction API object that was retrieved from the Kubernetes API.
+// ExtractEviction provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEviction(eviction *apiv1.Eviction, fieldManager string) (*EvictionApplyConfiguration, error) {
+	return ExtractEvictionFrom(eviction, fieldManager, "")
+}
+
+// ExtractEvictionStatus extracts the applied configuration owned by fieldManager from
+// eviction for the status subresource.
+func ExtractEvictionStatus(eviction *apiv1.Eviction, fieldManager string) (*EvictionApplyConfiguration, error) {
+	return ExtractEvictionFrom(eviction, fieldManager, "status")
+}
+
 func (b EvictionApplyConfiguration) IsApplyConfiguration() {}
 
 // WithKind sets the Kind field in the declarative configuration to the given value

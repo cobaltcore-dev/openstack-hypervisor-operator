@@ -23,6 +23,583 @@ func Parser() *typed.Parser {
 var parserOnce sync.Once
 var parser *typed.Parser
 var schemaYAML = typed.YAMLObject(`types:
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Aggregate
+  map:
+    fields:
+    - name: metadata
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: uuid
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.AggregateGroup
+  map:
+    fields:
+    - name: metadata
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: uuid
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Capabilities
+  map:
+    fields:
+    - name: cpuArch
+      type:
+        scalar: string
+      default: unknown
+    - name: cpus
+      type:
+        namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: memory
+      type:
+        namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Cell
+  map:
+    fields:
+    - name: allocation
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: capacity
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: cellID
+      type:
+        scalar: numeric
+    - name: effectiveCapacity
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.DomainCapabilities
+  map:
+    fields:
+    - name: arch
+      type:
+        scalar: string
+      default: unknown
+    - name: hypervisorType
+      type:
+        scalar: string
+      default: unknown
+    - name: supportedCpuModes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+    - name: supportedDevices
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+    - name: supportedFeatures
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Eviction
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.EvictionSpec
+    - name: status
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.EvictionStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.EvictionSpec
+  map:
+    fields:
+    - name: hypervisor
+      type:
+        scalar: string
+    - name: reason
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.EvictionStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: associative
+          keys:
+          - type
+    - name: hypervisorServiceId
+      type:
+        scalar: string
+    - name: outstandingInstances
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: outstandingRamMb
+      type:
+        scalar: numeric
+      default: 0
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Group
+  map:
+    fields:
+    - name: aggregate
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.AggregateGroup
+    - name: trait
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.TraitGroup
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HyperVisorUpdateStatus
+  map:
+    fields:
+    - name: inProgress
+      type:
+        scalar: boolean
+      default: false
+    - name: installed
+      type:
+        scalar: string
+      default: unknown
+    - name: retry
+      type:
+        scalar: numeric
+      default: 3
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Hypervisor
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorSpec
+    - name: status
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorSpec
+  map:
+    fields:
+    - name: aggregates
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+    - name: allowedProjects
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+    - name: createCertManagerCertificate
+      type:
+        scalar: boolean
+      default: false
+    - name: customTraits
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+      default: []
+    - name: evacuateOnReboot
+      type:
+        scalar: boolean
+      default: true
+    - name: groups
+      type:
+        list:
+          elementType:
+            namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Group
+          elementRelationship: atomic
+    - name: highAvailability
+      type:
+        scalar: boolean
+      default: true
+    - name: installCertificate
+      type:
+        scalar: boolean
+      default: true
+    - name: lifecycleEnabled
+      type:
+        scalar: boolean
+      default: true
+    - name: maintenance
+      type:
+        scalar: string
+    - name: maintenanceReason
+      type:
+        scalar: string
+    - name: overcommit
+      type:
+        map:
+          elementType:
+            scalar: numeric
+    - name: reboot
+      type:
+        scalar: boolean
+      default: false
+    - name: skipTests
+      type:
+        scalar: boolean
+      default: false
+    - name: version
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorStatus
+  map:
+    fields:
+    - name: aggregates
+      type:
+        list:
+          elementType:
+            namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Aggregate
+          elementRelationship: atomic
+    - name: allocation
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: capabilities
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Capabilities
+    - name: capacity
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: cells
+      type:
+        list:
+          elementType:
+            namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Cell
+          elementRelationship: atomic
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: associative
+          keys:
+          - type
+    - name: domainCapabilities
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.DomainCapabilities
+    - name: effectiveCapacity
+      type:
+        map:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.api.resource.Quantity
+    - name: evicted
+      type:
+        scalar: boolean
+    - name: hypervisorId
+      type:
+        scalar: string
+    - name: hypervisorVersion
+      type:
+        scalar: string
+      default: unknown
+    - name: instances
+      type:
+        list:
+          elementType:
+            namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Instance
+          elementRelationship: atomic
+    - name: internalIp
+      type:
+        scalar: string
+    - name: libVirtVersion
+      type:
+        scalar: string
+      default: unknown
+    - name: numInstances
+      type:
+        scalar: numeric
+      default: 0
+    - name: operatingSystem
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.OperatingSystemStatus
+    - name: serviceId
+      type:
+        scalar: string
+    - name: specHash
+      type:
+        scalar: string
+    - name: traits
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: updateStatus
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HyperVisorUpdateStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.Instance
+  map:
+    fields:
+    - name: active
+      type:
+        scalar: boolean
+    - name: id
+      type:
+        scalar: string
+    - name: name
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.OperatingSystemStatus
+  map:
+    fields:
+    - name: firmwareDate
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: firmwareVendor
+      type:
+        scalar: string
+    - name: firmwareVersion
+      type:
+        scalar: string
+    - name: gardenLinuxCommitID
+      type:
+        scalar: string
+    - name: gardenLinuxFeatures
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: hardwareModel
+      type:
+        scalar: string
+    - name: hardwareSerial
+      type:
+        scalar: string
+    - name: hardwareVendor
+      type:
+        scalar: string
+    - name: kernelCommandLine
+      type:
+        scalar: string
+    - name: kernelName
+      type:
+        scalar: string
+    - name: kernelRelease
+      type:
+        scalar: string
+    - name: kernelVersion
+      type:
+        scalar: string
+    - name: prettyVersion
+      type:
+        scalar: string
+    - name: variantID
+      type:
+        scalar: string
+    - name: version
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.TraitGroup
+  map:
+    fields:
+    - name: name
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.api.resource.Quantity
+  scalar: untyped
+  list:
+    elementType:
+      namedType: __untyped_atomic_
+    elementRelationship: atomic
+  map:
+    elementType:
+      namedType: __untyped_deduced_
+    elementRelationship: separable
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+  map:
+    fields:
+    - name: lastTransitionTime
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: message
+      type:
+        scalar: string
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: reason
+      type:
+        scalar: string
+    - name: status
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ConditionStatus
+    - name: type
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ConditionStatus
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+  map:
+    elementType:
+      scalar: untyped
+      list:
+        elementType:
+          namedType: __untyped_atomic_
+        elementRelationship: atomic
+      map:
+        elementType:
+          namedType: __untyped_deduced_
+        elementRelationship: separable
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: fieldsType
+      type:
+        scalar: string
+    - name: fieldsV1
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+    - name: manager
+      type:
+        scalar: string
+    - name: operation
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsOperationType
+    - name: subresource
+      type:
+        scalar: string
+    - name: time
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsOperationType
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+  map:
+    fields:
+    - name: annotations
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: creationTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: deletionGracePeriodSeconds
+      type:
+        scalar: numeric
+    - name: deletionTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: finalizers
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+    - name: generateName
+      type:
+        scalar: string
+    - name: generation
+      type:
+        scalar: numeric
+    - name: labels
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: managedFields
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+          elementRelationship: atomic
+    - name: name
+      type:
+        scalar: string
+    - name: namespace
+      type:
+        scalar: string
+    - name: ownerReferences
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+          elementRelationship: associative
+          keys:
+          - uid
+    - name: resourceVersion
+      type:
+        scalar: string
+    - name: selfLink
+      type:
+        scalar: string
+    - name: uid
+      type:
+        namedType: io.k8s.apimachinery.pkg.types.UID
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: blockOwnerDeletion
+      type:
+        scalar: boolean
+    - name: controller
+      type:
+        scalar: boolean
+    - name: kind
+      type:
+        scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: uid
+      type:
+        namedType: io.k8s.apimachinery.pkg.types.UID
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+  scalar: untyped
+- name: io.k8s.apimachinery.pkg.types.UID
+  scalar: string
 - name: __untyped_atomic_
   scalar: untyped
   list:

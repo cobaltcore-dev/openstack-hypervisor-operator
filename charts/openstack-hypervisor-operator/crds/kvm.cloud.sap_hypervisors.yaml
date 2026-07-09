@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: hypervisors.kvm.cloud.sap
 spec:
   group: kvm.cloud.sap
@@ -122,7 +122,7 @@ spec:
               createCertManagerCertificate:
                 default: false
                 description: |-
-                  Require to issue a certificate from cert-manager for the hypervisor, to be used for
+                  Requires issuing a certificate from cert-manager for the hypervisor, to be used for
                   secure communication with the libvirt API.
                 type: boolean
               customTraits:
@@ -133,7 +133,7 @@ spec:
                 type: array
               evacuateOnReboot:
                 default: true
-                description: EvacuateOnReboot request an evacuation of all instances
+                description: EvacuateOnReboot requests an evacuation of all instances
                   before reboot.
                 type: boolean
               groups:
@@ -205,7 +205,7 @@ spec:
                 type: boolean
               installCertificate:
                 default: true
-                description: InstallCertificate is used to enable the installations
+                description: InstallCertificate is used to enable the installation
                   of the certificates via kvm-node-agent.
                 type: boolean
               lifecycleEnabled:
@@ -250,7 +250,7 @@ spec:
                   rule: self.all(k, self[k] >= 1.0)
               reboot:
                 default: false
-                description: Reboot request an reboot after successful installation
+                description: Reboot requests a reboot after successful installation
                   of an upgrade.
                 type: boolean
               skipTests:
@@ -491,7 +491,7 @@ spec:
                       Supported cpu modes for domains.
 
                       The format of this list is cpu mode, and if specified, a specific
-                      submode. For example, the take the following xml domain cpu definition:
+                      submode. For example, take the following xml domain cpu definition:
 
                       <mode name='host-passthrough' supported='yes'>
                         <enum name='hostPassthroughMigratable'/>
@@ -508,7 +508,7 @@ spec:
                       Supported devices for domains.
 
                       The format of this list is the device type, and if specified, a specific
-                      model. For example, the take the following xml domain device definition:
+                      model. For example, take the following xml domain device definition:
 
                       <video supported='yes'>
                         <enum name='modelType'>
@@ -595,7 +595,7 @@ spec:
                 type: string
               numInstances:
                 default: 0
-                description: Represent the num of instances
+                description: Represents the number of instances running on this hypervisor.
                 type: integer
               operatingSystem:
                 description: Represents the Operating System status.

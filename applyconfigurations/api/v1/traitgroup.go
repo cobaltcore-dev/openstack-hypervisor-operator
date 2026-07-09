@@ -4,6 +4,9 @@ package v1
 
 // TraitGroupApplyConfiguration represents a declarative configuration of the TraitGroup type for use
 // with apply.
+//
+// TraitGroup represents a capability trait, such as an OpenStack
+// Placement trait (e.g. HW_CPU_X86_AVX2, COMPUTE_STATUS_DISABLED).
 type TraitGroupApplyConfiguration struct {
 	Name *string `json:"name,omitempty"`
 }

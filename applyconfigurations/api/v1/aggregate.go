@@ -4,9 +4,14 @@ package v1
 
 // AggregateApplyConfiguration represents a declarative configuration of the Aggregate type for use
 // with apply.
+//
+// Aggregate represents an OpenStack aggregate with its name and UUID.
 type AggregateApplyConfiguration struct {
-	Name     *string           `json:"name,omitempty"`
-	UUID     *string           `json:"uuid,omitempty"`
+	// Name is the name of the aggregate.
+	Name *string `json:"name,omitempty"`
+	// UUID is the unique identifier of the aggregate.
+	UUID *string `json:"uuid,omitempty"`
+	// Metadata is the metadata of the aggregate as key-value pairs.
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
