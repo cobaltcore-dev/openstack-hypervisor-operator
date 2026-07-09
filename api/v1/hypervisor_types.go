@@ -115,11 +115,11 @@ type HypervisorSpec struct {
 	OperatingSystemVersion string `json:"version,omitempty"`
 
 	// +kubebuilder:default:=false
-	// Reboot request an reboot after successful installation of an upgrade.
+	// Reboot requests a reboot after successful installation of an upgrade.
 	Reboot bool `json:"reboot"`
 
 	// +kubebuilder:default:=true
-	// EvacuateOnReboot request an evacuation of all instances before reboot.
+	// EvacuateOnReboot requests an evacuation of all instances before reboot.
 	EvacuateOnReboot bool `json:"evacuateOnReboot"`
 
 	// +kubebuilder:default:=true
@@ -168,12 +168,12 @@ type HypervisorSpec struct {
 	HighAvailability bool `json:"highAvailability"`
 
 	// +kubebuilder:default:=false
-	// Require to issue a certificate from cert-manager for the hypervisor, to be used for
+	// Requires issuing a certificate from cert-manager for the hypervisor, to be used for
 	// secure communication with the libvirt API.
 	CreateCertManagerCertificate bool `json:"createCertManagerCertificate"`
 
 	// +kubebuilder:default:=true
-	// InstallCertificate is used to enable the installations of the certificates via kvm-node-agent.
+	// InstallCertificate is used to enable the installation of the certificates via kvm-node-agent.
 	InstallCertificate bool `json:"installCertificate"`
 
 	// +kubebuilder:optional
@@ -401,7 +401,7 @@ type DomainCapabilities struct {
 	// Supported devices for domains.
 	//
 	// The format of this list is the device type, and if specified, a specific
-	// model. For example, the take the following xml domain device definition:
+	// model. For example, take the following xml domain device definition:
 	//
 	// <video supported='yes'>
 	//   <enum name='modelType'>
@@ -417,7 +417,7 @@ type DomainCapabilities struct {
 	// Supported cpu modes for domains.
 	//
 	// The format of this list is cpu mode, and if specified, a specific
-	// submode. For example, the take the following xml domain cpu definition:
+	// submode. For example, take the following xml domain cpu definition:
 	//
 	// <mode name='host-passthrough' supported='yes'>
 	//   <enum name='hostPassthroughMigratable'/>
@@ -536,7 +536,7 @@ type HypervisorStatus struct {
 	Cells []Cell `json:"cells,omitempty"`
 
 	// +kubebuilder:default:=0
-	// Represent the num of instances
+	// Represents the number of instances running on this hypervisor.
 	NumInstances int `json:"numInstances"`
 
 	// HypervisorID is the unique identifier of the hypervisor in OpenStack.

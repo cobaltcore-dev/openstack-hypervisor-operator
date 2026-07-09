@@ -4,9 +4,13 @@ package v1
 
 // EvictionSpecApplyConfiguration represents a declarative configuration of the EvictionSpec type for use
 // with apply.
+//
+// EvictionSpec defines the desired state of Eviction
 type EvictionSpecApplyConfiguration struct {
+	// Name of hypervisor to evict
 	Hypervisor *string `json:"hypervisor,omitempty"`
-	Reason     *string `json:"reason,omitempty"`
+	// Reason for eviction, always required
+	Reason *string `json:"reason,omitempty"`
 }
 
 // EvictionSpecApplyConfiguration constructs a declarative configuration of the EvictionSpec type for use with

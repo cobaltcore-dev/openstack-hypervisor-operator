@@ -8,11 +8,14 @@ import (
 
 // EvictionStatusApplyConfiguration represents a declarative configuration of the EvictionStatus type for use
 // with apply.
+//
+// EvictionStatus defines the observed state of Eviction
 type EvictionStatusApplyConfiguration struct {
-	HypervisorServiceId  *string                              `json:"hypervisorServiceId,omitempty"`
-	OutstandingRamMb     *int64                               `json:"outstandingRamMb,omitempty"`
-	OutstandingInstances []string                             `json:"outstandingInstances,omitempty"`
-	Conditions           []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	HypervisorServiceId  *string  `json:"hypervisorServiceId,omitempty"`
+	OutstandingRamMb     *int64   `json:"outstandingRamMb,omitempty"`
+	OutstandingInstances []string `json:"outstandingInstances,omitempty"`
+	// Conditions is an array of current conditions
+	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 
 // EvictionStatusApplyConfiguration constructs a declarative configuration of the EvictionStatus type for use with

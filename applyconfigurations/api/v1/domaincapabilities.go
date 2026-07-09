@@ -4,11 +4,49 @@ package v1
 
 // DomainCapabilitiesApplyConfiguration represents a declarative configuration of the DomainCapabilities type for use
 // with apply.
+//
+// Domain capabilities of the hypervisor as reported by libvirt.
+// These details are relevant to check if a VM can be scheduled on the hypervisor.
 type DomainCapabilitiesApplyConfiguration struct {
-	Arch              *string  `json:"arch,omitempty"`
-	HypervisorType    *string  `json:"hypervisorType,omitempty"`
-	SupportedDevices  []string `json:"supportedDevices,omitempty"`
+	// The available domain cpu architecture.
+	Arch *string `json:"arch,omitempty"`
+	// The supported type of virtualization for domains, such as "ch".
+	HypervisorType *string `json:"hypervisorType,omitempty"`
+	// Supported devices for domains.
+	//
+	// The format of this list is the device type, and if specified, a specific
+	// model. For example, take the following xml domain device definition:
+	//
+	// <video supported='yes'>
+	// <enum name='modelType'>
+	// <value>nvidia</value>
+	// </enum>
+	// </video>
+	//
+	// The corresponding entries in this list would be "video" and "video/nvidia".
+	SupportedDevices []string `json:"supportedDevices,omitempty"`
+	// Supported cpu modes for domains.
+	//
+	// The format of this list is cpu mode, and if specified, a specific
+	// submode. For example, take the following xml domain cpu definition:
+	//
+	// <mode name='host-passthrough' supported='yes'>
+	// <enum name='hostPassthroughMigratable'/>
+	// </mode>
+	//
+	// The corresponding entries in this list would be "host-passthrough" and
+	// "host-passthrough/migratable".
 	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
+	// Supported features for domains, such as "sev" or "sgx".
+	//
+	// This is a flat list of supported features, meaning the following xml:
+	//
+	// <features>
+	// <sev supported='no'/>
+	// <sgx supported='no'/>
+	// </features>
+	//
+	// Would correspond to the entries "sev" and "sgx" in this list.
 	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
 }
 

@@ -10,27 +10,62 @@ import (
 
 // HypervisorStatusApplyConfiguration represents a declarative configuration of the HypervisorStatus type for use
 // with apply.
+//
+// HypervisorStatus defines the observed state of Hypervisor
 type HypervisorStatusApplyConfiguration struct {
-	LibVirtVersion     *string                                   `json:"libVirtVersion,omitempty"`
-	HypervisorVersion  *string                                   `json:"hypervisorVersion,omitempty"`
-	OperatingSystem    *OperatingSystemStatusApplyConfiguration  `json:"operatingSystem,omitempty"`
-	Update             *HyperVisorUpdateStatusApplyConfiguration `json:"updateStatus,omitempty"`
-	Instances          []InstanceApplyConfiguration              `json:"instances,omitempty"`
-	Capabilities       *CapabilitiesApplyConfiguration           `json:"capabilities,omitempty"`
-	DomainCapabilities *DomainCapabilitiesApplyConfiguration     `json:"domainCapabilities,omitempty"`
-	Allocation         map[apiv1.ResourceName]resource.Quantity  `json:"allocation,omitempty"`
-	Capacity           map[apiv1.ResourceName]resource.Quantity  `json:"capacity,omitempty"`
-	EffectiveCapacity  map[apiv1.ResourceName]resource.Quantity  `json:"effectiveCapacity,omitempty"`
-	Cells              []CellApplyConfiguration                  `json:"cells,omitempty"`
-	NumInstances       *int                                      `json:"numInstances,omitempty"`
-	HypervisorID       *string                                   `json:"hypervisorId,omitempty"`
-	ServiceID          *string                                   `json:"serviceId,omitempty"`
-	Traits             []string                                  `json:"traits,omitempty"`
-	Aggregates         []AggregateApplyConfiguration             `json:"aggregates,omitempty"`
-	InternalIP         *string                                   `json:"internalIp,omitempty"`
-	Evicted            *bool                                     `json:"evicted,omitempty"`
-	Conditions         []metav1.ConditionApplyConfiguration      `json:"conditions,omitempty"`
-	SpecHash           *string                                   `json:"specHash,omitempty"`
+	// Represents the LibVirt version.
+	LibVirtVersion *string `json:"libVirtVersion,omitempty"`
+	// Represents the Hypervisor version
+	HypervisorVersion *string `json:"hypervisorVersion,omitempty"`
+	// Represents the Operating System status.
+	OperatingSystem *OperatingSystemStatusApplyConfiguration `json:"operatingSystem,omitempty"`
+	// Represents the Hypervisor update status.
+	Update *HyperVisorUpdateStatusApplyConfiguration `json:"updateStatus,omitempty"`
+	// Represents the Hypervisor hosted Virtual Machines
+	Instances []InstanceApplyConfiguration `json:"instances,omitempty"`
+	// Auto-discovered capabilities as reported by libvirt.
+	Capabilities *CapabilitiesApplyConfiguration `json:"capabilities,omitempty"`
+	// Auto-discovered domain capabilities relevant to check if a VM
+	// can be scheduled on the hypervisor.
+	DomainCapabilities *DomainCapabilitiesApplyConfiguration `json:"domainCapabilities,omitempty"`
+	// Auto-discovered resource allocation of all hosted VMs.
+	Allocation map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
+	// Auto-discovered capacity of the hypervisor.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the hypervisor. Use the
+	// effective capacity field to get the capacity considering the applied
+	// overcommit ratios.
+	Capacity map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
+	// Auto-discovered capacity of the hypervisor, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
+	EffectiveCapacity map[apiv1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
+	// Auto-discovered cells on this hypervisor.
+	Cells []CellApplyConfiguration `json:"cells,omitempty"`
+	// Represents the number of instances running on this hypervisor.
+	NumInstances *int `json:"numInstances,omitempty"`
+	// HypervisorID is the unique identifier of the hypervisor in OpenStack.
+	HypervisorID *string `json:"hypervisorId,omitempty"`
+	// ServiceID is the unique identifier of the compute service in OpenStack.
+	ServiceID *string `json:"serviceId,omitempty"`
+	// Traits are the applied traits of the hypervisor.
+	Traits []string `json:"traits,omitempty"`
+	// Aggregates are the applied aggregates of the hypervisor with their names and UUIDs.
+	Aggregates []AggregateApplyConfiguration `json:"aggregates,omitempty"`
+	// InternalIP is the internal IP address of the hypervisor.
+	InternalIP *string `json:"internalIp,omitempty"`
+	// Evicted indicates whether the hypervisor is evicted. (no instances left with active maintenance mode)
+	Evicted *bool `json:"evicted,omitempty"`
+	// Represents the Hypervisor node conditions.
+	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	SpecHash   *string                              `json:"specHash,omitempty"`
 }
 
 // HypervisorStatusApplyConfiguration constructs a declarative configuration of the HypervisorStatus type for use with

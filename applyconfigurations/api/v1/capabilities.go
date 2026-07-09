@@ -8,10 +8,15 @@ import (
 
 // CapabilitiesApplyConfiguration represents a declarative configuration of the Capabilities type for use
 // with apply.
+//
+// Capabilities of the hypervisor as reported by libvirt.
 type CapabilitiesApplyConfiguration struct {
-	HostCpuArch *string            `json:"cpuArch,omitempty"`
-	HostMemory  *resource.Quantity `json:"memory,omitempty"`
-	HostCpus    *resource.Quantity `json:"cpus,omitempty"`
+	// The hosts CPU architecture (not the guests).
+	HostCpuArch *string `json:"cpuArch,omitempty"`
+	// Total host memory available as a sum of memory over all numa cells.
+	HostMemory *resource.Quantity `json:"memory,omitempty"`
+	// Total host cpus available as a sum of cpus over all numa cells.
+	HostCpus *resource.Quantity `json:"cpus,omitempty"`
 }
 
 // CapabilitiesApplyConfiguration constructs a declarative configuration of the Capabilities type for use with

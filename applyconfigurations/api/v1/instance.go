@@ -5,9 +5,12 @@ package v1
 // InstanceApplyConfiguration represents a declarative configuration of the Instance type for use
 // with apply.
 type InstanceApplyConfiguration struct {
-	ID     *string `json:"id,omitempty"`
-	Name   *string `json:"name,omitempty"`
-	Active *bool   `json:"active,omitempty"`
+	// Represents the instance ID (uuidv4).
+	ID *string `json:"id,omitempty"`
+	// Represents the instance name.
+	Name *string `json:"name,omitempty"`
+	// Represents the instance state.
+	Active *bool `json:"active,omitempty"`
 }
 
 // InstanceApplyConfiguration constructs a declarative configuration of the Instance type for use with

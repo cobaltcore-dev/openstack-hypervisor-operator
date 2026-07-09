@@ -9,10 +9,28 @@ import (
 
 // CellApplyConfiguration represents a declarative configuration of the Cell type for use
 // with apply.
+//
+// Cell represents a NUMA cell on the hypervisor.
 type CellApplyConfiguration struct {
-	CellID            *uint64                                  `json:"cellID,omitempty"`
-	Allocation        map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
-	Capacity          map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
+	// Cell ID.
+	CellID *uint64 `json:"cellID,omitempty"`
+	// Auto-discovered resource allocation of all hosted VMs in this cell.
+	Allocation map[apiv1.ResourceName]resource.Quantity `json:"allocation,omitempty"`
+	// Auto-discovered capacity of this cell.
+	//
+	// Note that this capacity does not include the applied overcommit ratios,
+	// and represents the actual capacity of the cell. Use the effective capacity
+	// field to get the capacity considering the applied overcommit ratios.
+	Capacity map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
+	// Auto-discovered capacity of this cell, considering the
+	// applied overcommit ratios.
+	//
+	// In case no overcommit ratio is specified for a resource type, the default
+	// overcommit ratio of 1 should be applied, meaning the effective capacity
+	// is the same as the actual capacity.
+	//
+	// If the overcommit ratio results in a fractional effective capacity, the
+	// effective capacity is expected to be rounded down.
 	EffectiveCapacity map[apiv1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 }
 
