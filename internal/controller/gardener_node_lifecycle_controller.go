@@ -35,9 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -251,31 +249,4 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 		Owns(&appsv1.Deployment{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Complete(r)
-}
-
-// evictingConditionChangedPredicate complements GenerationChangedPredicate,
-// which ignores status-only updates.
-type evictingConditionChangedPredicate struct {
-	predicate.Funcs
-}
-
-func (evictingConditionChangedPredicate) Update(e event.UpdateEvent) bool {
-	if e.ObjectOld == nil || e.ObjectNew == nil {
-		return false
-	}
-	oldHv, ok1 := e.ObjectOld.(*kvmv1.Hypervisor)
-	newHv, ok2 := e.ObjectNew.(*kvmv1.Hypervisor)
-	if !ok1 || !ok2 {
-		return false
-	}
-	oldCond := meta.FindStatusCondition(oldHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
-	newCond := meta.FindStatusCondition(newHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
-	switch {
-	case oldCond == nil && newCond == nil:
-		return false
-	case oldCond == nil || newCond == nil:
-		return true
-	default:
-		return oldCond.Status != newCond.Status
-	}
 }
