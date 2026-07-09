@@ -273,9 +273,5 @@ func (hec *HypervisorMaintenanceController) SetupWithManager(mgr ctrl.Manager) e
 	}
 	hec.computeClient.Microversion = "2.90" // Xena (or later)
 
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(HypervisorMaintenanceControllerName).
-		For(&kvmv1.Hypervisor{}).
-		Owns(&kvmv1.Eviction{}).
-		Complete(hec)
+	return hec.registerWithManager(mgr)
 }
