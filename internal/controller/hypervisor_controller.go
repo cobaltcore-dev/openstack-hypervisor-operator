@@ -171,7 +171,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if err := hv.Status().Apply(ctx,
-			apiv1.Hypervisor(hypervisor.Name, "").WithStatus(statusCfg),
+			apiv1.Hypervisor(hypervisor.Name).WithStatus(statusCfg),
 			k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
 			return ctrl.Result{}, err
 		}

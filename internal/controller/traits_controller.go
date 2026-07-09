@@ -155,7 +155,7 @@ func (tc *TraitsController) applyTraitsStatus(ctx context.Context, hv *kvmv1.Hyp
 		statusCfg.WithTraits(traits...)
 	}
 	return tc.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(TraitsControllerName))
 }
 

@@ -145,7 +145,7 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				WithReason(kvmv1.ConditionReasonRunning).
 				WithMessage("Running"))
 		return ctrl.Result{}, r.Status().Apply(ctx,
-			apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+			apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 			client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 	}
 
@@ -188,7 +188,7 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 			WithReason(kvmv1.ConditionReasonSucceeded).
 			WithMessage("eviction completed successfully"))
 	return ctrl.Result{}, r.Status().Apply(ctx,
-		apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+		apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 		client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 }
 
@@ -209,7 +209,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 					WithReason(kvmv1.ConditionReasonFailed).
 					WithMessage("hypervisor not disabled"))
 			if err := r.Status().Apply(ctx,
-				apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+				apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 				client.ForceOwnership, client.FieldOwner(EvictionControllerName)); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -235,7 +235,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 					WithReason(kvmv1.ConditionReasonFailed).
 					WithMessage(fmt.Sprintf("failed to get hypervisor %v", err)))
 			return ctrl.Result{}, r.Status().Apply(ctx,
-				apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+				apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 				client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 		}
 
@@ -252,7 +252,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 				WithReason(kvmv1.ConditionReasonSucceeded).
 				WithMessage(msg))
 		return ctrl.Result{}, r.Status().Apply(ctx,
-			apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+			apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 			client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 	}
 
@@ -275,7 +275,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 			WithReason(kvmv1.ConditionReasonSucceeded).
 			WithMessage("Preflight checks passed, hypervisor is disabled and ready for eviction"))
 	return ctrl.Result{}, r.Status().Apply(ctx,
-		apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+		apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 		client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 }
 
@@ -299,7 +299,7 @@ func (r *EvictionReconciler) handleNotFound(ctx context.Context, eviction *kvmv1
 			WithReason(kvmv1.ConditionReasonSucceeded).
 			WithMessage(fmt.Sprintf("Instance %s is gone", uuid)))
 	return r.Status().Apply(ctx,
-		apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+		apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 		client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 }
 
@@ -345,7 +345,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				WithReason(kvmv1.ConditionReasonFailed).
 				WithMessage(fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message)))
 		applyErr := r.Status().Apply(ctx,
-			apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+			apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 			client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 		return ctrl.Result{}, errors.Join(fmt.Errorf("error migrating instance %v", uuid), applyErr)
 	}
@@ -391,7 +391,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 					WithMessage(fmt.Sprintf("Migration of instance %s finished", vm.ID)))
 		}
 		return ctrl.Result{}, r.Status().Apply(ctx,
-			apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+			apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 			client.ForceOwnership, client.FieldOwner(EvictionControllerName))
 	}
 
@@ -408,7 +408,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 				WithReason(kvmv1.ConditionReasonFailed).
 				WithMessage(fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID)))
 		if err := r.Status().Apply(ctx,
-			apiv1.Eviction(eviction.Name, eviction.Namespace).WithStatus(statusCfg),
+			apiv1.Eviction(eviction.Name).WithStatus(statusCfg),
 			client.ForceOwnership, client.FieldOwner(EvictionControllerName)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("could not update status due to %w", err)
 		}

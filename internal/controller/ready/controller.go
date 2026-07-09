@@ -121,7 +121,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			WithReason(readyCondition.Reason).
 			WithMessage(readyCondition.Message))
 	return ctrl.Result{}, r.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(ControllerName))
 }
 

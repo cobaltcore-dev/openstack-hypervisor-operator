@@ -86,7 +86,7 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 	}
 
 	return ctrl.Result{}, hec.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorMaintenanceControllerName))
 }
 
@@ -223,7 +223,7 @@ func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, 
 		WithController(true).
 		WithBlockOwnerDeletion(true)
 
-	evictionApplyCfg := apiv1.Eviction(eviction.Name, eviction.Namespace).
+	evictionApplyCfg := apiv1.Eviction(eviction.Name).
 		WithLabels(evictionLabels).
 		WithOwnerReferences(ownerRef).
 		WithSpec(apiv1.EvictionSpec().

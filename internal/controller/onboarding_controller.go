@@ -108,7 +108,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	apply := func() error {
 		return r.Status().Apply(ctx,
-			apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+			apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
 	}
 

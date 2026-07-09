@@ -104,7 +104,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 
 			if err2 := ac.Status().Apply(ctx,
-				apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+				apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 				k8sclient.ForceOwnership, k8sclient.FieldOwner(AggregatesControllerName)); err2 != nil {
 				return ctrl.Result{}, errors.Join(err, err2)
 			}
@@ -149,7 +149,7 @@ func (ac *AggregatesController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if err := ac.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(AggregatesControllerName)); err != nil {
 		return ctrl.Result{}, err
 	}

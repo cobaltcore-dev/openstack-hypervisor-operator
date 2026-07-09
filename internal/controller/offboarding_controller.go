@@ -166,7 +166,7 @@ func (r *HypervisorOffboardingReconciler) applyStatus(ctx context.Context, hv *k
 	}
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions, *cond)
 	return r.Status().Apply(ctx,
-		apiv1.Hypervisor(hv.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(OffboardingControllerName))
 }
 

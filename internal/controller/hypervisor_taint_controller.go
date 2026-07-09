@@ -86,7 +86,7 @@ func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Requ
 			WithObservedGeneration(hypervisor.Generation))
 
 	return ctrl.Result{}, r.Status().Apply(ctx,
-		apiv1.Hypervisor(hypervisor.Name, "").WithStatus(statusCfg),
+		apiv1.Hypervisor(hypervisor.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorTaintControllerName))
 }
 
