@@ -176,10 +176,6 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		if statusRequeueAfter > 0 {
-			return ctrl.Result{RequeueAfter: statusRequeueAfter}, nil
-		}
-
 		// Re-fetch after status apply so the spec patch has a fresh resourceVersion
 		if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to re-fetch hypervisor after status apply: %w", err)
@@ -192,12 +188,14 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		// Hypervisor spec/labels go stale.
 		base := hypervisor.DeepCopy()
 		syncLabelsAndAnnotations(nodeLabels, hypervisor, node)
-		if equality.Semantic.DeepEqual(hypervisor, base) {
-			return ctrl.Result{}, nil
+		if !equality.Semantic.DeepEqual(hypervisor, base) {
+			if err := hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
+				k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName)); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 
-		return ctrl.Result{}, hv.Patch(ctx, hypervisor, k8sclient.MergeFromWithOptions(base,
-			k8sclient.MergeFromWithOptimisticLock{}), k8sclient.FieldOwner(HypervisorControllerName))
+		return ctrl.Result{RequeueAfter: statusRequeueAfter}, nil
 	}
 
 	syncLabelsAndAnnotations(nodeLabels, hypervisor, node)

@@ -106,8 +106,13 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 	case kvmv1.MaintenanceUnset:
 		existing := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
 		if existing == nil || existing.Status != metav1.ConditionFalse {
-			// We need to enable the host as per spec
-			enableService := services.UpdateOpts{Status: services.ServiceEnabled}
+			// We need to enable the host as per spec.
+			// Also clear forced_down in case a previous HA event set it.
+			falseVal := false
+			enableService := openstack.UpdateServiceOpts{
+				Status:     services.ServiceEnabled,
+				ForcedDown: &falseVal,
+			}
 			log.Info("Enabling hypervisor", "id", serviceId)
 			if _, err := services.Update(ctx, hec.computeClient, serviceId, enableService).Extract(); err != nil {
 				return fmt.Errorf("failed to enable hypervisor due to %w", err)
