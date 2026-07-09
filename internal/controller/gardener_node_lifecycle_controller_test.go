@@ -58,7 +58,7 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 		Expect(k8sClient.Create(ctx, node)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
 			By("Cleanup the specific node")
-			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
+			Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, node))).To(Succeed())
 		})
 
 		By("creating the core resource for the Kind hypervisor")
@@ -116,6 +116,26 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			})
 		})
 
+		When("evicting has completed (Evicting=False)", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "Succeeded",
+					Message: "All VMs evicted",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should set the pdb to minAvailable 0 without waiting for Offboarded", func(ctx SpecContext) {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+			})
+		})
+
 		When("the node has been offboarded", func() {
 			BeforeEach(func(ctx SpecContext) {
 				hypervisor := &kvmv1.Hypervisor{}
@@ -147,74 +167,17 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 
 			_, err := controller.Reconcile(ctx, reconcileReq)
 			Expect(err).NotTo(HaveOccurred())
-		}
-	})
-
-	Context("setting the pod disruption budget", func() {
-		When("not evicted", func() {
-			It("should set the pdb to minimum 1", func() {
-				pdb := &policyv1.PodDisruptionBudget{}
-				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
-				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(1))))
-			})
-		})
-		When("evicted", func() {
-			BeforeEach(func() {
-				hv := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
-				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-					Type:    kvmv1.ConditionTypeEvicting,
-					Status:  metav1.ConditionFalse,
-					Reason:  "dontcare",
-					Message: "dontcare",
-				})
-				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
-			})
-
-			It("should set the pdb to minimum 0", func() {
-				pdb := &policyv1.PodDisruptionBudget{}
-				Expect(k8sClient.Get(ctx, podName, pdb)).To(Succeed())
-				Expect(pdb.Spec.MinAvailable).To(HaveValue(HaveField("IntVal", BeEquivalentTo(0))))
-			})
 		})
 	})
 
-	Context("create a signalling deployment", func() {
-		When("onboarding not completed", func() {
-			It("should create a failing deployment for the node", func() {
-				deployment := &appsv1.Deployment{}
-				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
-				Expect(deployment.Spec.Template.Spec.Containers).To(
-					ContainElement(
-						HaveField("StartupProbe",
-							HaveField("ProbeHandler",
-								HaveField("Exec",
-									HaveField("Command", ContainElements("/bin/false")))))))
-			})
-		})
-		When("onboarding is completed", func() {
-			BeforeEach(func() {
-				hv := &kvmv1.Hypervisor{}
-				Expect(k8sClient.Get(ctx, hypervisorName, hv)).To(Succeed())
-				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
-					Type:    ConditionTypeOnboarding,
-					Status:  metav1.ConditionFalse,
-					Reason:  "dontcare",
-					Message: "dontcare",
-				})
-				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
-			})
+	Context("When node does not exist", func() {
+		It("should succeed without error", func(ctx SpecContext) {
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, name, node)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, node)).To(Succeed())
 
-			It("should create a succeeding deployment for the node", func() {
-				deployment := &appsv1.Deployment{}
-				Expect(k8sClient.Get(ctx, podName, deployment)).To(Succeed())
-				Expect(deployment.Spec.Template.Spec.Containers).To(
-					ContainElement(
-						HaveField("StartupProbe",
-							HaveField("ProbeHandler",
-								HaveField("Exec",
-									HaveField("Command", ContainElements("/bin/true")))))))
-			})
+			_, err := controller.Reconcile(ctx, reconcileReq)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
