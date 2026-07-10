@@ -318,13 +318,12 @@ var _ = Describe("Hypervisor Controller", func() {
 				}
 
 				By("should have set the terminating condition on the Hypervisor resource")
-				// Get the Hypervisor resource
 				updatedHypervisor := &kvmv1.Hypervisor{}
 				Expect(hypervisorController.Get(ctx, hypervisorName, updatedHypervisor)).To(Succeed())
 				Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeTerminating),
-						HaveField("Reason", terminatingReason),
+						HaveField("Reason", kvmv1.ConditionReasonTerminating),
 						HaveField("Status", metav1.ConditionTrue),
 					),
 				))
@@ -366,8 +365,42 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(updatedHypervisor.Status.Conditions).To(ContainElement(
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeTerminating),
-						HaveField("Reason", terminatingReason),
+						HaveField("Reason", kvmv1.ConditionReasonTerminating),
 						HaveField("Status", metav1.ConditionTrue),
+					),
+				))
+			})
+		})
+		Context("when only the deletion timestamp is set (no Terminating node condition)", func() {
+			BeforeEach(func(ctx SpecContext) {
+				// Use a different node that has no Terminating condition — only
+				// a deletion timestamp — to verify the new gardener signal path.
+				resource.Status.Conditions = nil
+				Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+
+				By("creating a Hypervisor so the existing-hypervisor path is exercised")
+				hypervisor := &kvmv1.Hypervisor{
+					ObjectMeta: metav1.ObjectMeta{Name: resource.Name},
+				}
+				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
+				DeferCleanup(func(ctx SpecContext) {
+					Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
+				})
+			})
+
+			It("should set the Terminating condition from the deletion timestamp", func(ctx SpecContext) {
+				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: resource.Name},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeTerminating),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", kvmv1.ConditionReasonTerminating),
 					),
 				))
 			})
@@ -602,7 +635,7 @@ var _ = Describe("Hypervisor Controller", func() {
 					SatisfyAll(
 						HaveField("Type", kvmv1.ConditionTypeTerminating),
 						HaveField("Status", metav1.ConditionTrue),
-						HaveField("Reason", terminatingReason),
+						HaveField("Reason", kvmv1.ConditionReasonTerminating),
 					),
 				))
 			})

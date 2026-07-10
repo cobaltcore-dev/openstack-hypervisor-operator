@@ -130,15 +130,16 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 		}
 
-		// update terminating condition
+		// update terminating condition — fired by either the legacy gardener
+		// node condition or the node's deletion timestamp (gardener's future path)
 		nodeTerminationCondition := FindNodeStatusCondition(node.Status.Conditions, "Terminating")
-		if nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue {
-			// Node might be terminating, propagate condition to hypervisor
+		if (nodeTerminationCondition != nil && nodeTerminationCondition.Status == corev1.ConditionTrue) ||
+			!node.DeletionTimestamp.IsZero() {
 			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 				Type:    kvmv1.ConditionTypeTerminating,
-				Status:  metav1.ConditionStatus(nodeTerminationCondition.Status),
-				Reason:  nodeTerminationCondition.Reason,
-				Message: nodeTerminationCondition.Message,
+				Status:  metav1.ConditionTrue,
+				Reason:  kvmv1.ConditionReasonTerminating,
+				Message: "Node is terminating",
 			})
 		}
 
@@ -188,7 +189,8 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("failed setting controller reference: %w", err)
 	}
 
-	if IsNodeConditionPresentAndEqual(node.Status.Conditions, "Terminating", corev1.ConditionTrue) {
+	if IsNodeConditionPresentAndEqual(node.Status.Conditions, "Terminating", corev1.ConditionTrue) ||
+		!node.DeletionTimestamp.IsZero() {
 		hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
 	}
 
