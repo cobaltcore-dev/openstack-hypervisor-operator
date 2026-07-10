@@ -60,7 +60,9 @@ const (
 	// ConditionTypeReady is the type of condition for ready status of a hypervisor
 	ConditionTypeReady = "Ready"
 
-	// ConditionTypeTerminating is the type of condition for terminating status of a hypervisor
+	// ConditionTypeTerminating is set when the underlying Node is terminating —
+	// either because the legacy gardener node condition "Terminating" is present,
+	// or because the Node's deletionTimestamp has been set (gardener's future path).
 	ConditionTypeTerminating = "Terminating"
 
 	// ConditionTypeTainted is the type of condition for tainted status of a hypervisor
