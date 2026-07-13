@@ -1,9 +1,8 @@
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: hypervisors.kvm.cloud.sap
 spec:
   group: kvm.cloud.sap
@@ -122,9 +121,8 @@ spec:
               createCertManagerCertificate:
                 default: false
                 description: |-
-                  CreateCertManagerCertificate requests that a certificate be issued from
-                  cert-manager for the hypervisor, to be used for secure communication
-                  with the libvirt API.
+                  Require to issue a certificate from cert-manager for the hypervisor, to be used for
+                  secure communication with the libvirt API.
                 type: boolean
               customTraits:
                 default: []
@@ -134,71 +132,9 @@ spec:
                 type: array
               evacuateOnReboot:
                 default: true
-                description: EvacuateOnReboot requests an evacuation of all instances
+                description: EvacuateOnReboot request an evacuation of all instances
                   before reboot.
                 type: boolean
-              groups:
-                description: |-
-                  Groups defines typed group memberships for this hypervisor.
-
-                  Both traits and aggregates are forms of grouping: traits group
-                  hypervisors by capability, aggregates group them by administrative
-                  assignment. Each entry follows the field-presence union pattern
-                  (as used by PodSpec.volumes in core Kubernetes): exactly one
-                  type-specific sub-field must be populated per entry.
-
-                  The Cortex Placement shim and scheduler read group memberships
-                  directly from this field.
-
-                  Note: uniqueness of trait names and aggregate UUIDs is not enforced
-                  via CEL because the required O(n^2) comparison exceeds the
-                  Kubernetes CEL cost budget. Enforce uniqueness in the consuming
-                  controller or via a validating webhook if needed.
-                items:
-                  description: |-
-                    Group is a typed group membership entry for a hypervisor.
-
-                    This follows the field-presence union pattern (as used by
-                    PodSpec.volumes in core Kubernetes): each entry populates exactly
-                    one type-specific sub-field, and the populated field identifies
-                    the group type.
-                  properties:
-                    aggregate:
-                      description: |-
-                        AggregateGroup represents an administrative grouping, such as an
-                        OpenStack host aggregate.
-                      properties:
-                        metadata:
-                          additionalProperties:
-                            type: string
-                          type: object
-                        name:
-                          minLength: 1
-                          type: string
-                        uuid:
-                          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
-                          type: string
-                      required:
-                      - name
-                      - uuid
-                      type: object
-                    trait:
-                      description: |-
-                        TraitGroup represents a capability trait, such as an OpenStack
-                        Placement trait (e.g. HW_CPU_X86_AVX2, COMPUTE_STATUS_DISABLED).
-                      properties:
-                        name:
-                          minLength: 1
-                          type: string
-                      required:
-                      - name
-                      type: object
-                  type: object
-                  x-kubernetes-validations:
-                  - message: exactly one group type must be set
-                    rule: '(has(self.trait) ? 1 : 0) + (has(self.aggregate) ? 1 :
-                      0) == 1'
-                type: array
               highAvailability:
                 default: true
                 description: HighAvailability is used to enable the high availability
@@ -206,8 +142,8 @@ spec:
                 type: boolean
               installCertificate:
                 default: true
-                description: InstallCertificate enables installation of certificates
-                  via kvm-node-agent.
+                description: InstallCertificate is used to enable the installations
+                  of the certificates via kvm-node-agent.
                 type: boolean
               lifecycleEnabled:
                 default: true
@@ -229,30 +165,9 @@ spec:
                 description: MaintenanceReason provides the reason for manual maintenance
                   mode.
                 type: string
-              overcommit:
-                additionalProperties:
-                  type: number
-                description: |-
-                  Overcommit specifies the desired overcommit ratio by resource type.
-
-                  If no overcommit is specified for a resource type, the default overcommit
-                  ratio of 1.0 should be applied, i.e. the effective capacity is the same
-                  as the actual capacity.
-
-                  If the overcommit ratio results in a fractional effective capacity,
-                  the effective capacity is expected to be rounded down. This allows
-                  gradually adjusting the hypervisor capacity.
-
-                  It is validated that all overcommit ratios are greater than or equal to
-                  1.0, if specified. For this we don't need extra validating webhooks.
-                  See: https://kubernetes.io/blog/2022/09/23/crd-validation-rules-beta/#crd-transition-rules
-                type: object
-                x-kubernetes-validations:
-                - message: overcommit ratios must be >= 1.0
-                  rule: self.all(k, self[k] >= 1.0)
               reboot:
                 default: false
-                description: Reboot requests a reboot after successful installation
+                description: Reboot request an reboot after successful installation
                   of an upgrade.
                 type: boolean
               skipTests:
@@ -293,12 +208,6 @@ spec:
                   description: Aggregate represents an OpenStack aggregate with its
                     name and UUID.
                   properties:
-                    metadata:
-                      additionalProperties:
-                        type: string
-                      description: Metadata is the metadata of the aggregate as key-value
-                        pairs.
-                      type: object
                     name:
                       description: Name is the name of the aggregate.
                       type: string
@@ -350,13 +259,7 @@ spec:
                   - type: string
                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                   x-kubernetes-int-or-string: true
-                description: |-
-                  Auto-discovered capacity of the hypervisor.
-
-                  Note that this capacity does not include the applied overcommit ratios,
-                  and represents the actual capacity of the hypervisor. Use the
-                  effective capacity field to get the capacity considering the applied
-                  overcommit ratios.
+                description: Auto-discovered capacity of the hypervisor.
                 type: object
               cells:
                 description: Auto-discovered cells on this hypervisor.
@@ -380,35 +283,12 @@ spec:
                         - type: string
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
-                      description: |-
-                        Auto-discovered capacity of this cell.
-
-                        Note that this capacity does not include the applied overcommit ratios,
-                        and represents the actual capacity of the cell. Use the effective capacity
-                        field to get the capacity considering the applied overcommit ratios.
+                      description: Auto-discovered capacity of this cell.
                       type: object
                     cellID:
                       description: Cell ID.
                       format: int64
                       type: integer
-                    effectiveCapacity:
-                      additionalProperties:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                      description: |-
-                        Auto-discovered capacity of this cell, considering the
-                        applied overcommit ratios.
-
-                        In case no overcommit ratio is specified for a resource type, the default
-                        overcommit ratio of 1 should be applied, meaning the effective capacity
-                        is the same as the actual capacity.
-
-                        If the overcommit ratio results in a fractional effective capacity, the
-                        effective capacity is expected to be rounded down.
-                      type: object
                   required:
                   - cellID
                   type: object
@@ -470,9 +350,6 @@ spec:
                   - type
                   type: object
                 type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
               domainCapabilities:
                 description: |-
                   Auto-discovered domain capabilities relevant to check if a VM
@@ -493,7 +370,7 @@ spec:
                       Supported cpu modes for domains.
 
                       The format of this list is cpu mode, and if specified, a specific
-                      submode. For example, take the following xml domain cpu definition:
+                      submode. For example, the take the following xml domain cpu definition:
 
                       <mode name='host-passthrough' supported='yes'>
                         <enum name='hostPassthroughMigratable'/>
@@ -510,7 +387,7 @@ spec:
                       Supported devices for domains.
 
                       The format of this list is the device type, and if specified, a specific
-                      model. For example, take the following xml domain device definition:
+                      model. For example, the take the following xml domain device definition:
 
                       <video supported='yes'>
                         <enum name='modelType'>
@@ -538,24 +415,6 @@ spec:
                     items:
                       type: string
                     type: array
-                type: object
-              effectiveCapacity:
-                additionalProperties:
-                  anyOf:
-                  - type: integer
-                  - type: string
-                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                  x-kubernetes-int-or-string: true
-                description: |-
-                  Auto-discovered capacity of the hypervisor, considering the
-                  applied overcommit ratios.
-
-                  In case no overcommit ratio is specified for a resource type, the default
-                  overcommit ratio of 1 should be applied, meaning the effective capacity
-                  is the same as the actual capacity.
-
-                  If the overcommit ratio results in a fractional effective capacity, the
-                  effective capacity is expected to be rounded down.
                 type: object
               evicted:
                 description: Evicted indicates whether the hypervisor is evicted.
@@ -597,7 +456,7 @@ spec:
                 type: string
               numInstances:
                 default: 0
-                description: Represents the number of instances running on this hypervisor.
+                description: Represent the num of instances
                 type: integer
               operatingSystem:
                 description: Represents the Operating System status.
@@ -692,3 +551,4 @@ spec:
     storage: true
     subresources:
       status: {}
+

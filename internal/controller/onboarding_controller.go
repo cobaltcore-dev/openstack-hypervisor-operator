@@ -320,6 +320,11 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
+		// Wait for HypervisorComputeService controller to enable the compute service
+		if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled) {
+			return ctrl.Result{}, nil
+		}
+
 		// Wait for HypervisorInstanceHa controller to enable HA
 		if hv.Spec.HighAvailability && !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
 			return ctrl.Result{}, nil
