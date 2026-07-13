@@ -396,6 +396,29 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 									HaveField("Status", metav1.ConditionFalse),
 								)))
 						})
+
+						It("should keep the evicting condition on a repeated reconcile (must not be pruned by SSA)", func(ctx SpecContext) {
+							// Reconciling again with the succeeded state already
+							// recorded on the Hypervisor takes the early-return
+							// branch in reconcileEviction. The apply must still
+							// seed the succeeded evicting condition — otherwise
+							// SSA prunes it because this controller is its sole
+							// owner.
+							req := ctrl.Request{NamespacedName: hypervisorName}
+							_, err := controller.Reconcile(ctx, req)
+							Expect(err).NotTo(HaveOccurred())
+
+							updated := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+							Expect(updated.Status.Conditions).To(ContainElement(
+								SatisfyAll(
+									HaveField("Type", kvmv1.ConditionTypeEvicting),
+									HaveField("Status", metav1.ConditionFalse),
+									HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+								),
+							))
+							Expect(updated.Status.Evicted).To(BeTrue())
+						})
 					})
 				}) // Spec.Maintenance="<mode>"
 			}
