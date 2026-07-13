@@ -443,6 +443,49 @@ var _ = Describe("Hypervisor Controller", func() {
 		})
 	})
 
+	Context("When the node loses its internal IP", func() {
+		It("should keep the previously stored internal IP in the hypervisor status", func(ctx SpecContext) {
+			By("reconciling to create the Hypervisor")
+			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
+				Name: resource.Name,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("setting the node internal IP and reconciling")
+			node := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+			node.Status.Addresses = []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "192.168.1.100"},
+				{Type: corev1.NodeHostName, Address: "test-host"},
+			}
+			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
+
+			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
+				Name: resource.Name,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(hypervisor.Status.InternalIP).To(Equal("192.168.1.100"))
+
+			By("removing the internal IP from the node addresses and reconciling again")
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resource.Name}, node)).To(Succeed())
+			node.Status.Addresses = []corev1.NodeAddress{
+				{Type: corev1.NodeHostName, Address: "test-host"},
+			}
+			Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
+
+			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
+				Name: resource.Name,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			Expect(hypervisor.Status.InternalIP).To(Equal("192.168.1.100"))
+		})
+	})
+
 	Context("AgentPodsEvicted condition", func() {
 		var agentNamespace string
 
