@@ -53,6 +53,13 @@ const (
 	// ConditionTypeHypervisorDisabled is the type of condition for hypervisor disabled status
 	ConditionTypeHypervisorDisabled = "HypervisorDisabled"
 
+	// ConditionTypeIncomingMigrationsSettled is set on the Hypervisor CR by the
+	// maintenance controller. True means no live-migrations or evacuations are
+	// currently in flight targeting this host. False/Unknown/Missing means the
+	// controller has observed outstanding incoming migrations (or hasn't checked yet)
+	// and the host must not be declared evicted.
+	ConditionTypeIncomingMigrationsSettled = "IncomingMigrationsSettled"
+
 	// ConditionTypeHaEnabled is the type of condition for signalling if HA is enabled / disabled for the hypervisor
 	ConditionTypeHaEnabled = "HaEnabled"
 
@@ -70,6 +77,15 @@ const (
 
 	// ConditionReasonSucceeded means the eviction has succeeded
 	ConditionReasonSucceeded string = "Succeeded"
+
+	// ConditionReasonSettled means all incoming migrations have reached a terminal state
+	ConditionReasonSettled string = "Settled"
+
+	// ConditionReasonAborting means the controller is aborting incoming migrations
+	ConditionReasonAborting string = "AbortingIncomingMigrations"
+
+	// ConditionReasonWaiting means the controller is waiting for non-abortable incoming migrations
+	ConditionReasonWaiting string = "WaitingForIncomingMigrations"
 )
 
 // EvictionStatus defines the observed state of Eviction
