@@ -20,6 +20,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
@@ -28,18 +29,22 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	applyv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 )
 
 var _ = Describe("HypervisorMaintenanceController", func() {
 	var (
-		controller     *HypervisorMaintenanceController
-		fakeServer     testhelper.FakeServer
-		hypervisorName = types.NamespacedName{Name: "hv-test"}
+		controller         *HypervisorMaintenanceController
+		fakeServer         testhelper.FakeServer
+		hypervisorName     = types.NamespacedName{Name: "hv-test"}
+		migrationsResponse string // mutable: tests can set this to control /os-migrations responses
+		deletedMigrations  []string
 	)
 
 	const (
@@ -82,6 +87,28 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
+
+		// Default: no incoming migrations
+		migrationsResponse = `{"migrations": []}`
+		deletedMigrations = nil
+
+		fakeServer.Mux.HandleFunc("GET /os-migrations", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			mt := r.URL.Query().Get("migration_type")
+			// Only return migrations for the live-migration type query;
+			// evacuation query returns empty by default.
+			if mt == "evacuation" {
+				fmt.Fprint(w, `{"migrations": []}`)
+			} else {
+				fmt.Fprint(w, migrationsResponse)
+			}
+		})
+
+		fakeServer.Mux.HandleFunc("DELETE /servers/", func(w http.ResponseWriter, r *http.Request) {
+			deletedMigrations = append(deletedMigrations, r.URL.Path)
+			w.WriteHeader(http.StatusAccepted)
+		})
 
 		By("Creating the HypervisorMaintenanceController")
 		controller = &HypervisorMaintenanceController{
@@ -237,6 +264,42 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
 				})
 			}) // Spec.Maintenance=""
+
+			Context("Spec.Maintenance=\"\" with only stale IncomingMigrationsSettled condition", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+					// First, simulate that the controller previously owned the condition
+					// by applying it via SSA with the same field manager.
+					statusCfg := applyv1.HypervisorStatus().
+						WithEvicted(false).
+						WithConditions(applymetav1.Condition().
+							WithType(kvmv1.ConditionTypeIncomingMigrationsSettled).
+							WithStatus(metav1.ConditionFalse).
+							WithReason(kvmv1.ConditionReasonWaiting).
+							WithMessage("incoming migrations still pending").
+							WithLastTransitionTime(metav1.Now()))
+					Expect(k8sClient.Status().Apply(ctx,
+						applyv1.Hypervisor(hypervisor.Name).WithStatus(statusCfg),
+						k8sclient.ForceOwnership,
+						k8sclient.FieldOwner(HypervisorMaintenanceControllerName),
+					)).To(Succeed())
+
+					// Now cancel maintenance.
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					hypervisor.Spec.Maintenance = ""
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+					expectedBody := `{"status": "enabled", "forced_down": false}`
+					mockServiceUpdate(expectedBody)
+				})
+
+				It("should remove the stale IncomingMigrationsSettled condition", func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					Expect(meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)).To(BeNil())
+				})
+			})
 
 			Context("Spec.Maintenance=\"ha\"", func() {
 				BeforeEach(func(ctx SpecContext) {
@@ -480,6 +543,249 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 			// ServiceID should still be empty
 			Expect(hypervisor.Status.ServiceID).To(BeEmpty())
+		})
+	})
+
+	Context("Incoming migrations settling", func() {
+		BeforeEach(func(ctx SpecContext) {
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Status.ServiceID = "1234"
+			meta.SetStatusCondition(&hypervisor.Status.Conditions,
+				metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  metav1.StatusSuccess,
+					Message: "Onboarded",
+				},
+			)
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+			// Re-read to get fresh resourceVersion, then update spec
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = "auto"
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			// Permissive service mock: accept any enable/disable call
+			fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, ServiceEnabledResponse)
+			})
+		})
+
+		Context("when there are no incoming migrations", func() {
+			It("should set IncomingMigrationsSettled=True and proceed to create eviction", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(meta.IsStatusConditionTrue(hypervisor.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)).To(BeTrue())
+				// Eviction should be created
+				eviction := &kvmv1.Eviction{}
+				Expect(k8sClient.Get(ctx, hypervisorName, eviction)).To(Succeed())
+			})
+		})
+
+		Context("when there is a running incoming migration", func() {
+			BeforeEach(func(_ SpecContext) {
+				migrationsResponse = `{"migrations": [
+					{
+						"id": 42,
+						"uuid": "mig-uuid-1",
+						"instance_uuid": "inst-uuid-1",
+						"status": "running",
+						"source_compute": "node003",
+						"dest_compute": "hv-test",
+						"migration_type": "live-migration"
+					}
+				]}`
+			})
+
+			It("should set IncomingMigrationsSettled=False with Aborting reason", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				cond := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonAborting))
+			})
+
+			It("should issue a DELETE to abort the migration", func(_ SpecContext) {
+				Expect(deletedMigrations).To(HaveLen(1))
+				Expect(deletedMigrations[0]).To(ContainSubstring("inst-uuid-1"))
+				Expect(deletedMigrations[0]).To(ContainSubstring("42"))
+			})
+
+			It("should not create an eviction resource", func(ctx SpecContext) {
+				eviction := &kvmv1.Eviction{}
+				err := k8sClient.Get(ctx, hypervisorName, eviction)
+				Expect(err).To(HaveOccurred())
+				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+			})
+
+			It("should requeue after settleRequeueInterval", func(ctx SpecContext) {
+				req := ctrl.Request{NamespacedName: hypervisorName}
+				result, err := controller.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			})
+		})
+
+		Context("when there is a post-migrating incoming migration", func() {
+			BeforeEach(func(_ SpecContext) {
+				migrationsResponse = `{"migrations": [
+					{
+						"id": 99,
+						"uuid": "mig-uuid-2",
+						"instance_uuid": "inst-uuid-2",
+						"status": "post-migrating",
+						"source_compute": "node003",
+						"dest_compute": "hv-test",
+						"migration_type": "live-migration"
+					}
+				]}`
+			})
+
+			It("should set IncomingMigrationsSettled=False with Waiting reason", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				cond := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonWaiting))
+			})
+
+			It("should not issue any DELETE", func(_ SpecContext) {
+				Expect(deletedMigrations).To(BeEmpty())
+			})
+
+			It("should not create an eviction resource", func(ctx SpecContext) {
+				eviction := &kvmv1.Eviction{}
+				err := k8sClient.Get(ctx, hypervisorName, eviction)
+				Expect(err).To(HaveOccurred())
+				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+			})
+
+			It("should requeue after settleRequeueInterval", func(ctx SpecContext) {
+				req := ctrl.Request{NamespacedName: hypervisorName}
+				result, err := controller.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			})
+		})
+
+		Context("when eviction succeeded but instances remain (incident regression)", func() {
+			BeforeEach(func(ctx SpecContext) {
+				// Simulate: eviction CR exists and reports Succeeded
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+				eviction := &kvmv1.Eviction{
+					ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+					Spec: kvmv1.EvictionSpec{
+						Hypervisor: hypervisorName.Name,
+						Reason:     "test",
+					},
+				}
+				Expect(controllerutil.SetControllerReference(hypervisor, eviction, controller.Scheme)).To(Succeed())
+				Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
+
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Message: "done",
+					Reason:  kvmv1.ConditionReasonSucceeded,
+				})
+				Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+
+				// Set NumInstances=1 on the Hypervisor (simulating late-arriving instance)
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Status.NumInstances = 1
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Evicted",
+				})
+				hypervisor.Status.Evicted = true
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should flip Evicted back to false", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Evicted).To(BeFalse())
+			})
+
+			It("should set Evicting back to Running", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				cond := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeEvicting)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonRunning))
+			})
+
+			It("should delete the eviction CR to re-enter drain", func(ctx SpecContext) {
+				eviction := &kvmv1.Eviction{}
+				err := k8sClient.Get(ctx, hypervisorName, eviction)
+				Expect(err).To(HaveOccurred())
+				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+			})
+		})
+
+		Context("when eviction just finished but instances remain (no pre-existing Succeeded condition)", func() {
+			BeforeEach(func(ctx SpecContext) {
+				// Simulate: eviction CR exists and reports finished, but the
+				// Hypervisor does NOT have Evicting=Succeeded yet (first reconcile
+				// after the Eviction CR transitioned).
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+
+				eviction := &kvmv1.Eviction{
+					ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+					Spec: kvmv1.EvictionSpec{
+						Hypervisor: hypervisorName.Name,
+						Reason:     "test",
+					},
+				}
+				Expect(controllerutil.SetControllerReference(hypervisor, eviction, controller.Scheme)).To(Succeed())
+				Expect(k8sClient.Create(ctx, eviction)).To(Succeed())
+
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Message: "done",
+					Reason:  kvmv1.ConditionReasonSucceeded,
+				})
+				Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+
+				// Set NumInstances=1 but leave Evicting condition as Running (not Succeeded)
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				hypervisor.Status.NumInstances = 1
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionTrue,
+					Reason:  kvmv1.ConditionReasonRunning,
+					Message: "Evicting",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should set Evicting to True/Running and not declare Evicted", func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+				Expect(hypervisor.Status.Evicted).To(BeFalse())
+				cond := meta.FindStatusCondition(hypervisor.Status.Conditions, kvmv1.ConditionTypeEvicting)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonRunning))
+			})
+
+			It("should delete the eviction CR to restart drain", func(ctx SpecContext) {
+				eviction := &kvmv1.Eviction{}
+				err := k8sClient.Get(ctx, hypervisorName, eviction)
+				Expect(err).To(HaveOccurred())
+				Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+			})
 		})
 	})
 })
