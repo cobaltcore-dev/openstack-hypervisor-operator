@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package eviction
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
@@ -38,6 +37,7 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
@@ -51,38 +51,57 @@ type EvictionReconciler struct {
 
 const (
 	EvictionControllerName = "eviction"
-	shortRetryTime         = 1 * time.Second
-	defaultPollTime        = 10 * time.Second
 )
 
-// popInstance removes and returns the last instance UUID from the slice.
-// Returns the modified slice and the UUID (empty string if slice was empty).
-func popInstance(instances []string) (remaining []string, uuid string) {
-	if len(instances) == 0 {
-		return instances, ""
-	}
-	return instances[:len(instances)-1], instances[len(instances)-1]
+// candidate is an instance eligible to start migrating this pass, along with
+// the migration mode decided from its already-fetched state.
+type candidate struct {
+	id   string
+	live bool
 }
 
-// peekInstance returns the last instance UUID without removing it.
-// Returns empty string if the slice is empty.
-func peekInstance(instances []string) string {
-	if len(instances) == 0 {
-		return ""
+// removeInstance returns instances with the first occurrence of uuid removed,
+// preserving order. Used when a specific VM completes migration, which - once
+// migrations run in parallel - is no longer necessarily the tail of the slice.
+func removeInstance(instances []string, uuid string) []string {
+	for i, u := range instances {
+		if u == uuid {
+			return append(instances[:i:i], instances[i+1:]...)
+		}
 	}
-	return instances[len(instances)-1]
+	return instances
 }
 
-// moveToBack moves the last instance to the front of the slice,
-// effectively deprioritizing it. Returns the modified slice.
-func moveToBack(instances []string) []string {
-	if len(instances) < 2 {
+// deprioritize moves the given instance to the back of the queue (index 0,
+// since the queue is processed from the tail). Used to defer an ERROR or
+// terminating instance so the eviction retries healthier instances first. If
+// the uuid is absent or already at the back, the slice is returned unchanged.
+func deprioritize(instances []string, uuid string) []string {
+	idx := -1
+	for i, u := range instances {
+		if u == uuid {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
 		return instances
 	}
-	uuid := instances[len(instances)-1]
-	copy(instances[1:], instances[:len(instances)-1])
+	// Shift [0:idx] up by one and place uuid at the front (= back of queue).
+	copy(instances[1:idx+1], instances[0:idx])
 	instances[0] = uuid
 	return instances
+}
+
+// isMigrationTaskState reports whether a nova task_state indicates a migration
+// (live or cold/resize) is already underway. A freshly-triggered migration
+// reports the instance as ACTIVE with such a task_state for a few seconds before
+// its Status flips to MIGRATING/RESIZE; counting these prevents the eviction
+// loop from over-triggering past the concurrency limit during that window.
+// Nova values include "migrating", "migrating-start", "resize_prep",
+// "resize_migrating", "resize_migrated", "resize_finish".
+func isMigrationTaskState(taskState string) bool {
+	return strings.Contains(taskState, "migrat") || strings.Contains(taskState, "resize")
 }
 
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
@@ -154,7 +173,8 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 
 	// That should leave us with "Running" and the hypervisor should be deactivated
 	if len(eviction.Status.OutstandingInstances) > 0 {
-		return r.evictNext(ctx, eviction)
+		limit := global.ResolveConcurrency(hypervisor.Status.Traits)
+		return r.evictNext(ctx, eviction, limit)
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
@@ -203,7 +223,7 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 		}) {
 			return ctrl.Result{}, r.updateStatus(ctx, eviction)
 		}
-		return ctrl.Result{RequeueAfter: defaultPollTime}, nil // Wait for hypervisor to be disabled
+		return ctrl.Result{RequeueAfter: global.DefaultPollTime}, nil // Wait for hypervisor to be disabled
 	}
 
 	// Fetch all virtual machines on the hypervisor
@@ -259,145 +279,203 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 	return ctrl.Result{}, r.updateStatus(ctx, eviction)
 }
 
-// Tries to handle the NotFound-error by updating the status
-func (r *EvictionReconciler) handleNotFound(ctx context.Context, eviction *kvmv1.Eviction, err error) error {
+// removeGone drops a specific instance from the outstanding set when it is
+// gone (NotFound), recording a success condition. Returns true if the error was
+// a NotFound and was handled, false otherwise (caller should treat the original
+// error as a real failure).
+func (r *EvictionReconciler) removeGone(eviction *kvmv1.Eviction, uuid string, err error) bool {
 	if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return err
+		return false
 	}
-	logger.FromContext(ctx).Info("Instance is gone")
-	var uuid string
-	eviction.Status.OutstandingInstances, uuid = popInstance(eviction.Status.OutstandingInstances)
-	if uuid == "" {
-		return nil
+	eviction.Status.OutstandingInstances = removeInstance(eviction.Status.OutstandingInstances, uuid)
+	r.setMigrationSucceeded(eviction, fmt.Sprintf("Instance %s is gone", uuid))
+	return true
+}
+
+// evictNext scans the whole outstanding set once and keeps up to `limit`
+// migrations in flight. Instances that have already left the host are removed,
+// transient (MIGRATING/RESIZE) and terminating instances are counted as busy,
+// and fresh migrations are started only while there is spare concurrency. With
+// limit == 1 the behavior is equivalent to the historical one-at-a-time drain.
+func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction, limit int) (ctrl.Result, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	baseLog := logger.FromContext(ctx).WithName("Evict")
+
+	// Snapshot the current queue; we mutate eviction.Status.OutstandingInstances
+	// as instances complete, so iterate over a copy.
+	outstanding := append([]string(nil), eviction.Status.OutstandingInstances...)
+
+	inFlight := 0 // migrations currently running (or terminating)
+	started := 0  // migrations we triggered this pass
+	var candidates []candidate
+	var errs []error // errors to surface after the status update
+
+	for _, uuid := range outstanding {
+		log := baseLog.WithValues("server", uuid)
+		vmCtx := logger.IntoContext(ctx, log)
+
+		vm, err := servers.Get(vmCtx, r.computeClient, uuid).Extract()
+		if err != nil {
+			if r.removeGone(eviction, uuid, err) {
+				continue
+			}
+			// Transient Get error - leave the instance queued and retry soon.
+			errs = append(errs, err)
+			continue
+		}
+
+		log = log.WithValues("server_status", vm.Status)
+
+		switch vm.Status {
+		case "MIGRATING", "RESIZE":
+			// Already draining - occupies an in-flight slot.
+			inFlight++
+			continue
+		case "ERROR":
+			// Needs manual intervention (or another operator fixes it);
+			// deprioritize and record the failure, but don't hold a slot.
+			eviction.Status.OutstandingInstances = deprioritize(eviction.Status.OutstandingInstances, uuid)
+			log.Info("error", "faultMessage", vm.Fault.Message)
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionFalse,
+				Message: fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message),
+				Reason:  kvmv1.ConditionReasonFailed,
+			})
+			errs = append(errs, fmt.Errorf("error migrating instance %v", uuid))
+			continue
+		}
+
+		// A migration we triggered on a previous pass does not flip Status to
+		// MIGRATING/RESIZE immediately - nova first reports the instance as
+		// ACTIVE with a migration task_state (e.g. "migrating",
+		// "migrating-start", "resize_migrating"/"resize_prep"). Count those as
+		// in-flight too, otherwise the slot looks free and we would trigger a
+		// second migration, exceeding the concurrency limit.
+		if isMigrationTaskState(vm.TaskState) {
+			inFlight++
+			continue
+		}
+
+		currentHypervisor, _, _ := strings.Cut(vm.HypervisorHostname, ".")
+		if currentHypervisor != eviction.Spec.Hypervisor {
+			// It has left this host. Confirm a pending resize first, otherwise
+			// consider it done and drop it from the outstanding set.
+			if vm.Status == "VERIFY_RESIZE" {
+				log.Info("confirm-resize")
+				err := servers.ConfirmResize(vmCtx, r.computeClient, vm.ID).ExtractErr()
+				if err != nil && !r.removeGone(eviction, uuid, err) {
+					// Retry confirm on the next pass.
+					errs = append(errs, err)
+				}
+				// Whether confirmed now or gone, treat as busy this pass so we
+				// re-check it next time before declaring completion.
+				inFlight++
+				continue
+			}
+
+			log.Info("migrated")
+			eviction.Status.OutstandingInstances = removeInstance(eviction.Status.OutstandingInstances, uuid)
+			r.setMigrationSucceeded(eviction, fmt.Sprintf("Migration of instance %s finished", vm.ID))
+			continue
+		}
+
+		if vm.TaskState == "deleting" {
+			// Just wait for it to disappear; deprioritize and count as busy so
+			// we don't spend a fresh slot on it.
+			eviction.Status.OutstandingInstances = deprioritize(eviction.Status.OutstandingInstances, uuid)
+			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeMigration,
+				Status:  metav1.ConditionFalse,
+				Message: fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID),
+				Reason:  kvmv1.ConditionReasonFailed,
+			})
+			inFlight++
+			continue
+		}
+
+		// Otherwise it is a candidate to start migrating this pass. Decide the
+		// migration mode now from the state we already fetched.
+		candidates = append(candidates, candidate{
+			id:   vm.ID,
+			live: vm.Status == "ACTIVE" || vm.PowerState == 1,
+		})
+	}
+
+	// Start fresh migrations until we hit the concurrency limit.
+	for _, c := range candidates {
+		if inFlight+started >= limit {
+			break
+		}
+		log := baseLog.WithValues("server", c.id)
+		migrateCtx := logger.IntoContext(ctx, log)
+
+		var migErr error
+		if c.live {
+			log.Info("trigger live-migration")
+			migErr = r.liveMigrate(migrateCtx, c.id, eviction)
+		} else {
+			log.Info("trigger cold-migration")
+			migErr = r.coldMigrate(migrateCtx, c.id, eviction)
+		}
+		if migErr != nil {
+			if r.removeGone(eviction, c.id, migErr) {
+				continue
+			}
+			errs = append(errs, migErr)
+			continue
+		}
+		started++
+	}
+
+	// Persisting the status is the only genuinely fatal error here: if it fails
+	// we must return it (with no result) so controller-runtime retries. Per-VM
+	// problems (ERROR-state instances, failed migrate triggers, transient Gets)
+	// are expected and recoverable - they are recorded on the MigratingInstance
+	// condition and retried via RequeueAfter, so returning them as a reconcile
+	// error would only discard our RequeueAfter (controller-runtime ignores the
+	// result when the error is non-nil) and emit a warning.
+	if err := r.updateStatus(ctx, eviction); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if joined := errors.Join(errs...); joined != nil {
+		baseLog.Info("instances need attention this pass; will retry", "err", joined.Error())
+	}
+
+	baseLog.Info("poll", "inFlight", inFlight, "started", started,
+		"outstanding", len(eviction.Status.OutstandingInstances), "limit", limit)
+
+	// Requeue while there is still work; use a short retry when nothing is
+	// actually migrating yet (e.g. all instances errored) so we don't idle.
+	requeue := global.DefaultPollTime
+	if inFlight+started == 0 && len(eviction.Status.OutstandingInstances) > 0 {
+		requeue = global.ShortRetryTime
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// setMigrationSucceeded records a successful migration (with the given message)
+// without clobbering a sticky Failed condition while other instances are still
+// outstanding - an earlier ERROR instance moved to the back of the queue means
+// the eviction is not actually clean yet. The condition is only allowed to flip
+// to Succeeded once the whole eviction completes (OutstandingInstances empty).
+func (r *EvictionReconciler) setMigrationSucceeded(eviction *kvmv1.Eviction, msg string) {
+	prior := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeMigration)
+	stickyFailure := len(eviction.Status.OutstandingInstances) > 0 && prior != nil &&
+		prior.Status == metav1.ConditionFalse &&
+		prior.Reason == kvmv1.ConditionReasonFailed
+	if stickyFailure {
+		return
 	}
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
 		Type:    kvmv1.ConditionTypeMigration,
 		Status:  metav1.ConditionFalse,
-		Message: fmt.Sprintf("Instance %s is gone", uuid),
+		Message: msg,
 		Reason:  kvmv1.ConditionReasonSucceeded,
 	})
-	return r.updateStatus(ctx, eviction)
-}
-
-func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Eviction) (ctrl.Result, error) {
-	uuid := peekInstance(eviction.Status.OutstandingInstances)
-	if uuid == "" {
-		return ctrl.Result{}, nil
-	}
-	log := logger.FromContext(ctx).WithName("Evict").WithValues("server", uuid)
-	ctx = logger.IntoContext(ctx, log)
-
-	res := servers.Get(ctx, r.computeClient, uuid)
-	vm, err := res.Extract()
-
-	if err != nil {
-		if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
-			return ctrl.Result{}, err2
-		} else {
-			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
-		}
-	}
-
-	log = log.WithValues("server_status", vm.Status)
-	ctx = logger.IntoContext(ctx, log)
-
-	// First, check the transient statuses
-	switch vm.Status {
-	case "MIGRATING", "RESIZE":
-		// wait for the migration to finish
-		return ctrl.Result{RequeueAfter: defaultPollTime}, nil
-	case "ERROR":
-		// Needs manual intervention (or another operator fixes it)
-		// put it at the end of the list (beginning of array)
-		eviction.Status.OutstandingInstances = moveToBack(eviction.Status.OutstandingInstances)
-		log.Info("error", "faultMessage", vm.Fault.Message)
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeMigration,
-			Status:  metav1.ConditionFalse,
-			Message: fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message),
-			Reason:  kvmv1.ConditionReasonFailed,
-		})
-
-		return ctrl.Result{}, errors.Join(fmt.Errorf("error migrating instance %v", uuid),
-			r.updateStatus(ctx, eviction))
-	}
-
-	currentHypervisor, _, _ := strings.Cut(vm.HypervisorHostname, ".")
-
-	if currentHypervisor != eviction.Spec.Hypervisor {
-		log.Info("migrated")
-		// Don't overwrite a sticky Failed migration condition with Succeeded
-		// while there are still other outstanding VMs - an earlier ERROR VM
-		// has been moved to the back of the queue and the eviction is not
-		// actually clean. The condition is reset only when the whole
-		// eviction completes (OutstandingInstances becomes empty).
-		remaining, _ := popInstance(eviction.Status.OutstandingInstances)
-		prior := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeMigration)
-		stickyFailure := len(remaining) > 0 && prior != nil &&
-			prior.Status == metav1.ConditionFalse &&
-			prior.Reason == kvmv1.ConditionReasonFailed
-		if !stickyFailure {
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("Migration of instance %s finished", vm.ID),
-				Reason:  kvmv1.ConditionReasonSucceeded,
-			})
-		}
-
-		// So, it is already off this one, do we need to verify it?
-		if vm.Status == "VERIFY_RESIZE" {
-			err := servers.ConfirmResize(ctx, r.computeClient, vm.ID).ExtractErr()
-			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
-				// Retry confirm in next reconciliation
-				return ctrl.Result{}, err2
-			} else {
-				// handled not found without errors
-				return ctrl.Result{RequeueAfter: shortRetryTime}, nil
-			}
-		}
-
-		// All done
-		eviction.Status.OutstandingInstances, _ = popInstance(eviction.Status.OutstandingInstances)
-		return ctrl.Result{}, r.updateStatus(ctx, eviction)
-	}
-
-	if vm.TaskState == "deleting" { //nolint:gocritic
-		// We just have to wait for it to be gone. Try the next one.
-		eviction.Status.OutstandingInstances = moveToBack(eviction.Status.OutstandingInstances)
-
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeMigration,
-			Status:  metav1.ConditionFalse,
-			Message: fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID),
-			Reason:  kvmv1.ConditionReasonFailed,
-		})
-		if err := r.updateStatus(ctx, eviction); err != nil {
-			return ctrl.Result{}, fmt.Errorf("could not update status due to %w", err)
-		}
-		return ctrl.Result{RequeueAfter: defaultPollTime}, nil
-	} else if vm.Status == "ACTIVE" || vm.PowerState == 1 {
-		log.Info("trigger live-migration")
-		if err := r.liveMigrate(ctx, vm.ID, eviction); err != nil {
-			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
-		}
-	} else {
-		log.Info("trigger cold-migration")
-		if err := r.coldMigrate(ctx, vm.ID, eviction); err != nil {
-			if err2 := r.handleNotFound(ctx, eviction, err); err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{RequeueAfter: shortRetryTime}, nil
-		}
-	}
-
-	// Triggered a migration, give it a generous time to start, so we do not
-	// see the old state because the migration didn't start
-	log.Info("poll")
-	return ctrl.Result{RequeueAfter: defaultPollTime}, nil
 }
 
 func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {

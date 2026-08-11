@@ -17,11 +17,16 @@ limitations under the License.
 
 package controller
 
+import "github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
+
 // This should contain constants shared between controllers
 const (
 	labelHypervisor   = "nova.openstack.cloud.sap/virt-driver"
 	testAggregateName = "tenant_filter_tests"
 
+	// defaultPollTime is the default requeue interval used while waiting for a
+	// slow external state transition to settle.
+	defaultPollTime = global.DefaultPollTime
 	// taintKeyOffboarding is used as a NoExecute taint. nova-compute and
 	// neutron agent pods do not tolerate it (the kvm-node-agent and the
 	// signalling pod do), so applying it forces those agents off the node.
