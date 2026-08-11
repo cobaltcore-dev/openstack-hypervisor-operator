@@ -34,3 +34,6 @@ charts/**/*.tgz
 
 # Claude Code local settings
 .claude/
+
+# Serena MCP
+.serena/

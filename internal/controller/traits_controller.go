@@ -22,7 +22,6 @@ import (
 	"errors"
 	"slices"
 	"strings"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,7 +65,7 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// ensure hypervisorID is set
 	if hv.Status.HypervisorID == "" {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: defaultPollTime}, nil
 	}
 
 	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
