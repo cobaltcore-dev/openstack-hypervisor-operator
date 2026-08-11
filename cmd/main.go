@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	gruntime "runtime"
+	"strconv"
 	"strings"
 
 	"github.com/sapcc/go-api-declarations/bininfo"
@@ -52,6 +53,7 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/ready"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/logger"
@@ -104,6 +106,14 @@ func main() {
 	flag.StringVar(&agentNamespacesFlag, "agent-namespaces", "",
 		"Comma-separated list of namespaces to search for agent pods (nova-compute, neutron) during offboarding.")
 
+	flag.IntVar(&global.EvictionConcurrency, "eviction-concurrency", 1,
+		"Default maximum number of VM migrations to run concurrently while draining a hypervisor. Defaults to 1 (serial).")
+
+	var evictionTraitConcurrencyFlag string
+	flag.StringVar(&evictionTraitConcurrencyFlag, "eviction-trait-concurrency", "",
+		"Comma-separated TRAIT=N overrides for per-host migration concurrency, e.g. "+
+			"CUSTOM_HANA_EXCLUSIVE_HOST=1,CUSTOM_FOO=2. The lowest matching trait limit wins.")
+
 	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
 		"Name of the certificate issuer.")
@@ -148,6 +158,27 @@ func main() {
 	if len(global.AgentNamespaces) == 0 {
 		setupLog.Error(errors.New("--agent-namespaces is required"), "invalid configuration")
 		os.Exit(1)
+	}
+
+	if global.EvictionConcurrency < 1 {
+		setupLog.Error(errors.New("--eviction-concurrency must be >= 1"), "invalid configuration")
+		os.Exit(1)
+	}
+
+	for entry := range strings.SplitSeq(evictionTraitConcurrencyFlag, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		trait, value, ok := strings.Cut(entry, "=")
+		trait = strings.TrimSpace(trait)
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if !ok || trait == "" || err != nil || n < 1 {
+			setupLog.Error(errors.New("invalid --eviction-trait-concurrency entry: "+entry),
+				"invalid configuration", "expected", "TRAIT=N with N >= 1")
+			os.Exit(1)
+		}
+		global.EvictionTraitConcurrency[trait] = n
 	}
 
 	if certificateIssuerName == "" {
@@ -297,7 +328,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.EvictionReconciler{
+	if err = (&eviction.EvictionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
