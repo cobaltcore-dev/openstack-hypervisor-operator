@@ -18,6 +18,7 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -34,6 +35,38 @@ import (
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
+
+// findManagedFieldOwnerOfCondition returns the field-manager name that owns
+// the status.conditions entry keyed by the given condition type in the
+// object's managedFields. It only inspects entries for the "status"
+// subresource. Returns the empty string if no manager owns that key.
+func findManagedFieldOwnerOfCondition(hv *kvmv1.Hypervisor, condType string) string {
+	for _, entry := range hv.ManagedFields {
+		if entry.Subresource != "status" {
+			continue
+		}
+		if entry.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields); err != nil {
+			continue
+		}
+		status, ok := fields["f:status"].(map[string]any)
+		if !ok {
+			continue
+		}
+		conditions, ok := status["f:conditions"].(map[string]any)
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf(`k:{"type":%q}`, condType)
+		if _, ok := conditions[key]; ok {
+			return entry.Manager
+		}
+	}
+	return ""
+}
 
 var _ = Describe("HypervisorMaintenanceController", func() {
 	var (
@@ -342,6 +375,23 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 									HaveField("Type", kvmv1.ConditionTypeEvicting),
 									HaveField("Status", metav1.ConditionTrue),
 								)))
+						})
+
+						// The maintenance controller's status patch at
+						// hypervisor_maintenance_controller.go:91 must claim
+						// ownership of the Evicting condition via the
+						// HypervisorMaintenance field manager so other
+						// controllers do not overwrite it silently.
+						It("should own the Evicting condition via managedFields", func(ctx SpecContext) {
+							updated := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+
+							Expect(meta.FindStatusCondition(
+								updated.Status.Conditions, kvmv1.ConditionTypeEvicting,
+							)).NotTo(BeNil(), "precondition: Evicting condition must be set")
+
+							Expect(findManagedFieldOwnerOfCondition(updated, kvmv1.ConditionTypeEvicting)).
+								To(Equal(HypervisorMaintenanceControllerName))
 						})
 					})
 
