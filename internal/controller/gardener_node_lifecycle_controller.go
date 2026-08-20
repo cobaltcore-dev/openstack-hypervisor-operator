@@ -33,13 +33,9 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	policyv1ac "k8s.io/client-go/applyconfigurations/policy/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -52,14 +48,13 @@ type GardenerNodeLifecycleController struct {
 
 const (
 	labelCriticalComponent    = "node.gardener.cloud/critical-component"
-	valueReasonTerminating    = "terminating"
 	MaintenanceControllerName = "maintenance"
 )
 
 // The counter-side in gardener is here:
 // https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L646
 
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update;watch
+// +kubebuilder:rbac:groups=kvm.cloud.sap,resources=hypervisors,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=create;delete;get;list;patch;update;watch
 
@@ -67,19 +62,9 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	log := logger.FromContext(ctx).WithName(req.Name)
 	ctx = logger.IntoContext(ctx, log)
 
-	node := &corev1.Node{}
-	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
-		// ignore not found errors, could be deleted
-		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
-	}
-
 	hv := &kvmv1.Hypervisor{}
-	if err := r.Get(ctx, k8sclient.ObjectKey{Name: req.Name}, hv); err != nil {
-		if k8sclient.IgnoreNotFound(err) != nil {
-			return ctrl.Result{}, err
-		}
-		// Hypervisor not found, nothing to do
-		return ctrl.Result{}, nil
+	if err := r.Get(ctx, req.NamespacedName, hv); err != nil {
+		return ctrl.Result{}, k8sclient.IgnoreNotFound(err)
 	}
 
 	if !hv.Spec.LifecycleEnabled {
@@ -91,27 +76,35 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 	// to avoid racing with live-migration.
 	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination &&
 		meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
-		patched, err := r.ensureOffboardingTaint(ctx, node)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to ensure offboarding taint: %w", err)
-		}
-		if patched {
-			return ctrl.Result{}, nil
+		node := &corev1.Node{}
+		if err := r.Get(ctx, k8sclient.ObjectKey{Name: hv.Name}, node); err != nil {
+			if k8sclient.IgnoreNotFound(err) != nil {
+				return ctrl.Result{}, err
+			}
+			// Node already gone, nothing to taint
+		} else {
+			patched, err := r.ensureOffboardingTaint(ctx, node)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to ensure offboarding taint: %w", err)
+			}
+			if patched {
+				return ctrl.Result{}, nil
+			}
 		}
 	}
 
-	// We do not care about the particular value, as long as it isn't an error
-	var minAvailable int32 = 1
+	var minAvailable int32 = 0
+	if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) {
+		// Evicting condition is either not present or is true (i.e. ongoing)
+		minAvailable = 1 // Do not allow draining of the pod
+	}
 
-	// Onboarding is not in progress anymore, i.e. the host is onboarded
-	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
-	// Evicting is not in progress anymore, i.e. the host is empty
 	offboarded := meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
-
 	if offboarded {
 		minAvailable = 0
 
-		if onboardingCompleted && isTerminating(node) {
+		onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+		if onboardingCompleted && hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
 			// Wait for HypervisorInstanceHa controller to disable HA
 			if !meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
 				return ctrl.Result{}, nil // Will be reconciled again when condition changes
@@ -119,11 +112,12 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 		}
 	}
 
-	if err := r.ensureBlockingPodDisruptionBudget(ctx, node, minAvailable); err != nil {
+	if err := r.ensureBlockingPodDisruptionBudget(ctx, hv, minAvailable); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureSignallingDeployment(ctx, node, minAvailable, onboardingCompleted); err != nil {
+	onboardingCompleted := meta.IsStatusConditionFalse(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	if err := r.ensureSignallingDeployment(ctx, hv, minAvailable, onboardingCompleted); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -154,17 +148,17 @@ func (r *GardenerNodeLifecycleController) ensureOffboardingTaint(ctx context.Con
 	return true, r.Patch(ctx, node, patch, k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
-func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx context.Context, node *corev1.Node, minAvailable int32) error {
-	name := nameForNode(node)
-	nodeLabels := labelsForNode(node)
-	gvk, err := apiutil.GVKForObject(node, r.Scheme)
+func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx context.Context, hypervisor *kvmv1.Hypervisor, minAvailable int32) error {
+	name := nameForHypervisor(hypervisor)
+	nodeLabels := labelsForHypervisor(hypervisor)
+	gvk, err := apiutil.GVKForObject(hypervisor, r.Scheme)
 	if err != nil {
 		return err
 	}
 
 	podDisruptionBudget := policyv1ac.PodDisruptionBudget(name, MaintenanceNamespace).
 		WithLabels(nodeLabels).
-		WithOwnerReferences(OwnerReference(node, &gvk)).
+		WithOwnerReferences(OwnerReference(hypervisor, &gvk)).
 		WithSpec(policyv1ac.PodDisruptionBudgetSpec().
 			WithMinAvailable(intstr.FromInt32(minAvailable)).
 			WithSelector(v1.LabelSelector().WithMatchLabels(nodeLabels)))
@@ -172,35 +166,19 @@ func (r *GardenerNodeLifecycleController) ensureBlockingPodDisruptionBudget(ctx 
 	return r.Apply(ctx, podDisruptionBudget, k8sclient.FieldOwner(MaintenanceControllerName))
 }
 
-func isTerminating(node *corev1.Node) bool {
-	conditions := node.Status.Conditions
-	if conditions == nil {
-		return false
-	}
-
-	// See: https://github.com/gardener/machine-controller-manager/blob/rel-v0.56/pkg/util/provider/machinecontroller/machine.go#L658-L659
-	for _, condition := range conditions {
-		if condition.Type == "Terminating" {
-			return true
-		}
-	}
-
-	return false
+func nameForHypervisor(hypervisor *kvmv1.Hypervisor) string {
+	return fmt.Sprintf("maint-%v", hypervisor.Name)
 }
 
-func nameForNode(node *corev1.Node) string {
-	return fmt.Sprintf("maint-%v", node.Name)
-}
-
-func labelsForNode(node *corev1.Node) map[string]string {
+func labelsForHypervisor(hypervisor *kvmv1.Hypervisor) map[string]string {
 	return map[string]string{
-		MaintenanceLabelKey: nameForNode(node),
+		MaintenanceLabelKey: nameForHypervisor(hypervisor),
 	}
 }
 
-func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context.Context, node *corev1.Node, scale int32, ready bool) error {
-	name := nameForNode(node)
-	labels := labelsForNode(node)
+func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context.Context, hypervisor *kvmv1.Hypervisor, scale int32, ready bool) error {
+	name := nameForHypervisor(hypervisor)
+	labels := labelsForHypervisor(hypervisor)
 
 	podLabels := maps.Clone(labels)
 	podLabels[labelCriticalComponent] = "true"
@@ -212,13 +190,13 @@ func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context
 		command = "/bin/false"
 	}
 
-	gvk, err := apiutil.GVKForObject(node, r.Scheme)
+	gvk, err := apiutil.GVKForObject(hypervisor, r.Scheme)
 	if err != nil {
 		return err
 	}
 
 	deployment := apps1ac.Deployment(name, MaintenanceNamespace).
-		WithOwnerReferences(OwnerReference(node, &gvk)).
+		WithOwnerReferences(OwnerReference(hypervisor, &gvk)).
 		WithLabels(labels).
 		WithSpec(apps1ac.DeploymentSpec().
 			WithReplicas(scale).
@@ -233,7 +211,7 @@ func (r *GardenerNodeLifecycleController) ensureSignallingDeployment(ctx context
 				WithSpec(corev1ac.PodSpec().
 					WithHostNetwork(true).
 					WithNodeSelector(map[string]string{
-						corev1.LabelHostname: node.Labels[corev1.LabelHostname],
+						corev1.LabelHostname: hypervisor.Labels[corev1.LabelHostname],
 					}).
 					WithTerminationGracePeriodSeconds(1).
 					WithTolerations(
@@ -265,48 +243,10 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 	_ = logger.FromContext(ctx)
 	r.namespace = namespace
 
-	hypervisorToNode := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &corev1.Node{})
-
-	// Maintenance=termination bumps generation; Evicting status changes do not.
-	hypervisorRelevantChange := predicate.Or(
-		predicate.GenerationChangedPredicate{},
-		evictingConditionChangedPredicate{},
-	)
-
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(MaintenanceControllerName).
-		For(&corev1.Node{}).
-		Watches(&kvmv1.Hypervisor{}, hypervisorToNode,
-			builder.WithPredicates(hypervisorRelevantChange),
-		).
+		For(&kvmv1.Hypervisor{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Complete(r)
-}
-
-// evictingConditionChangedPredicate complements GenerationChangedPredicate,
-// which ignores status-only updates.
-type evictingConditionChangedPredicate struct {
-	predicate.Funcs
-}
-
-func (evictingConditionChangedPredicate) Update(e event.UpdateEvent) bool {
-	if e.ObjectOld == nil || e.ObjectNew == nil {
-		return false
-	}
-	oldHv, ok1 := e.ObjectOld.(*kvmv1.Hypervisor)
-	newHv, ok2 := e.ObjectNew.(*kvmv1.Hypervisor)
-	if !ok1 || !ok2 {
-		return false
-	}
-	oldCond := meta.FindStatusCondition(oldHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
-	newCond := meta.FindStatusCondition(newHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
-	switch {
-	case oldCond == nil && newCond == nil:
-		return false
-	case oldCond == nil || newCond == nil:
-		return true
-	default:
-		return oldCond.Status != newCond.Status
-	}
 }
