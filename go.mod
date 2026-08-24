@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 module github.com/cobaltcore-dev/openstack-hypervisor-operator
 
-go 1.26.0
+go 1.27
 
 require (
 	github.com/gophercloud/gophercloud/v2 v2.14.0
