@@ -423,7 +423,7 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 		return errRequeue
 	}
 
-	shortHypervisorAddress := strings.SplitN(hypervisorAddress, ".", 2)[0]
+	shortHypervisorAddress, _, _ := strings.Cut(hypervisorAddress, ".")
 
 	hypervisorQuery := hypervisors.ListOpts{HypervisorHostnamePattern: &shortHypervisorAddress}
 	hypervisorPages, err := hypervisors.List(r.computeClient, hypervisorQuery).AllPages(ctx)
@@ -446,7 +446,7 @@ func (r *OnboardingController) ensureNovaProperties(ctx context.Context, hv *kvm
 	var found = false
 	var myHypervisor hypervisors.Hypervisor
 	for _, h := range hs {
-		short := strings.SplitN(h.HypervisorHostname, ".", 2)[0]
+		short, _, _ := strings.Cut(h.HypervisorHostname, ".")
 		if short == shortHypervisorAddress {
 			myHypervisor = h
 			found = true
