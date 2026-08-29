@@ -407,6 +407,364 @@ var _ = Describe("Eviction Controller", func() {
 					))
 				})
 			})
+
+			When("hypervisor has servers to evict", func() {
+				const (
+					serverId1 = "server-uuid-1"
+					serverId2 = "server-uuid-2"
+				)
+
+				BeforeEach(func(ctx SpecContext) {
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/{hypervisor_id}", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprintf(w, `{
+							"hypervisor": {
+								"id": "test-hv-id",
+								"hypervisor_version": 1000,
+								"memory_mb_used": 2048,
+								"servers": [
+									{"name": "server1", "uuid": "%s"},
+									{"name": "server2", "uuid": "%s"}
+								],
+								"service": {"id": "test-id"},
+								"status": "disabled"
+							}
+						}`, serverId1, serverId2)
+						Expect(err).To(Succeed())
+					})
+				})
+
+				When("server is ACTIVE and live migration succeeds", func() {
+					BeforeEach(func(ctx SpecContext) {
+						callCount := 0
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							callCount++
+							hostname := hypervisorName
+							if callCount > 1 {
+								hostname = "different-hypervisor"
+							}
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "ACTIVE",
+									"power_state": 1,
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+								}
+							}`, r.PathValue("server_id"), hostname)
+							Expect(err).To(Succeed())
+						})
+						fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("X-Openstack-Request-Id", "test-req-id")
+							w.WriteHeader(http.StatusAccepted)
+						})
+					})
+
+					It("should successfully live migrate", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+					})
+				})
+
+				When("server is in ERROR state", func() {
+					BeforeEach(func(ctx SpecContext) {
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "ERROR",
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com",
+									"fault": {"message": "Migration failed"}
+								}
+							}`, r.PathValue("server_id"), hypervisorName)
+							Expect(err).To(Succeed())
+						})
+					})
+
+					It("should move ERROR server to end of queue", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).To(HaveOccurred())
+					})
+				})
+
+				When("server is MIGRATING", func() {
+					BeforeEach(func(ctx SpecContext) {
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "MIGRATING",
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+								}
+							}`, r.PathValue("server_id"), hypervisorName)
+							Expect(err).To(Succeed())
+						})
+					})
+
+					It("should wait for migration", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(defaultPollTime))
+					})
+				})
+
+				When("server needs cold migration", func() {
+					BeforeEach(func(ctx SpecContext) {
+						callCount := 0
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							callCount++
+							hostname := hypervisorName
+							if callCount > 1 {
+								hostname = "different-hypervisor"
+							}
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "SHUTOFF",
+									"power_state": 0,
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+								}
+							}`, r.PathValue("server_id"), hostname)
+							Expect(err).To(Succeed())
+						})
+						fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("X-Openstack-Request-Id", "test-req-id")
+							w.WriteHeader(http.StatusAccepted)
+						})
+					})
+
+					It("should cold migrate", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+					})
+				})
+
+				When("server is being deleted", func() {
+					BeforeEach(func(ctx SpecContext) {
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "ACTIVE",
+									"OS-EXT-STS:task_state": "deleting",
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+								}
+							}`, r.PathValue("server_id"), hypervisorName)
+							Expect(err).To(Succeed())
+						})
+					})
+
+					It("should skip and move to queue end", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+					})
+				})
+
+				When("server is not found", func() {
+					BeforeEach(func(ctx SpecContext) {
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.WriteHeader(http.StatusNotFound)
+						})
+					})
+
+					It("should handle not found", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(shortRetryTime))
+					})
+				})
+
+				When("live migration fails", func() {
+					BeforeEach(func(ctx SpecContext) {
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							_, err := fmt.Fprintf(w, `{
+								"server": {
+									"id": "%s",
+									"status": "ACTIVE",
+									"power_state": 1,
+									"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+								}
+							}`, r.PathValue("server_id"), hypervisorName)
+							Expect(err).To(Succeed())
+						})
+						fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+							w.WriteHeader(http.StatusBadRequest)
+						})
+					})
+
+					It("should return error", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).To(HaveOccurred())
+					})
+				})
+
+				When("server in VERIFY_RESIZE", func() {
+					BeforeEach(func(ctx SpecContext) {
+						callCount := 0
+						fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							callCount++
+							if callCount == 1 {
+								_, err := fmt.Fprintf(w, `{
+									"server": {
+										"id": "%s",
+										"status": "ACTIVE",
+										"power_state": 1,
+										"OS-EXT-SRV-ATTR:hypervisor_hostname": "%s.example.com"
+									}
+								}`, r.PathValue("server_id"), hypervisorName)
+								Expect(err).To(Succeed())
+							} else {
+								_, err := fmt.Fprintf(w, `{
+									"server": {
+										"id": "%s",
+										"status": "VERIFY_RESIZE",
+										"OS-EXT-SRV-ATTR:hypervisor_hostname": "other.example.com"
+									}
+								}`, r.PathValue("server_id"))
+								Expect(err).To(Succeed())
+							}
+						})
+						fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+							w.Header().Add("X-Openstack-Request-Id", "test-req-id")
+							w.WriteHeader(http.StatusAccepted)
+						})
+					})
+
+					It("should confirm resize", func(ctx SpecContext) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(shortRetryTime))
+					})
+				})
+			})
+		})
+
+		Describe("never-onboarded hypervisor", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Clearing hypervisor IDs to simulate never-onboarded state")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisorName}, hypervisor)).To(Succeed())
+				hypervisor.Status.HypervisorID = ""
+				hypervisor.Status.ServiceID = ""
+				hypervisor.Status.Conditions = nil
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+				// Mock handler for the case when HypervisorID is empty string
+				fakeServer.Mux.HandleFunc("GET /os-hypervisors/", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNotFound)
+				})
+			})
+
+			It("should succeed without making actual hypervisor call", func(ctx SpecContext) {
+				// First reconcile sets initial condition
+				_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+				Expect(err).NotTo(HaveOccurred())
+				// Second reconcile: since hypervisor has no IDs, expectHypervisor=false
+				// API call with empty ID returns 404, which is handled as expected
+				_, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+				Expect(err).NotTo(HaveOccurred())
+
+				resource := &kvmv1.Eviction{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).NotTo(HaveOccurred())
+				Expect(resource.Status.Conditions).To(ContainElement(
+					SatisfyAll(
+						HaveField("Type", kvmv1.ConditionTypeEvicting),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+						HaveField("Message", ContainSubstring("expected case of no hypervisor")),
+					),
+				))
+			})
+		})
+
+		Describe("preflight failures", func() {
+			BeforeEach(func(ctx SpecContext) {
+				By("Removing HypervisorDisabled condition to simulate preflight failure scenario")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisorName}, hypervisor)).To(Succeed())
+				meta.RemoveStatusCondition(&hypervisor.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			When("hypervisor not disabled", func() {
+				It("should set preflight failed and requeue", func(ctx SpecContext) {
+					// First reconcile sets initial "Evicting" condition
+					result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+
+					// Second reconcile should fail preflight check (condition set) and update status
+					result, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+
+					resource := &kvmv1.Eviction{}
+					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).NotTo(HaveOccurred())
+					Expect(resource.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypePreflight),
+							HaveField("Status", metav1.ConditionFalse),
+							HaveField("Reason", kvmv1.ConditionReasonFailed),
+							HaveField("Message", "hypervisor not disabled"),
+						),
+					))
+
+					// Third reconcile should requeue without updating (condition already set)
+					result, err = evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result.RequeueAfter).To(Equal(defaultPollTime))
+				})
+			})
 		})
 
 		Context("Failure Modes", func() {
