@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package eviction
 
 import (
 	"fmt"
@@ -33,83 +33,75 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 )
 
 var _ = Describe("Instance slice helpers", func() {
-	Describe("peekInstance", func() {
-		It("returns empty string for empty slice", func() {
-			Expect(peekInstance([]string{})).To(Equal(""))
+	Describe("removeInstance", func() {
+		It("returns unchanged slice for empty slice", func() {
+			Expect(removeInstance([]string{}, "a")).To(BeEmpty())
 		})
 
-		It("returns empty string for nil slice", func() {
-			Expect(peekInstance(nil)).To(Equal(""))
+		It("returns nil for nil slice", func() {
+			Expect(removeInstance(nil, "a")).To(BeNil())
 		})
 
-		It("returns the last element", func() {
-			Expect(peekInstance([]string{"a", "b", "c"})).To(Equal("c"))
+		It("removes the matching element preserving order", func() {
+			Expect(removeInstance([]string{"a", "b", "c"}, "b")).To(Equal([]string{"a", "c"}))
 		})
 
-		It("returns the only element for single-element slice", func() {
-			Expect(peekInstance([]string{"only"})).To(Equal("only"))
+		It("removes the first element", func() {
+			Expect(removeInstance([]string{"a", "b", "c"}, "a")).To(Equal([]string{"b", "c"}))
 		})
 
-		It("does not modify the slice", func() {
+		It("removes the last element", func() {
+			Expect(removeInstance([]string{"a", "b", "c"}, "c")).To(Equal([]string{"a", "b"}))
+		})
+
+		It("removes only the first occurrence", func() {
+			Expect(removeInstance([]string{"a", "b", "a"}, "a")).To(Equal([]string{"b", "a"}))
+		})
+
+		It("returns the slice unchanged when the uuid is absent", func() {
+			Expect(removeInstance([]string{"a", "b"}, "z")).To(Equal([]string{"a", "b"}))
+		})
+
+		It("does not mutate the input backing array", func() {
 			s := []string{"a", "b", "c"}
-			peekInstance(s)
+			_ = removeInstance(s, "b")
 			Expect(s).To(Equal([]string{"a", "b", "c"}))
 		})
 	})
 
-	Describe("popInstance", func() {
-		It("returns empty string and unchanged slice for empty slice", func() {
-			s, uuid := popInstance([]string{})
-			Expect(uuid).To(Equal(""))
-			Expect(s).To(BeEmpty())
-		})
-
-		It("returns empty string and unchanged slice for nil slice", func() {
-			s, uuid := popInstance(nil)
-			Expect(uuid).To(Equal(""))
-			Expect(s).To(BeNil())
-		})
-
-		It("removes and returns the last element", func() {
-			s, uuid := popInstance([]string{"a", "b", "c"})
-			Expect(uuid).To(Equal("c"))
-			Expect(s).To(Equal([]string{"a", "b"}))
-		})
-
-		It("returns empty slice when popping last element", func() {
-			s, uuid := popInstance([]string{"only"})
-			Expect(uuid).To(Equal("only"))
-			Expect(s).To(BeEmpty())
-		})
-	})
-
-	Describe("moveToBack", func() {
+	Describe("deprioritize", func() {
 		It("returns unchanged slice for empty slice", func() {
-			s := moveToBack([]string{})
-			Expect(s).To(BeEmpty())
+			Expect(deprioritize([]string{}, "a")).To(BeEmpty())
 		})
 
-		It("returns unchanged slice for nil slice", func() {
-			s := moveToBack(nil)
-			Expect(s).To(BeNil())
+		It("returns nil for nil slice", func() {
+			Expect(deprioritize(nil, "a")).To(BeNil())
 		})
 
 		It("returns unchanged slice for single-element slice", func() {
-			s := moveToBack([]string{"only"})
-			Expect(s).To(Equal([]string{"only"}))
+			Expect(deprioritize([]string{"only"}, "only")).To(Equal([]string{"only"}))
 		})
 
-		It("moves last element to front for two elements", func() {
-			s := moveToBack([]string{"a", "b"})
-			Expect(s).To(Equal([]string{"b", "a"}))
+		It("is a no-op when the uuid is already at the back (index 0)", func() {
+			Expect(deprioritize([]string{"a", "b", "c"}, "a")).To(Equal([]string{"a", "b", "c"}))
 		})
 
-		It("moves last element to front for multiple elements", func() {
-			s := moveToBack([]string{"a", "b", "c", "d"})
-			Expect(s).To(Equal([]string{"d", "a", "b", "c"}))
+		It("is a no-op when the uuid is absent", func() {
+			Expect(deprioritize([]string{"a", "b", "c"}, "z")).To(Equal([]string{"a", "b", "c"}))
+		})
+
+		It("moves the tail (head-of-queue) element to the back", func() {
+			// Queue is processed from the tail; "c" is next, deprioritizing it
+			// puts it at index 0 (the back).
+			Expect(deprioritize([]string{"a", "b", "c"}, "c")).To(Equal([]string{"c", "a", "b"}))
+		})
+
+		It("moves a specific middle element to the back", func() {
+			Expect(deprioritize([]string{"a", "b", "c", "d"}, "c")).To(Equal([]string{"c", "a", "b", "d"}))
 		})
 	})
 })
@@ -466,12 +458,12 @@ var _ = Describe("Eviction Controller", func() {
 				liveMigrateCalls = map[string]int{}
 
 				By("Seeding the eviction status with a list of VMs to evict")
-				// OutstandingInstances is processed from the END (peekInstance returns
-				// last). With [good-1, error-1, good-2], processing order is:
-				//   1) good-2 (last) - migrate, then drop
-				//   2) error-1 (now last) - skipped via moveToBack
-				//   3) good-1 - migrate, then drop
-				//   4) error-1 (alone) - keeps erroring
+				// With the default concurrency of 1, each reconcile pass scans the
+				// whole outstanding set but starts at most one new migration. The
+				// ERROR VM is deprioritized (moved to the back of the queue) and
+				// never migrated, while
+				// the two healthy VMs migrate one after another and are removed as
+				// soon as they report a different host.
 				eviction := &kvmv1.Eviction{}
 				Expect(k8sClient.Get(ctx, typeNamespacedName, eviction)).To(Succeed())
 				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
@@ -547,11 +539,11 @@ var _ = Describe("Eviction Controller", func() {
 				By("Running reconciliations until only the errored VM remains")
 				const maxLoops = 20
 				for i := range maxLoops {
-					// Tolerate errors here: when the controller hits the ERROR
-					// VM it returns an error (joined with the status update).
-					// That is part of the pattern under test, not a test failure.
+					// Reconcile no longer returns an error for an ERROR-state VM
+					// (it's recorded on the condition and retried via RequeueAfter),
+					// so no error is expected here.
 					_, reconcileErr := evictionReconciler.Reconcile(ctx, reconcileRequest)
-					_ = reconcileErr // expected on ERROR-VM iterations
+					Expect(reconcileErr).NotTo(HaveOccurred())
 					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
 
 					// Once both healthy VMs have been migrated and removed, we are
@@ -588,15 +580,268 @@ var _ = Describe("Eviction Controller", func() {
 					HaveField("Reason", kvmv1.ConditionReasonSucceeded),
 				)))
 
-				By("Subsequent reconciliations keep retrying the errored VM (and surfacing the error)")
-				_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
-				// The controller returns an error when it encounters a VM in ERROR
-				// state. The reconcile error should mention the errored UUID.
-				if err != nil {
-					Expect(err.Error()).To(ContainSubstring("error-1"))
-				}
+				By("Subsequent reconciliations keep retrying the errored VM without surfacing a reconcile error")
+				result, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+				// An ERROR-state instance is an expected, recoverable condition:
+				// the controller records it on the MigratingInstance condition and
+				// retries via RequeueAfter, rather than returning a reconcile error
+				// (which would discard the RequeueAfter and spam warnings).
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
 				Expect(resource.Status.OutstandingInstances).To(Equal([]string{"error-1"}))
+				By("The failure remains visible on the MigratingInstance condition")
+				Expect(resource.Status.Conditions).To(ContainElement(SatisfyAll(
+					HaveField("Type", kvmv1.ConditionTypeMigration),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", kvmv1.ConditionReasonFailed),
+					HaveField("Message", ContainSubstring("error-1")),
+				)))
+			})
+		})
+
+		Context("Parallel Eviction", func() {
+			const serverTpl = `{
+    "server": {
+        "id": "%[1]s",
+        "status": "%[2]s",
+        "OS-EXT-SRV-ATTR:hypervisor_hostname": "%[3]s",
+        "OS-EXT-STS:task_state": "",
+        "OS-EXT-STS:power_state": 1
+    }
+}`
+
+			var migrateCalls map[string]int
+			// seedVMs seeds the eviction with n ACTIVE VMs already past preflight,
+			// and installs the per-VM mock. A VM that has received a migrate call
+			// reports a different host on the next GET, so it leaves the queue.
+			seedVMs := func(ctx SpecContext, n int) []string {
+				migrateCalls = map[string]int{}
+				ids := make([]string, n)
+				for i := range ids {
+					ids[i] = fmt.Sprintf("vm-%d", i)
+				}
+
+				eviction := &kvmv1.Eviction{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, eviction)).To(Succeed())
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type: kvmv1.ConditionTypeEvicting, Status: metav1.ConditionTrue,
+					Message: "Running", Reason: kvmv1.ConditionReasonRunning,
+				})
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type: kvmv1.ConditionTypePreflight, Status: metav1.ConditionTrue,
+					Message: "preflight passed", Reason: kvmv1.ConditionReasonSucceeded,
+				})
+				eviction.Status.HypervisorServiceId = serviceId
+				eviction.Status.OutstandingInstances = append([]string(nil), ids...)
+				Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+
+				fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+					serverID := r.PathValue("server_id")
+					hvHost := hypervisorName + ".example.local"
+					if migrateCalls[serverID] > 0 {
+						hvHost = "other-host.example.local"
+					}
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprintf(w, serverTpl, serverID, "ACTIVE", hvHost)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+					migrateCalls[r.PathValue("server_id")]++
+					w.WriteHeader(http.StatusAccepted)
+				})
+				return ids
+			}
+
+			// inFlight counts VMs that have been told to migrate but have not yet
+			// been observed leaving the host (i.e. still outstanding).
+			inFlight := func(outstanding []string) int {
+				n := 0
+				for _, id := range outstanding {
+					if migrateCalls[id] > 0 {
+						n++
+					}
+				}
+				return n
+			}
+
+			It("starts at most `limit` migrations per pass and never exceeds it in flight", func(ctx SpecContext) {
+				orig := global.EvictionConcurrency
+				global.EvictionConcurrency = 3
+				DeferCleanup(func() { global.EvictionConcurrency = orig })
+
+				seedVMs(ctx, 5)
+				resource := &kvmv1.Eviction{}
+
+				By("First pass triggers exactly the limit (3) migrations")
+				_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+				Expect(err).NotTo(HaveOccurred())
+				started := 0
+				for _, c := range migrateCalls {
+					started += c
+				}
+				Expect(started).To(Equal(3), "should start exactly limit migrations in the first pass")
+
+				By("Draining to completion, never exceeding the limit in flight")
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				for range 20 {
+					if len(resource.Status.OutstandingInstances) == 0 {
+						break
+					}
+					Expect(inFlight(resource.Status.OutstandingInstances)).To(BeNumerically("<=", 3))
+					_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				}
+
+				Expect(resource.Status.OutstandingInstances).To(BeEmpty())
+				By("Every VM was migrated exactly once")
+				for id, c := range migrateCalls {
+					Expect(c).To(Equal(1), "VM %s migrated exactly once", id)
+				}
+				Expect(migrateCalls).To(HaveLen(5))
+			})
+
+			It("does not exceed the limit when a triggered migration has not yet flipped to MIGRATING status", func(ctx SpecContext) {
+				// Regression: nova reports a freshly-triggered instance as ACTIVE
+				// with task_state "migrating" for a while before Status becomes
+				// MIGRATING. If those aren't counted as in-flight, the loop keeps
+				// triggering and exceeds the concurrency limit.
+				orig := global.EvictionConcurrency
+				global.EvictionConcurrency = 2
+				DeferCleanup(func() { global.EvictionConcurrency = orig })
+
+				const tmpl = `{
+    "server": {
+        "id": "%[1]s",
+        "status": "%[2]s",
+        "OS-EXT-SRV-ATTR:hypervisor_hostname": "%[3]s",
+        "OS-EXT-STS:task_state": "%[4]s",
+        "OS-EXT-STS:power_state": 1
+    }
+}`
+				calls := map[string]int{}
+				// polls-since-trigger per VM; a migrated VM lingers ACTIVE with
+				// task_state=migrating for 2 polls (as nova does), then leaves.
+				pollsSince := map[string]int{}
+
+				ids := make([]string, 5)
+				for i := range ids {
+					ids[i] = fmt.Sprintf("tsvm-%d", i)
+				}
+				eviction := &kvmv1.Eviction{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, eviction)).To(Succeed())
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type: kvmv1.ConditionTypeEvicting, Status: metav1.ConditionTrue,
+					Message: "Running", Reason: kvmv1.ConditionReasonRunning,
+				})
+				meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+					Type: kvmv1.ConditionTypePreflight, Status: metav1.ConditionTrue,
+					Message: "preflight passed", Reason: kvmv1.ConditionReasonSucceeded,
+				})
+				eviction.Status.HypervisorServiceId = serviceId
+				eviction.Status.OutstandingInstances = append([]string(nil), ids...)
+				Expect(k8sClient.Status().Update(ctx, eviction)).To(Succeed())
+
+				fakeServer.Mux.HandleFunc("GET /servers/{server_id}", func(w http.ResponseWriter, r *http.Request) {
+					serverID := r.PathValue("server_id")
+					host := hypervisorName + ".example.local"
+					status, task := "ACTIVE", ""
+					if calls[serverID] > 0 {
+						pollsSince[serverID]++
+						if pollsSince[serverID] <= 2 {
+							// Still on the source host, ACTIVE, task_state migrating -
+							// the window that used to be miscounted as a free slot.
+							task = "migrating"
+						} else {
+							host = "other-host.example.local" // finally left
+						}
+					}
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprintf(w, tmpl, serverID, status, host, task)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				fakeServer.Mux.HandleFunc("POST /servers/{server_id}/action", func(w http.ResponseWriter, r *http.Request) {
+					calls[r.PathValue("server_id")]++
+					w.WriteHeader(http.StatusAccepted)
+				})
+
+				resource := &kvmv1.Eviction{}
+				concurrentlyTriggered := func() int {
+					// VMs triggered but not yet observed off-host.
+					n := 0
+					for id, c := range calls {
+						if c > 0 && pollsSince[id] <= 2 {
+							n++
+						}
+					}
+					return n
+				}
+
+				By("Draining, asserting no more than `limit` are ever in flight")
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				for range 40 {
+					if len(resource.Status.OutstandingInstances) == 0 {
+						break
+					}
+					_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(concurrentlyTriggered()).To(BeNumerically("<=", 2),
+						"in-flight migrations must never exceed the limit")
+					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				}
+
+				Expect(resource.Status.OutstandingInstances).To(BeEmpty())
+				By("Every VM migrated exactly once")
+				for id, c := range calls {
+					Expect(c).To(Equal(1), "VM %s migrated exactly once", id)
+				}
+				Expect(calls).To(HaveLen(5))
+			})
+
+			It("forces serial migration for hosts carrying the exclusive trait", func(ctx SpecContext) {
+				orig := global.EvictionConcurrency
+				origMap := global.EvictionTraitConcurrency
+				global.EvictionConcurrency = 4
+				global.EvictionTraitConcurrency = map[string]int{"CUSTOM_HANA_EXCLUSIVE_HOST": 1}
+				DeferCleanup(func() {
+					global.EvictionConcurrency = orig
+					global.EvictionTraitConcurrency = origMap
+				})
+
+				By("Marking the hypervisor with the exclusive trait")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: hypervisorName}, hv)).To(Succeed())
+				hv.Status.Traits = []string{"CUSTOM_HANA_EXCLUSIVE_HOST"}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				seedVMs(ctx, 4)
+				resource := &kvmv1.Eviction{}
+
+				By("First pass triggers only ONE migration despite the higher global default")
+				_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+				Expect(err).NotTo(HaveOccurred())
+				started := 0
+				for _, c := range migrateCalls {
+					started += c
+				}
+				Expect(started).To(Equal(1), "exclusive-trait host must migrate serially")
+
+				By("Never more than one in flight through to completion")
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				for range 30 {
+					if len(resource.Status.OutstandingInstances) == 0 {
+						break
+					}
+					Expect(inFlight(resource.Status.OutstandingInstances)).To(BeNumerically("<=", 1))
+					_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				}
+				Expect(resource.Status.OutstandingInstances).To(BeEmpty())
+				Expect(migrateCalls).To(HaveLen(4))
 			})
 		})
 	})
