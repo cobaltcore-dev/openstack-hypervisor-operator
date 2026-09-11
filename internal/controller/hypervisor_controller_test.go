@@ -68,16 +68,14 @@ var _ = Describe("Hypervisor Controller", func() {
 
 		// pregenerate the resource
 		resource = &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   resourceName,
-				Labels: map[string]string{corev1.LabelTopologyZone: topologyZone},
-			},
+			Name:   resourceName,
+			Labels: map[string]string{corev1.LabelTopologyZone: topologyZone},
 		}
 
 		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
 			By("Cleanup the specific hypervisor")
-			hypervisor := &kvmv1.Hypervisor{ObjectMeta: metav1.ObjectMeta{Name: resource.Name}}
+			hypervisor := &kvmv1.Hypervisor{Name: resource.Name}
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, hypervisor))).To(Succeed())
 
 			By("Cleanup the specific node")
@@ -89,7 +87,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		BeforeEach(func(ctx SpecContext) {
 			By("Reconciling the created resource")
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
+				Name: resource.Name,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -119,7 +117,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -144,7 +142,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -169,7 +167,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -194,7 +192,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -216,7 +214,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -237,7 +235,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				labeledResource.Labels[labelLifecycleMode] = "true"
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -259,7 +257,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				labeledResource.Labels[labelLifecycleMode] = "skip-tests"
 				Expect(k8sClient.Patch(ctx, labeledResource, client.Merge)).To(Succeed())
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -302,7 +300,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		Context("and the Hypervisor resource does not exists", func() {
 			It("should successfully reconcile the terminating node", func(ctx SpecContext) {
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				hypervisor := &kvmv1.Hypervisor{}
@@ -312,7 +310,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				By("Reconciling the created resource")
 				for range 2 {
 					_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-						NamespacedName: types.NamespacedName{Name: resource.Name},
+						Name: resource.Name,
 					})
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -333,9 +331,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		Context("and the Hypervisor resource does exists", func() {
 			BeforeEach(func(ctx SpecContext) {
 				hypervisor := &kvmv1.Hypervisor{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resource.Name,
-					},
+					Name: resource.Name,
 					Spec: kvmv1.HypervisorSpec{
 						Maintenance: kvmv1.MaintenanceUnset,
 					},
@@ -350,7 +346,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				By("Reconciling the created resource")
 				for range 2 {
 					_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-						NamespacedName: types.NamespacedName{Name: resource.Name},
+						Name: resource.Name,
 					})
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -380,7 +376,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 				By("creating a Hypervisor so the existing-hypervisor path is exercised")
 				hypervisor := &kvmv1.Hypervisor{
-					ObjectMeta: metav1.ObjectMeta{Name: resource.Name},
+					Name: resource.Name,
 				}
 				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 				DeferCleanup(func(ctx SpecContext) {
@@ -390,7 +386,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			It("should set the Terminating condition from the deletion timestamp", func(ctx SpecContext) {
 				_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 
@@ -411,7 +407,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		It("should return error for non-NotFound errors", func(ctx SpecContext) {
 			// Try to reconcile a node that doesn't exist - should be gracefully ignored
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: "non-existent-node"},
+				Name: "non-existent-node",
 			})
 			// NotFound errors are ignored, so this should not error
 			Expect(err).NotTo(HaveOccurred())
@@ -422,7 +418,7 @@ var _ = Describe("Hypervisor Controller", func() {
 		It("should set internal IP in hypervisor status", func(ctx SpecContext) {
 			// First reconcile to create the hypervisor
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
+				Name: resource.Name,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -437,7 +433,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			// Reconcile again to update the hypervisor with the IP
 			_, err = hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
+				Name: resource.Name,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -452,7 +448,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 		BeforeEach(func(ctx SpecContext) {
 			agentNamespace = fmt.Sprintf("agent-ns-%d", agentNamespaceCounter.Add(1))
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: agentNamespace}}
+			ns := &corev1.Namespace{Name: agentNamespace}
 			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 			DeferCleanup(func(ctx SpecContext) {
 				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, ns))).To(Succeed())
@@ -464,7 +460,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			// The condition is only computed during termination.
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: resource.Name},
+				Name: resource.Name,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -512,10 +508,8 @@ var _ = Describe("Hypervisor Controller", func() {
 
 		createPod := func(ctx SpecContext, name, namespace string, phase corev1.PodPhase, tolerations ...corev1.Toleration) *corev1.Pod {
 			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name,
-					Namespace: namespace,
-				},
+				Name:      name,
+				Namespace: namespace,
 				Spec: corev1.PodSpec{
 					NodeName: resource.Name,
 					Containers: []corev1.Container{
@@ -548,7 +542,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			It("should set AgentPodsEvicted=True without requeue", func(ctx SpecContext) {
 				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RequeueAfter).To(BeZero())
@@ -572,7 +566,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			It("should set AgentPodsEvicted=False with reason AgentPodsRunning and requeue", func(ctx SpecContext) {
 				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
@@ -610,7 +604,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Status().Patch(ctx, node, client.MergeFrom(base))).To(Succeed())
 
 				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
@@ -658,7 +652,7 @@ var _ = Describe("Hypervisor Controller", func() {
 				Expect(k8sClient.Patch(ctx, node, client.MergeFrom(base))).To(Succeed())
 
 				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RequeueAfter).To(Equal(defaultPollTime),
@@ -700,7 +694,7 @@ var _ = Describe("Hypervisor Controller", func() {
 
 			It("should set AgentPodsEvicted=False (deletion-pending pod still counts as running)", func(ctx SpecContext) {
 				result, err := hypervisorController.Reconcile(ctx, ctrl.Request{
-					NamespacedName: types.NamespacedName{Name: resource.Name},
+					Name: resource.Name,
 				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RequeueAfter).To(Equal(defaultPollTime))
@@ -734,7 +728,7 @@ var _ = Describe("computeAgentPodsEvictedCondition field selector", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "field-selector-test"}}
+		ns := &corev1.Namespace{Name: "field-selector-test"}
 		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, ns))).To(Succeed())
@@ -742,7 +736,7 @@ var _ = Describe("computeAgentPodsEvictedCondition field selector", func() {
 
 		// Create a pod on "target-node".
 		onTarget := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "on-target", Namespace: ns.Name},
+			Name: "on-target", Namespace: ns.Name,
 			Spec: corev1.PodSpec{
 				NodeName:   "target-node",
 				Containers: []corev1.Container{{Name: "c", Image: "registry.example.com/img:latest"}},
@@ -755,7 +749,7 @@ var _ = Describe("computeAgentPodsEvictedCondition field selector", func() {
 
 		// Create a pod on a different node — must not appear in results.
 		onOther := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "on-other", Namespace: ns.Name},
+			Name: "on-other", Namespace: ns.Name,
 			Spec: corev1.PodSpec{
 				NodeName:   "other-node",
 				Containers: []corev1.Container{{Name: "c", Image: "registry.example.com/img:latest"}},

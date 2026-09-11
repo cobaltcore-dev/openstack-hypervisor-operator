@@ -47,9 +47,7 @@ var _ = Describe("Hypervisor Taint Controller", func() {
 
 		// pregenerate the resource
 		resource = &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName,
-			},
+			Name: hypervisorName,
 		}
 
 		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -99,7 +97,7 @@ var _ = Describe("Hypervisor Taint Controller", func() {
 	Context("When reconciling a non-existent hypervisor", func() {
 		It("should return without error", func(ctx SpecContext) {
 			nonExistentReq := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: "non-existent-hv"},
+				Name: "non-existent-hv",
 			}
 			_, err := controller.Reconcile(ctx, nonExistentReq)
 			Expect(err).NotTo(HaveOccurred())

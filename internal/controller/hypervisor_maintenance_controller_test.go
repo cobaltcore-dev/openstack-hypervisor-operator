@@ -92,11 +92,9 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 		By("Creating a blank Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      hypervisorName.Name,
-				Namespace: hypervisorName.Namespace,
-			},
-			Spec: kvmv1.HypervisorSpec{},
+			Name:      hypervisorName.Name,
+			Namespace: hypervisorName.Namespace,
+			Spec:      kvmv1.HypervisorSpec{},
 		}
 		Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
@@ -116,10 +114,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 	AfterEach(func(ctx SpecContext) {
 		eviction := &kvmv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      hypervisorName.Name,
-				Namespace: hypervisorName.Namespace,
-			},
+			Name:      hypervisorName.Name,
+			Namespace: hypervisorName.Namespace,
 		}
 		Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, eviction))).To(Succeed())
 	})
@@ -219,7 +215,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					mockServiceUpdate(expectedBody)
 
 					eviction := &kvmv1.Eviction{
-						ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+						Name: hypervisorName.Name,
 						Spec: kvmv1.EvictionSpec{
 							Hypervisor: hypervisorName.Name,
 							Reason:     "test",
@@ -295,7 +291,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					When("there is an ongoing eviction", func() {
 						BeforeEach(func(ctx SpecContext) {
 							eviction := &kvmv1.Eviction{
-								ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+								Name: hypervisorName.Name,
 								Spec: kvmv1.EvictionSpec{
 									Hypervisor: hypervisorName.Name,
 									Reason:     "test",
@@ -348,7 +344,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 					When("there is a finished eviction", func() {
 						BeforeEach(func(ctx SpecContext) {
 							eviction := &kvmv1.Eviction{
-								ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+								Name: hypervisorName.Name,
 								Spec: kvmv1.EvictionSpec{
 									Hypervisor: hypervisorName.Name,
 									Reason:     "test",
@@ -404,7 +400,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 
 	Context("Non-existent Hypervisor", func() {
 		It("should handle gracefully with IgnoreNotFound", func(ctx SpecContext) {
-			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "non-existent-hv"}}
+			req := ctrl.Request{Name: "non-existent-hv"}
 			_, err := controller.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 		})

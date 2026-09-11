@@ -88,10 +88,8 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	nodeLabels := labels.Set(node.Labels)
 	hypervisor := &kvmv1.Hypervisor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   node.Name,
-			Labels: map[string]string{},
-		},
+		Name:   node.Name,
+		Labels: map[string]string{},
 		Spec: kvmv1.HypervisorSpec{
 			HighAvailability:   true,
 			InstallCertificate: true,

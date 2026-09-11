@@ -76,7 +76,7 @@ var _ = Describe("Offboarding Controller", func() {
 		}
 
 		By("Creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
+		ns := &corev1.Namespace{Name: namespaceName}
 		Expect(k8sclient.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
 			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
@@ -84,9 +84,7 @@ var _ = Describe("Offboarding Controller", func() {
 
 		By("Creating the hypervisor resource with lifecycle enabled")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: resourceName.Name,
-			},
+			Name: resourceName.Name,
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
 			},

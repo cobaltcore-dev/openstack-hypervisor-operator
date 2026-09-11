@@ -22,7 +22,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -59,20 +58,18 @@ var _ = Describe("Node Certificate Controller", func() {
 		}
 
 		By("creating the namespace for the reconciler")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+		ns := &corev1.Namespace{Name: namespace}
 		Expect(client.IgnoreAlreadyExists(fakeClient.Create(ctx, ns))).To(Succeed())
 
 		By("creating the core resource for the Kind Node")
 		resource := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName,
-				Labels: map[string]string{labelHypervisor: "test"},
-			},
+			Name:   nodeName,
+			Labels: map[string]string{labelHypervisor: "test"},
 		}
 		Expect(fakeClient.Create(ctx, resource)).To(Succeed())
 
 		DeferCleanup(func(ctx SpecContext) {
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			node := &corev1.Node{Name: nodeName}
 			By("Cleanup the specific node")
 			Expect(client.IgnoreAlreadyExists(fakeClient.Delete(ctx, node))).To(Succeed())
 
@@ -86,7 +83,7 @@ var _ = Describe("Node Certificate Controller", func() {
 		It("should successfully create a new certificate", func(ctx SpecContext) {
 			By("Reconciling the node")
 			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
+				Name: nodeName,
 			}
 			_, err := nodeCertificateController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -120,7 +117,7 @@ var _ = Describe("Node Certificate Controller", func() {
 		It("should create certificate with all DNS names and IP addresses", func(ctx SpecContext) {
 			By("Reconciling the node")
 			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: nodeName},
+				Name: nodeName,
 			}
 			_, err := nodeCertificateController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -151,9 +148,7 @@ var _ = Describe("Node Certificate Controller", func() {
 		BeforeEach(func(ctx SpecContext) {
 			By("Creating a node without the hypervisor label")
 			nodeWithoutLabel := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-without-label",
-				},
+				Name: "node-without-label",
 			}
 			Expect(fakeClient.Create(ctx, nodeWithoutLabel)).To(Succeed())
 			DeferCleanup(func(ctx SpecContext) {
@@ -167,7 +162,7 @@ var _ = Describe("Node Certificate Controller", func() {
 			// create the certificate even without the label.
 			By("Reconciling the node without label")
 			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: "node-without-label"},
+				Name: "node-without-label",
 			}
 			_, err := nodeCertificateController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -184,7 +179,7 @@ var _ = Describe("Node Certificate Controller", func() {
 		It("should return without error", func(ctx SpecContext) {
 			By("Reconciling a non-existent node")
 			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: "non-existent-node"},
+				Name: "non-existent-node",
 			}
 			_, err := nodeCertificateController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())

@@ -22,7 +22,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -43,9 +42,7 @@ var _ = Describe("Hypervisor Spec CEL Validation", func() {
 		}
 
 		hypervisor = &Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName.Name,
-			},
+			Name: hypervisorName.Name,
 			Spec: HypervisorSpec{
 				OperatingSystemVersion: "1.0",
 				LifecycleEnabled:       true,
@@ -171,9 +168,7 @@ var _ = Describe("Hypervisor Spec CEL Validation", func() {
 	Context("When creating a new Hypervisor", func() {
 		It("should allow creation with maintenance set to termination", func(ctx SpecContext) {
 			newHypervisor := &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "new-test-hypervisor",
-				},
+				Name: "new-test-hypervisor",
 				Spec: HypervisorSpec{
 					Maintenance:            MaintenanceTermination,
 					OperatingSystemVersion: "1.0",
@@ -226,9 +221,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 
 		It("should allow creation with maintenance='manual' and a non-empty maintenanceReason", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-hypervisor-manual-with-reason",
-				},
+				Name: "test-hypervisor-manual-with-reason",
 				Spec: HypervisorSpec{
 					OperatingSystemVersion: "1.0",
 					LifecycleEnabled:       true,
@@ -247,9 +240,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 
 		It("should reject creation with maintenance='manual' but empty maintenanceReason", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-hypervisor-manual-empty-reason",
-				},
+				Name: "test-hypervisor-manual-empty-reason",
 				Spec: HypervisorSpec{
 					Maintenance:       MaintenanceManual,
 					MaintenanceReason: "",
@@ -263,9 +254,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 
 		It("should reject creation with maintenance='manual' but missing maintenanceReason", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-hypervisor-manual-no-reason",
-				},
+				Name: "test-hypervisor-manual-no-reason",
 				Spec: HypervisorSpec{
 					Maintenance: MaintenanceManual,
 				},
@@ -278,9 +267,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 
 		It("should allow creation with non-manual maintenance modes without maintenanceReason", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-hypervisor-auto-no-reason",
-				},
+				Name: "test-hypervisor-auto-no-reason",
 				Spec: HypervisorSpec{
 					Maintenance: MaintenanceAuto,
 				},
@@ -295,9 +282,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 
 		It("should allow creation with empty maintenance and no maintenanceReason", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-hypervisor-no-maintenance",
-				},
+				Name: "test-hypervisor-no-maintenance",
 				Spec: HypervisorSpec{
 					LifecycleEnabled: true,
 				},
@@ -318,9 +303,7 @@ var _ = Describe("MaintenanceReason CEL Validation", func() {
 			}
 
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: hypervisorName.Name,
-				},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					LifecycleEnabled: true,
 					Maintenance:      MaintenanceAuto,
@@ -426,7 +409,7 @@ var _ = Describe("Groups CEL Validation", func() {
 	Context("Union rule: exactly one group type per entry", func() {
 		It("should accept a group with only trait set", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
@@ -438,7 +421,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should accept a group with only aggregate set", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
@@ -450,7 +433,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should accept mixed trait and aggregate entries", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Trait: &TraitGroup{Name: "HW_CPU_X86_AVX2"}},
@@ -464,7 +447,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should reject a group with both trait and aggregate set", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{
@@ -481,7 +464,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should reject a group with neither trait nor aggregate set", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{},
@@ -497,7 +480,7 @@ var _ = Describe("Groups CEL Validation", func() {
 	Context("Field validation", func() {
 		It("should reject a trait with empty name", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Trait: &TraitGroup{Name: ""}},
@@ -511,7 +494,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should reject an aggregate with empty name", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{Name: "", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
@@ -525,7 +508,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should reject an aggregate with empty UUID", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: ""}},
@@ -539,7 +522,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should accept an aggregate without metadata", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{Name: "fast-storage", UUID: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}},
@@ -551,7 +534,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should accept an aggregate with metadata", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{
 						{Aggregate: &AggregateGroup{
@@ -573,7 +556,7 @@ var _ = Describe("Groups CEL Validation", func() {
 
 		It("should accept an empty groups list", func(ctx SpecContext) {
 			hypervisor = &Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+				Name: hypervisorName.Name,
 				Spec: HypervisorSpec{
 					Groups: []Group{},
 				},

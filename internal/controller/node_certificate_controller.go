@@ -60,14 +60,10 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 	secretName, certName := getSecretAndCertName(node.Name)
 
 	certificate := &cmapi.Certificate{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       cmapi.CertificateKind,
-			APIVersion: cmapi.SchemeGroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      certName,
-			Namespace: r.namespace,
-		},
+		Kind:       cmapi.CertificateKind,
+		APIVersion: cmapi.SchemeGroupVersion.String(),
+		Name:       certName,
+		Namespace:  r.namespace,
 	}
 
 	update, err := controllerutil.CreateOrUpdate(ctx, r.Client, certificate, func() error {

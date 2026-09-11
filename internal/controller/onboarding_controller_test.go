@@ -203,13 +203,11 @@ var _ = Describe("Onboarding Controller", func() {
 
 		By("creating the resource for the Kind Hypervisor")
 		hv := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName,
-				Labels: map[string]string{
-					corev1.LabelTopologyRegion: region,
-					corev1.LabelTopologyZone:   availabilityZone,
-					corev1.LabelHostname:       hypervisorName,
-				},
+			Name: hypervisorName,
+			Labels: map[string]string{
+				corev1.LabelTopologyRegion: region,
+				corev1.LabelTopologyZone:   availabilityZone,
+				corev1.LabelHostname:       hypervisorName,
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,

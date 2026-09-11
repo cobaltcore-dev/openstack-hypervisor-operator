@@ -221,9 +221,7 @@ var _ = Describe("Eviction Controller", func() {
 			BeforeEach(func(ctx SpecContext) {
 				By("Creating the hypervisor resource")
 				hypervisor := &kvmv1.Hypervisor{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: hypervisorName,
-					},
+					Name: hypervisorName,
 				}
 				Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 				DeferCleanup(func(ctx SpecContext) {
@@ -249,9 +247,7 @@ var _ = Describe("Eviction Controller", func() {
 		BeforeEach(func(ctx SpecContext) {
 			By("Creating the hypervisor resource")
 			hypervisor := &kvmv1.Hypervisor{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: hypervisorName,
-				},
+				Name: hypervisorName,
 			}
 			Expect(k8sClient.Create(ctx, hypervisor)).To(Succeed())
 			DeferCleanup(func(ctx SpecContext) {

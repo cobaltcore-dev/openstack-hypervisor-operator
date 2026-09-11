@@ -111,11 +111,9 @@ var _ = Describe("AggregatesController", func() {
 
 		By("Creating hypervisor resource with lifecycle enabled")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName.Name,
-				Labels: map[string]string{
-					corev1.LabelTopologyZone: "zone-a",
-				},
+			Name: hypervisorName.Name,
+			Labels: map[string]string{
+				corev1.LabelTopologyZone: "zone-a",
 			},
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,

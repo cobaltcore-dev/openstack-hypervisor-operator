@@ -165,9 +165,7 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 
 func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Context, hv *kvmv1.Hypervisor) error {
 	eviction := &kvmv1.Eviction{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: hv.Name,
-		},
+		Name: hv.Name,
 	}
 
 	switch hv.Spec.Maintenance {

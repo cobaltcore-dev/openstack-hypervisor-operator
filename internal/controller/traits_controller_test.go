@@ -79,9 +79,7 @@ var _ = Describe("TraitsController", func() {
 
 		By("Creating a Hypervisor resource")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hypervisorName.Name,
-			},
+			Name: hypervisorName.Name,
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
 				CustomTraits:     []string{"CUSTOM_FOO", "CUSTOM_BAR"},

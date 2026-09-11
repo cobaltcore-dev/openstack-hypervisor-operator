@@ -51,9 +51,7 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 
 		By("creating the core resource for the Kind Node")
 		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-			},
+			Name: nodeName,
 		}
 		Expect(k8sClient.Create(ctx, node)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
@@ -63,9 +61,7 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 
 		By("creating the core resource for the Kind hypervisor")
 		hypervisor := &kvmv1.Hypervisor{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-			},
+			Name: nodeName,
 			Spec: kvmv1.HypervisorSpec{
 				LifecycleEnabled: true,
 			},

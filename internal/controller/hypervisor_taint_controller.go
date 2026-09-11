@@ -47,10 +47,8 @@ type HypervisorTaintController struct {
 
 func (r *HypervisorTaintController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	hypervisor := &kvmv1.Hypervisor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   req.Name,
-			Labels: map[string]string{},
-		},
+		Name:   req.Name,
+		Labels: map[string]string{},
 		Spec: kvmv1.HypervisorSpec{
 			HighAvailability:   true,
 			InstallCertificate: true,
