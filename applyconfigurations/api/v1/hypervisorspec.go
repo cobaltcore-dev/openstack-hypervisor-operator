@@ -40,6 +40,7 @@ type HypervisorSpecApplyConfiguration struct {
 	// via CEL because the required O(n^2) comparison exceeds the
 	// Kubernetes CEL cost budget. Enforce uniqueness in the consuming
 	// controller or via a validating webhook if needed.
+	//
 	Groups []GroupApplyConfiguration `json:"groups,omitempty"`
 	// AllowedProjects defines which openstack projects are allowed to schedule
 	// instances on this hypervisor. The values of this list should be project
@@ -66,6 +67,7 @@ type HypervisorSpecApplyConfiguration struct {
 	// If the overcommit ratio results in a fractional effective capacity,
 	// the effective capacity is expected to be rounded down. This allows
 	// gradually adjusting the hypervisor capacity.
+	//
 	//
 	// It is validated that all overcommit ratios are greater than or equal to
 	// 1.0, if specified. For this we don't need extra validating webhooks.

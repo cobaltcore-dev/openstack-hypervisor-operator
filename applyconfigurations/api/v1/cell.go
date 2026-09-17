@@ -21,6 +21,7 @@ type CellApplyConfiguration struct {
 	// Note that this capacity does not include the applied overcommit ratios,
 	// and represents the actual capacity of the cell. Use the effective capacity
 	// field to get the capacity considering the applied overcommit ratios.
+	//
 	Capacity map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
 	// Auto-discovered capacity of this cell, considering the
 	// applied overcommit ratios.
@@ -31,6 +32,7 @@ type CellApplyConfiguration struct {
 	//
 	// If the overcommit ratio results in a fractional effective capacity, the
 	// effective capacity is expected to be rounded down.
+	//
 	EffectiveCapacity map[apiv1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 }
 
