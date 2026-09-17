@@ -24,6 +24,7 @@ type DomainCapabilitiesApplyConfiguration struct {
 	// </video>
 	//
 	// The corresponding entries in this list would be "video" and "video/nvidia".
+	//
 	SupportedDevices []string `json:"supportedDevices,omitempty"`
 	// Supported cpu modes for domains.
 	//
@@ -36,6 +37,7 @@ type DomainCapabilitiesApplyConfiguration struct {
 	//
 	// The corresponding entries in this list would be "host-passthrough" and
 	// "host-passthrough/migratable".
+	//
 	SupportedCpuModes []string `json:"supportedCpuModes,omitempty"`
 	// Supported features for domains, such as "sev" or "sgx".
 	//
@@ -47,6 +49,7 @@ type DomainCapabilitiesApplyConfiguration struct {
 	// </features>
 	//
 	// Would correspond to the entries "sev" and "sgx" in this list.
+	//
 	SupportedFeatures []string `json:"supportedFeatures,omitempty"`
 }
 
