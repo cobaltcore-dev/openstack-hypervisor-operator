@@ -16,7 +16,7 @@ import (
 //
 // Hypervisor is the Schema for the hypervisors API
 type HypervisorApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *HypervisorSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *HypervisorStatusApplyConfiguration `json:"status,omitempty"`

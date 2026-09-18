@@ -16,7 +16,7 @@ import (
 //
 // Eviction is the Schema for the evictions API
 type EvictionApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *EvictionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *EvictionStatusApplyConfiguration `json:"status,omitempty"`

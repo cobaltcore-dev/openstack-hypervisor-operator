@@ -36,6 +36,7 @@ type HypervisorStatusApplyConfiguration struct {
 	// and represents the actual capacity of the hypervisor. Use the
 	// effective capacity field to get the capacity considering the applied
 	// overcommit ratios.
+	//
 	Capacity map[apiv1.ResourceName]resource.Quantity `json:"capacity,omitempty"`
 	// Auto-discovered capacity of the hypervisor, considering the
 	// applied overcommit ratios.
@@ -46,6 +47,7 @@ type HypervisorStatusApplyConfiguration struct {
 	//
 	// If the overcommit ratio results in a fractional effective capacity, the
 	// effective capacity is expected to be rounded down.
+	//
 	EffectiveCapacity map[apiv1.ResourceName]resource.Quantity `json:"effectiveCapacity,omitempty"`
 	// Auto-discovered cells on this hypervisor.
 	Cells []CellApplyConfiguration `json:"cells,omitempty"`
