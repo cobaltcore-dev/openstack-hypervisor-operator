@@ -33,13 +33,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	applyv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 )
 
 var _ = Describe("HypervisorMaintenanceController", func() {
 	var (
-		controller     *HypervisorMaintenanceController
-		fakeServer     testhelper.FakeServer
-		hypervisorName = types.NamespacedName{Name: "hv-test"}
+		controller         *HypervisorMaintenanceController
+		fakeServer         testhelper.FakeServer
+		hypervisorName     = types.NamespacedName{Name: "hv-test"}
+		expectReconcileErr bool
+		reconcileErr       error
 	)
 
 	const (
@@ -82,6 +85,8 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 		By("Setting up the OpenStack http mock server")
 		fakeServer = testhelper.SetupHTTP()
 		DeferCleanup(fakeServer.Teardown)
+		expectReconcileErr = false
+		reconcileErr = nil
 
 		By("Creating the HypervisorMaintenanceController")
 		controller = &HypervisorMaintenanceController{
@@ -108,8 +113,10 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 	// After the setup in JustBefore, we want to reconcile
 	JustBeforeEach(func(ctx SpecContext) {
 		req := ctrl.Request{NamespacedName: hypervisorName}
-		_, err := controller.Reconcile(ctx, req)
-		Expect(err).NotTo(HaveOccurred())
+		_, reconcileErr = controller.Reconcile(ctx, req)
+		if !expectReconcileErr {
+			Expect(reconcileErr).NotTo(HaveOccurred())
+		}
 	})
 
 	AfterEach(func(ctx SpecContext) {
@@ -138,6 +145,77 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 		})
 
 		Describe("Enabling or Disabling the Nova Service", func() {
+			Context("when enabling the service fails", func() {
+				BeforeEach(func(ctx SpecContext) {
+					expectReconcileErr = true
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeHypervisorDisabled,
+						Status:  metav1.ConditionTrue,
+						Reason:  kvmv1.ConditionReasonSucceeded,
+						Message: "Hypervisor is disabled",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+					fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, _ *http.Request) {
+						http.Error(w, "nova unavailable", http.StatusServiceUnavailable)
+					})
+				})
+
+				It("reports the failed transition", func(ctx SpecContext) {
+					Expect(reconcileErr).To(MatchError(ContainSubstring("failed to enable hypervisor")))
+					updated := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+					condition := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
+					Expect(condition).NotTo(BeNil())
+					Expect(condition.Status).To(Equal(metav1.ConditionUnknown))
+					Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonFailed))
+					Expect(condition.Message).To(ContainSubstring("failed to enable hypervisor"))
+				})
+			})
+
+			Context("when disabling the service fails", func() {
+				BeforeEach(func(ctx SpecContext) {
+					expectReconcileErr = true
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeEvicting,
+						Status:  metav1.ConditionTrue,
+						Reason:  kvmv1.ConditionReasonRunning,
+						Message: "Evicting",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+					Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+					hypervisor.Spec.Maintenance = kvmv1.MaintenanceAuto
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+					fakeServer.Mux.HandleFunc("PUT /os-services/1234", func(w http.ResponseWriter, _ *http.Request) {
+						http.Error(w, "nova unavailable", http.StatusServiceUnavailable)
+					})
+				})
+
+				It("reports the failure without starting eviction", func(ctx SpecContext) {
+					Expect(reconcileErr).To(MatchError(ContainSubstring("failed to disable hypervisor")))
+					updated := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+					condition := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
+					Expect(condition).NotTo(BeNil())
+					Expect(condition.Status).To(Equal(metav1.ConditionUnknown))
+					Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonFailed))
+					Expect(condition.Message).To(ContainSubstring("failed to disable hypervisor"))
+					evictingCondition := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeEvicting)
+					Expect(evictingCondition).NotTo(BeNil())
+					Expect(evictingCondition.Status).To(Equal(metav1.ConditionTrue))
+
+					eviction := &kvmv1.Eviction{}
+					err := k8sClient.Get(ctx, hypervisorName, eviction)
+					Expect(err).To(HaveOccurred())
+					Expect(k8sclient.IgnoreNotFound(err)).To(Succeed())
+				})
+			})
+
 			Context("Spec.Maintenance=\"\"", func() {
 				BeforeEach(func(ctx SpecContext) {
 					hypervisor := &kvmv1.Hypervisor{}
@@ -392,6 +470,29 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 									HaveField("Status", metav1.ConditionFalse),
 								)))
 						})
+
+						It("should keep the evicting condition on a repeated reconcile (must not be pruned by SSA)", func(ctx SpecContext) {
+							// Reconciling again with the succeeded state already
+							// recorded on the Hypervisor takes the early-return
+							// branch in reconcileEviction. The apply must still
+							// seed the succeeded evicting condition — otherwise
+							// SSA prunes it because this controller is its sole
+							// owner.
+							req := ctrl.Request{NamespacedName: hypervisorName}
+							_, err := controller.Reconcile(ctx, req)
+							Expect(err).NotTo(HaveOccurred())
+
+							updated := &kvmv1.Hypervisor{}
+							Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+							Expect(updated.Status.Conditions).To(ContainElement(
+								SatisfyAll(
+									HaveField("Type", kvmv1.ConditionTypeEvicting),
+									HaveField("Status", metav1.ConditionFalse),
+									HaveField("Reason", kvmv1.ConditionReasonSucceeded),
+								),
+							))
+							Expect(updated.Status.Evicted).To(BeTrue())
+						})
 					})
 				}) // Spec.Maintenance="<mode>"
 			}
@@ -454,5 +555,25 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 			// ServiceID should still be empty
 			Expect(hypervisor.Status.ServiceID).To(BeEmpty())
 		})
+	})
+})
+
+var _ = Describe("retainStatusCondition", func() {
+	It("retains each condition type only once", func() {
+		statusCfg := applyv1.HypervisorStatus()
+		condition := &metav1.Condition{
+			Type:    kvmv1.ConditionTypeEvicting,
+			Status:  metav1.ConditionTrue,
+			Reason:  kvmv1.ConditionReasonRunning,
+			Message: "Evicting",
+		}
+
+		conditions := []metav1.Condition{*condition}
+		retainStatusCondition(statusCfg, conditions, condition.Type)
+		retainStatusCondition(statusCfg, conditions, condition.Type)
+
+		Expect(statusCfg.Conditions).To(HaveLen(1))
+		Expect(statusCfg.Conditions[0].Type).NotTo(BeNil())
+		Expect(*statusCfg.Conditions[0].Type).To(Equal(kvmv1.ConditionTypeEvicting))
 	})
 })
