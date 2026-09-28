@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +45,10 @@ import (
 
 const (
 	HypervisorMaintenanceControllerName = "HypervisorMaintenance"
+
+	// settleRequeueInterval is the interval at which the controller re-checks
+	// incoming migrations when they haven't settled yet.
+	settleRequeueInterval = 10 * time.Second
 )
 
 type HypervisorMaintenanceController struct {
@@ -72,27 +77,33 @@ func (hec *HypervisorMaintenanceController) Reconcile(ctx context.Context, req c
 	// Include unchanged fields owned by this controller because omitting them
 	// from a subsequent SSA payload would prune them. Seed only the
 	// HypervisorDisabled condition here because it is always retained.
-	// reconcileEviction conditionally seeds ConditionTypeEvicting: it is included
-	// when maintenance is active, and intentionally omitted when MaintenanceUnset
-	// so that SSA prunes it from the field manager's managed fields.
+	// reconcileEviction conditionally seeds ConditionTypeEvicting and
+	// ConditionTypeIncomingMigrationsSettled: they are included when maintenance
+	// is active, and intentionally omitted when MaintenanceUnset so that SSA
+	// prunes them from the field manager's managed fields.
 	statusCfg := apiv1.HypervisorStatus().WithEvicted(hv.Status.Evicted)
 	retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled)
 
 	if err := hec.reconcileComputeService(ctx, hv, statusCfg); err != nil {
 		retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+		retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
 		applyErr := hec.Status().Apply(ctx,
 			apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 			k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorMaintenanceControllerName))
 		return ctrl.Result{}, errors.Join(err, applyErr)
 	}
 
-	if err := hec.reconcileEviction(ctx, hv, statusCfg); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, hec.Status().Apply(ctx,
+	requeue, err := hec.reconcileEviction(ctx, hv, statusCfg)
+	applyErr := hec.Status().Apply(ctx,
 		apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(HypervisorMaintenanceControllerName))
+	if err != nil || applyErr != nil {
+		return ctrl.Result{}, errors.Join(err, applyErr)
+	}
+	if requeue {
+		return ctrl.Result{RequeueAfter: settleRequeueInterval}, nil
+	}
+	return ctrl.Result{}, nil
 }
 
 // retainStatusCondition keeps an existing condition of the given type in the
@@ -181,9 +192,10 @@ func (hec *HypervisorMaintenanceController) reconcileComputeService(ctx context.
 }
 
 // reconcileEviction creates/deletes the Eviction CR and sets the ConditionTypeEvicting
-// condition and Evicted scalar on statusCfg. When eviction should be removed, the
-// condition entry is filtered out so SSA prunes it.
-func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) error {
+// and ConditionTypeIncomingMigrationsSettled conditions plus the Evicted scalar on
+// statusCfg. When eviction should be removed, the condition entries are filtered out
+// so SSA prunes them.
+func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (requeue bool, err error) {
 	eviction := &kvmv1.Eviction{
 		Name: hv.Name,
 	}
@@ -191,35 +203,102 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 	switch hv.Spec.Maintenance {
 	case kvmv1.MaintenanceUnset:
 		// Avoid deleting the eviction over and over.
-		if !hv.Status.Evicted && meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) == nil {
-			return nil
+		if !hv.Status.Evicted &&
+			meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting) == nil &&
+			meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled) == nil {
+			return false, nil
 		}
 		if err := k8sclient.IgnoreNotFound(hec.Delete(ctx, eviction)); err != nil {
-			return err
+			return false, err
 		}
-		// ConditionTypeEvicting is intentionally absent from statusCfg — SSA
-		// will prune it from this field manager's managed fields on Apply.
+		// ConditionTypeEvicting and ConditionTypeIncomingMigrationsSettled are
+		// intentionally absent from statusCfg — SSA will prune them from this
+		// field manager's managed fields on Apply.
 		statusCfg.WithEvicted(false)
 
 	case kvmv1.MaintenanceManual, kvmv1.MaintenanceAuto, kvmv1.MaintenanceTermination:
-		// In case of "ha", the host gets emptied from the HA service.
-		// Seed the existing evicting condition so SSA does not prune it,
-		// regardless of whether we take the short-circuit below.
-		if cond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting); cond != nil {
-			statusCfg.WithConditions(utils.ConditionFromStatus(*cond))
-			if cond.Reason == kvmv1.ConditionReasonSucceeded {
-				// We are done here, no need to look at the eviction any more.
-				return nil
+		evictingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+		migrationsCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
+		if evictingCondition != nil &&
+			evictingCondition.Status == metav1.ConditionFalse &&
+			evictingCondition.Reason == kvmv1.ConditionReasonSucceeded {
+			if hv.Status.NumInstances > 0 {
+				// Instance appeared after eviction completed. Delete the Eviction CR so
+				// ensureEviction recreates a fresh one.
+				log := logger.FromContext(ctx)
+				log.Info("Eviction reported succeeded but instances remain on host; re-entering drain",
+					"numInstances", hv.Status.NumInstances)
+				if delErr := k8sclient.IgnoreNotFound(hec.Delete(ctx, eviction)); delErr != nil {
+					return false, delErr
+				}
+				statusCfg.WithEvicted(false)
+				utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+					*k8sacmetav1.Condition().
+						WithType(kvmv1.ConditionTypeEvicting).
+						WithStatus(metav1.ConditionTrue).
+						WithReason(kvmv1.ConditionReasonRunning).
+						WithMessage(fmt.Sprintf("Re-entering drain: %d instance(s) still on host", hv.Status.NumInstances)))
+				retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
+				return false, nil
 			}
+
+			if hv.Status.Evicted && migrationsCondition != nil &&
+				migrationsCondition.Status == metav1.ConditionTrue &&
+				migrationsCondition.Reason == kvmv1.ConditionReasonSettled {
+				retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+				retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeIncomingMigrationsSettled)
+				return false, nil
+			}
+		}
+
+		// Gate: ensure all incoming migrations are settled before proceeding.
+		settled, err := hec.settleIncomingMigrations(ctx, hv, statusCfg)
+		if err != nil {
+			statusCfg.WithEvicted(false)
+			retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+			return false, err
+		}
+		if !settled {
+			// Cannot proceed with eviction while incoming migrations are outstanding.
+			// Clear the terminal scalar and seed the existing evicting condition so
+			// SSA does not leave the hypervisor marked as evicted or prune it.
+			statusCfg.WithEvicted(false)
+			retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+			return true, nil
+		}
+
+		if evictingCondition != nil && evictingCondition.Reason == kvmv1.ConditionReasonSucceeded {
+			// The host was not previously known to be settled, but the current Nova
+			// check established it. Preserve the completed eviction state.
+			retainStatusCondition(statusCfg, hv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+			return false, nil
 		}
 
 		status, err := hec.ensureEviction(ctx, eviction, hv)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		var reason, message string
 		if status == metav1.ConditionFalse {
+			if hv.Status.NumInstances > 0 {
+				// Eviction CR says done but instances exist (race with in-flight migration).
+				// Delete the Eviction CR and restart drain.
+				log := logger.FromContext(ctx)
+				log.Info("Eviction finished but instances remain on host; restarting drain",
+					"numInstances", hv.Status.NumInstances)
+				if delErr := k8sclient.IgnoreNotFound(hec.Delete(ctx, eviction)); delErr != nil {
+					return false, delErr
+				}
+				statusCfg.WithEvicted(false)
+				utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+					*k8sacmetav1.Condition().
+						WithType(kvmv1.ConditionTypeEvicting).
+						WithStatus(metav1.ConditionTrue).
+						WithReason(kvmv1.ConditionReasonRunning).
+						WithMessage(fmt.Sprintf("Restarting drain: %d instance(s) still on host", hv.Status.NumInstances)))
+				return false, nil
+			}
 			message = "Evicted"
 			reason = kvmv1.ConditionReasonSucceeded
 			statusCfg.WithEvicted(true)
@@ -237,7 +316,66 @@ func (hec *HypervisorMaintenanceController) reconcileEviction(ctx context.Contex
 				WithMessage(message))
 	}
 
-	return nil
+	return false, nil
+}
+
+// settleIncomingMigrations checks for in-flight migrations targeting this host,
+// aborts those that can be aborted, and reports whether the host is settled.
+// It sets the IncomingMigrationsSettled condition on statusCfg.
+// Returns true if settled (no incoming migrations), false otherwise.
+func (hec *HypervisorMaintenanceController) settleIncomingMigrations(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (bool, error) {
+	log := logger.FromContext(ctx)
+
+	aborted, waiting, err := openstack.SettleIncomingMigrations(ctx, hec.computeClient, hv.Name)
+	if err != nil {
+		err = fmt.Errorf("settling incoming migrations for %s: %w", hv.Name, err)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeIncomingMigrationsSettled).
+				WithStatus(metav1.ConditionUnknown).
+				WithReason(kvmv1.ConditionReasonFailed).
+				WithMessage(err.Error()))
+		return false, err
+	}
+
+	if len(waiting) > 0 {
+		instanceUUIDs := make([]string, len(waiting))
+		for i, m := range waiting {
+			instanceUUIDs[i] = m.InstanceUUID
+		}
+		log.Info("Waiting for non-abortable incoming migrations", "host", hv.Name, "instances", instanceUUIDs)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeIncomingMigrationsSettled).
+				WithStatus(metav1.ConditionFalse).
+				WithReason(kvmv1.ConditionReasonWaiting).
+				WithMessage(fmt.Sprintf("Waiting for %d non-abortable incoming migration(s) to complete", len(waiting))))
+		return false, nil
+	}
+
+	if len(aborted) > 0 {
+		instanceUUIDs := make([]string, len(aborted))
+		for i, m := range aborted {
+			instanceUUIDs[i] = m.InstanceUUID
+		}
+		log.Info("Aborted incoming migrations", "host", hv.Name, "instances", instanceUUIDs)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeIncomingMigrationsSettled).
+				WithStatus(metav1.ConditionFalse).
+				WithReason(kvmv1.ConditionReasonAborting).
+				WithMessage(fmt.Sprintf("Aborted %d incoming migration(s); verifying on next reconcile", len(aborted))))
+		return false, nil
+	}
+
+	// No incoming migrations — settled.
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeIncomingMigrationsSettled).
+			WithStatus(metav1.ConditionTrue).
+			WithReason(kvmv1.ConditionReasonSettled).
+			WithMessage("No incoming migrations targeting this host"))
+	return true, nil
 }
 
 func (hec *HypervisorMaintenanceController) ensureEviction(ctx context.Context, eviction *kvmv1.Eviction, hypervisor *kvmv1.Hypervisor) (metav1.ConditionStatus, error) {
