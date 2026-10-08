@@ -859,7 +859,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 
 				eviction := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+					Name: hypervisorName.Name,
 					Spec: kvmv1.EvictionSpec{
 						Hypervisor: hypervisorName.Name,
 						Reason:     "test",
@@ -921,7 +921,7 @@ var _ = Describe("HypervisorMaintenanceController", func() {
 				Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
 
 				eviction := &kvmv1.Eviction{
-					ObjectMeta: metav1.ObjectMeta{Name: hypervisorName.Name},
+					Name: hypervisorName.Name,
 					Spec: kvmv1.EvictionSpec{
 						Hypervisor: hypervisorName.Name,
 						Reason:     "test",
