@@ -47,6 +47,10 @@ spec:
           value: {{ quote .Values.controllerManager.manager.env.labelSelector }}
         - name: AGENT_NAMESPACES
           value: {{ quote .Values.controllerManager.manager.env.agentNamespaces }}
+        - name: EVICTION_CONCURRENCY
+          value: {{ quote .Values.controllerManager.manager.env.evictionConcurrency }}
+        - name: EVICTION_TRAIT_CONCURRENCY
+          value: {{ quote .Values.controllerManager.manager.env.evictionTraitConcurrency }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: GOMEMLIMIT
