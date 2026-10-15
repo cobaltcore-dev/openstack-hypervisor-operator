@@ -110,6 +110,12 @@ var _ = Describe("Offboarding Controller", func() {
 
 				By("Setting terminating condition")
 				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Onboarding completed",
+				})
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
 					Type:    kvmv1.ConditionTypeTerminating,
 					Status:  metav1.ConditionTrue,
 					Reason:  "dontcare",

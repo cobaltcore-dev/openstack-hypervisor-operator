@@ -153,6 +153,12 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 		return nil
 	}
 
+	// Successful onboarding is terminal. Maintenance and offboarding track the
+	// host's subsequent lifecycle without erasing its successful onboarding.
+	if status.Reason == kvmv1.ConditionReasonSucceeded {
+		return nil
+	}
+
 	base := hv.DeepCopy()
 
 	meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{

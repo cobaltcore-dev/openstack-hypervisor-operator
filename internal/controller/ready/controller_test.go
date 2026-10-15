@@ -344,6 +344,33 @@ var _ = Describe("ComputeReadyCondition", func() {
 	})
 
 	Context("Priority 6: All checks pass - Ready", func() {
+		DescribeTable("preserves readiness semantics after successful onboarding",
+			func(lifecycleEnabled bool, maintenance, conditionType string, expectedStatus metav1.ConditionStatus, expectedReason string) {
+				hv.Spec.LifecycleEnabled = lifecycleEnabled
+				hv.Spec.Maintenance = maintenance
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionFalse,
+					Reason: kvmv1.ConditionReasonSucceeded,
+				})
+				if conditionType != "" {
+					meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+						Type:   conditionType,
+						Status: metav1.ConditionTrue,
+					})
+				}
+
+				result := ComputeReadyCondition(hv)
+				Expect(result.Status).To(Equal(expectedStatus))
+				Expect(result.Reason).To(Equal(expectedReason))
+			},
+			Entry("lifecycle disabled does not invalidate readiness", false, kvmv1.MaintenanceUnset, "", metav1.ConditionTrue, kvmv1.ConditionReasonReadyReady),
+			Entry("termination maintenance remains not ready", true, kvmv1.MaintenanceTermination, "", metav1.ConditionFalse, kvmv1.ConditionReasonReadyMaintenance),
+			Entry("manual maintenance remains not ready", true, kvmv1.MaintenanceManual, "", metav1.ConditionFalse, kvmv1.ConditionReasonReadyMaintenance),
+			Entry("terminating condition takes precedence", true, kvmv1.MaintenanceUnset, kvmv1.ConditionTypeTerminating, metav1.ConditionFalse, kvmv1.ConditionReasonTerminating),
+			Entry("offboarded condition takes precedence", true, kvmv1.MaintenanceUnset, kvmv1.ConditionTypeOffboarded, metav1.ConditionFalse, "Offboarded"),
+		)
+
 		It("should return Ready=True when all conditions are satisfied", func() {
 			meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
 				Type:   kvmv1.ConditionTypeOnboarding,
