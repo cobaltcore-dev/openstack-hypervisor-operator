@@ -234,6 +234,82 @@ var _ = Describe("Onboarding Controller", func() {
 		})
 	})
 
+	Context("aborting onboarding", func() {
+		DescribeTable("preserves successful onboarding without OpenStack cleanup",
+			func(ctx SpecContext, maintenance string, lifecycleEnabled bool) {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Spec.Maintenance = maintenance
+				hv.Spec.LifecycleEnabled = lifecycleEnabled
+				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:               kvmv1.ConditionTypeOnboarding,
+					Status:             metav1.ConditionFalse,
+					Reason:             kvmv1.ConditionReasonSucceeded,
+					Message:            "Onboarding completed",
+					LastTransitionTime: metav1.NewTime(time.Date(2026, time.September, 21, 12, 59, 6, 0, time.UTC)),
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+				originalStatus := hv.Status.DeepCopy()
+				originalResourceVersion := hv.ResourceVersion
+
+				// The default mock handler fails any OpenStack request, including cleanup.
+				Expect(reconcileLoop(ctx, 2)).To(Succeed())
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status).To(Equal(*originalStatus))
+				Expect(hv.ResourceVersion).To(Equal(originalResourceVersion))
+			},
+			Entry("when termination begins", kvmv1.MaintenanceTermination, true),
+			Entry("when lifecycle management is disabled", kvmv1.MaintenanceUnset, false),
+		)
+
+		DescribeTable("cleans up test servers and aborts incomplete onboarding",
+			func(ctx SpecContext, reason, maintenance string, lifecycleEnabled bool, message string) {
+				listRequests, deleteRequests := 0, 0
+				fakeServer.Mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+					listRequests++
+					Expect(r.URL.Query().Get("name")).To(Equal(testPrefixName + "-" + hypervisorName))
+					w.Header().Set("Content-Type", "application/json")
+					_, err := fmt.Fprint(w, `{"servers": [{"id": "test-server-id", "name": "ohooc-test-host"}]}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				fakeServer.Mux.HandleFunc("DELETE /servers/test-server-id", func(w http.ResponseWriter, _ *http.Request) {
+					deleteRequests++
+					w.WriteHeader(http.StatusAccepted)
+				})
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Spec.Maintenance = maintenance
+				hv.Spec.LifecycleEnabled = lifecycleEnabled
+				Expect(k8sClient.Update(ctx, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionTrue,
+					Reason:  reason,
+					Message: "Onboarding in progress",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				Expect(reconcileLoop(ctx, 2)).To(Succeed())
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonAborted))
+				Expect(condition.Message).To(Equal(message))
+				Expect(listRequests).To(Equal(1))
+				Expect(deleteRequests).To(Equal(1))
+			},
+			Entry("Initial during termination", kvmv1.ConditionReasonInitial, kvmv1.MaintenanceTermination, true, "Aborted due to MaintenanceTermination"),
+			Entry("Testing during termination", kvmv1.ConditionReasonTesting, kvmv1.MaintenanceTermination, true, "Aborted due to MaintenanceTermination"),
+			Entry("Handover during termination", kvmv1.ConditionReasonHandover, kvmv1.MaintenanceTermination, true, "Aborted due to MaintenanceTermination"),
+			Entry("Initial with lifecycle disabled", kvmv1.ConditionReasonInitial, kvmv1.MaintenanceUnset, false, "Aborted due to LifecycleEnabled being false"),
+			Entry("Testing with lifecycle disabled", kvmv1.ConditionReasonTesting, kvmv1.MaintenanceUnset, false, "Aborted due to LifecycleEnabled being false"),
+			Entry("Handover with lifecycle disabled", kvmv1.ConditionReasonHandover, kvmv1.MaintenanceUnset, false, "Aborted due to LifecycleEnabled being false"),
+		)
+	})
+
 	Context("initial setup of a new hypervisor", func() {
 		BeforeEach(func() {
 			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
