@@ -10,7 +10,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/gophercloud/gophercloud/v2 v2.15.0
 	github.com/gophercloud/utils/v2 v2.0.0-20260922174841-b4759ea0529b
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	github.com/sapcc/go-api-declarations v1.25.1
 	go.uber.org/zap v1.28.0
