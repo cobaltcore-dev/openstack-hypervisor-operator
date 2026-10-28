@@ -18,6 +18,8 @@ limitations under the License.
 package controller
 
 import (
+	"regexp"
+
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -183,6 +185,135 @@ var _ = Describe("Node Certificate Controller", func() {
 			}
 			_, err := nodeCertificateController.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When reconciling a node with the Calico interfaces annotation", func() {
+		// updateCalicoAnnotation sets the projectcalico.org/Interfaces annotation on the node.
+		updateCalicoAnnotation := func(ctx SpecContext, value string) {
+			node := &corev1.Node{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
+			if node.Annotations == nil {
+				node.Annotations = map[string]string{}
+			}
+			node.Annotations[annotationCalicoInterfaces] = value
+			Expect(fakeClient.Update(ctx, node)).To(Succeed())
+		}
+
+		// setNodeInternalIP sets the node status InternalIP.
+		setNodeInternalIP := func(ctx SpecContext, ip string) {
+			node := &corev1.Node{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
+			node.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}}
+			Expect(fakeClient.Status().Update(ctx, node)).To(Succeed())
+		}
+
+		// reconcileNode reconciles the node under test and expects no error.
+		reconcileNode := func(ctx SpecContext) {
+			_, err := nodeCertificateController.Reconcile(ctx, ctrl.Request{Name: nodeName})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// fetchCertificate returns the certificate created for the node under test.
+		fetchCertificate := func(ctx SpecContext) *cmapi.Certificate {
+			_, certName := getSecretAndCertName(nodeName)
+			certificate := &cmapi.Certificate{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, certificate)).To(Succeed())
+			return certificate
+		}
+
+		type annotationCase struct {
+			includeRegex string
+			excludeRegex string
+			annotation   string
+			statusIP     string
+			expectedIPs  []string
+		}
+
+		DescribeTable("computing the certificate IP addresses from the Calico annotation",
+			func(ctx SpecContext, testCase annotationCase) {
+				if testCase.includeRegex != "" {
+					nodeCertificateController.includeInterfaceNames = regexp.MustCompile(testCase.includeRegex)
+				}
+				if testCase.excludeRegex != "" {
+					nodeCertificateController.excludeInterfaceNames = regexp.MustCompile(testCase.excludeRegex)
+				}
+
+				updateCalicoAnnotation(ctx, testCase.annotation)
+				if testCase.statusIP != "" {
+					setNodeInternalIP(ctx, testCase.statusIP)
+				}
+
+				reconcileNode(ctx)
+
+				certificate := fetchCertificate(ctx)
+				Expect(certificate.Spec.IPAddresses).To(Equal(testCase.expectedIPs))
+			},
+			Entry("includes only interfaces matching the include regex",
+				annotationCase{
+					includeRegex: `^vlan_[0-9]+$`,
+					annotation:   `[{"name":"vlan_100","addresses":["10.10.0.5"]},{"name":"enp1s0","addresses":["10.0.0.9"]},{"name":"vlan_abc","addresses":["10.10.0.6"]}]`,
+					statusIP:     "10.0.0.1",
+					expectedIPs:  []string{"10.0.0.1", "10.10.0.5"},
+				}),
+			Entry("drops interfaces matching the exclude regex even if they are included",
+				annotationCase{
+					includeRegex: `^vlan_.*$`,
+					excludeRegex: `^vlan_100$`,
+					annotation:   `[{"name":"vlan_100","addresses":["10.10.0.5"]},{"name":"vlan_200","addresses":["10.10.0.6"]}]`,
+					expectedIPs:  []string{"10.10.0.6"},
+				}),
+			Entry("merges annotation addresses with status addresses and deduplicates",
+				annotationCase{
+					includeRegex: `^vlan_[0-9]+$`,
+					annotation:   `[{"name":"vlan_100","addresses":["10.0.0.1","10.10.0.5"]}]`,
+					statusIP:     "10.0.0.1",
+					expectedIPs:  []string{"10.0.0.1", "10.10.0.5"},
+				}),
+			Entry("skips non-routable and invalid addresses",
+				annotationCase{
+					includeRegex: `.*`,
+					annotation:   `[{"name":"vlan_100","addresses":["not-an-ip","fe80::1","127.0.0.1","10.10.0.5"]}]`,
+					expectedIPs:  []string{"10.10.0.5"},
+				}),
+			Entry("still creates the certificate when the annotation is malformed JSON",
+				annotationCase{
+					includeRegex: `^vlan_[0-9]+$`,
+					annotation:   `this-is-not-json`,
+					statusIP:     "10.0.0.1",
+					expectedIPs:  []string{"10.0.0.1"},
+				}),
+		)
+
+		It("should remove annotation addresses from the certificate when the annotation is deleted", func(ctx SpecContext) {
+			By("Configuring an include filter for numbered vlan interfaces")
+			nodeCertificateController.includeInterfaceNames = regexp.MustCompile(`^vlan_[0-9]+$`)
+
+			By("Annotating the node with Calico interfaces")
+			updateCalicoAnnotation(ctx, `[{"name":"vlan_100","addresses":["10.10.0.5"]}]`)
+
+			By("Setting the node status InternalIP")
+			setNodeInternalIP(ctx, "10.0.0.1")
+
+			By("Reconciling the node")
+			reconcileNode(ctx)
+
+			By("Checking that both addresses are present")
+			certificate := fetchCertificate(ctx)
+			Expect(certificate.Spec.IPAddresses).To(Equal([]string{"10.0.0.1", "10.10.0.5"}))
+
+			By("Deleting the Calico interfaces annotation from the node")
+			node := &corev1.Node{}
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
+			delete(node.Annotations, annotationCalicoInterfaces)
+			Expect(fakeClient.Update(ctx, node)).To(Succeed())
+
+			By("Reconciling the node again")
+			reconcileNode(ctx)
+
+			By("Checking that the annotation IP is removed and the status IP is retained")
+			certificate = fetchCertificate(ctx)
+			Expect(certificate.Spec.IPAddresses).To(Equal([]string{"10.0.0.1"}))
 		})
 	})
 })

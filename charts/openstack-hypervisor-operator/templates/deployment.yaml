@@ -43,6 +43,10 @@ spec:
           value: {{ quote .Values.controllerManager.manager.env.certificateNamespace }}
         - name: CERTIFICATE_ISSUER_NAME
           value: {{ quote .Values.controllerManager.manager.env.certificateIssuerName }}
+        - name: CERTIFICATE_INTERFACE_INCLUDE_REGEX
+          value: {{ quote .Values.controllerManager.manager.env.certificateInterfaceIncludeRegex }}
+        - name: CERTIFICATE_INTERFACE_EXCLUDE_REGEX
+          value: {{ quote .Values.controllerManager.manager.env.certificateInterfaceExcludeRegex }}
         - name: LABEL_SELECTOR
           value: {{ quote .Values.controllerManager.manager.env.labelSelector }}
         - name: AGENT_NAMESPACES

@@ -6,6 +6,8 @@ controllerManager:
     - --health-probe-bind-address=:8081
     - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
     - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
+    - --certificate-interface-include-regex=$(CERTIFICATE_INTERFACE_INCLUDE_REGEX)
+    - --certificate-interface-exclude-regex=$(CERTIFICATE_INTERFACE_EXCLUDE_REGEX)
     - --label-selector=$(LABEL_SELECTOR)
     - --agent-namespaces=$(AGENT_NAMESPACES)
     - --eviction-concurrency=$(EVICTION_CONCURRENCY)
@@ -18,6 +20,10 @@ controllerManager:
     env:
       certificateIssuerName: nova-hypervisor-agents-ca-issuer
       certificateNamespace: monsoon3
+      # Go regexes selecting node interfaces (Calico Interfaces annotation) whose
+      # addresses are added to the certificate; the exclude regex wins over the include.
+      certificateInterfaceIncludeRegex: "^vlan_[0-9]+$"
+      certificateInterfaceExcludeRegex: ""
       labelSelector: ""
       agentNamespaces: "monsoon3"
       # Default maximum number of VM migrations to run concurrently while draining a hypervisor.

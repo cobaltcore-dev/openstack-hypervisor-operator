@@ -19,7 +19,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/netip"
+	"regexp"
 	"slices"
 	"time"
 
@@ -38,13 +41,67 @@ import (
 
 const (
 	NodeCertificateControllerName = "certificate"
+
+	annotationCalicoInterfaces = "projectcalico.org/Interfaces"
 )
+
+// calicoNodeInterface is a single entry of the interfaces annotation.
+type calicoNodeInterface struct {
+	Name      string   `json:"name"`
+	Addresses []string `json:"addresses"`
+}
+
+// parseRoutableIP parses a plain IP address into its canonical form,
+// rejecting zoned and non-routable addresses.
+func parseRoutableIP(address string) (netip.Addr, bool) {
+	ip, err := netip.ParseAddr(address)
+	if err != nil || ip.Zone() != "" {
+		return netip.Addr{}, false
+	}
+
+	ip = ip.Unmap()
+	return ip, ip.IsGlobalUnicast()
+}
+
+// addInterfaceAddresses adds the annotation's interface addresses to ipAddresses, filtered by name; the exclude regex wins.
+func (r *NodeCertificateController) addInterfaceAddresses(ctx context.Context, node *corev1.Node, ipAddresses map[string]bool) {
+	rawAnnotation := node.Annotations[annotationCalicoInterfaces]
+	if rawAnnotation == "" {
+		return
+	}
+
+	var interfaces []calicoNodeInterface
+	if err := json.Unmarshal([]byte(rawAnnotation), &interfaces); err != nil {
+		logger.FromContext(ctx).Error(err, "could not parse node annotation", "annotation", annotationCalicoInterfaces)
+		return
+	}
+
+	for _, iface := range interfaces {
+		if r.includeInterfaceNames != nil && !r.includeInterfaceNames.MatchString(iface.Name) {
+			continue
+		}
+		if r.excludeInterfaceNames != nil && r.excludeInterfaceNames.MatchString(iface.Name) {
+			continue
+		}
+
+		for _, address := range iface.Addresses {
+			if ip, ok := parseRoutableIP(address); ok {
+				ipAddresses[ip.String()] = true
+			}
+		}
+	}
+}
 
 type NodeCertificateController struct {
 	k8sclient.Client
 	Scheme     *runtime.Scheme
 	namespace  string
 	issuerName string
+
+	// includeInterfaceNames selects interface names for the certificate; nil admits all.
+	includeInterfaceNames *regexp.Regexp
+	// excludeInterfaceNames drops interface names; nil excludes none. Wins over include.
+	excludeInterfaceNames *regexp.Regexp
 }
 
 func getSecretAndCertName(name string) (secretName, certName string) {
@@ -73,9 +130,13 @@ func (r *NodeCertificateController) ensureCertificate(ctx context.Context, node 
 		case corev1.NodeHostName, corev1.NodeInternalDNS, corev1.NodeExternalDNS:
 			dnsNameSet[addr.Address] = true
 		case corev1.NodeInternalIP, corev1.NodeExternalIP:
-			ipAddressSet[addr.Address] = true
+			if ip, ok := parseRoutableIP(addr.Address); ok {
+				ipAddressSet[ip.String()] = true
+			}
 		}
 	}
+
+	r.addInterfaceAddresses(ctx, node, ipAddressSet)
 
 	ipAddresses := make([]string, 0, len(ipAddressSet))
 	for k := range ipAddressSet {
@@ -156,7 +217,28 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
+func (r *NodeCertificateController) SetupWithManager(
+	mgr ctrl.Manager, namespace, issuerName, interfaceIncludeRegex, interfaceExcludeRegex string,
+) error {
+
+	if interfaceIncludeRegex != "" {
+		includeRegex, err := regexp.Compile(interfaceIncludeRegex)
+		if err != nil {
+			return fmt.Errorf("invalid interface include regex %q: %w", interfaceIncludeRegex, err)
+		}
+
+		r.includeInterfaceNames = includeRegex
+	}
+
+	if interfaceExcludeRegex != "" {
+		excludeRegex, err := regexp.Compile(interfaceExcludeRegex)
+		if err != nil {
+			return fmt.Errorf("invalid interface exclude regex %q: %w", interfaceExcludeRegex, err)
+		}
+
+		r.excludeInterfaceNames = excludeRegex
+	}
+
 	r.namespace = namespace
 	r.issuerName = issuerName
 
