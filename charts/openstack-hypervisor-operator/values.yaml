@@ -4,12 +4,6 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
-    - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
-    - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
-    - --label-selector=$(LABEL_SELECTOR)
-    - --agent-namespaces=$(AGENT_NAMESPACES)
-    - --eviction-concurrency=$(EVICTION_CONCURRENCY)
-    - --eviction-trait-concurrency=$(EVICTION_TRAIT_CONCURRENCY)
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
