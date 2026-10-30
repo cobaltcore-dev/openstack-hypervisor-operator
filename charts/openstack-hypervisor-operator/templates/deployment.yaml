@@ -33,7 +33,10 @@ spec:
         - name: OS_USER_DOMAIN_NAME
           value: {{ quote .Values.controllerManager.manager.env.osUserDomainName }}
         - name: OS_USERNAME
-          value: {{ quote .Values.controllerManager.manager.env.osUsername }}
+          valueFrom:
+            secretKeyRef:
+              key: SERVICE_USERNAME
+              name: {{ include "openstack-hypervisor-operator.fullname" . }}-secret
         - name: OS_PASSWORD
           valueFrom:
             secretKeyRef:
