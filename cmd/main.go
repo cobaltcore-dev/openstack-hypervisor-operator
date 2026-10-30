@@ -87,6 +87,8 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 	var certificateNamespace string
 	var certificateIssuerName string
+	var certificateInterfaceIncludeRegex string
+	var certificateInterfaceExcludeRegex string
 
 	flag.BoolVar(&version, "version", false,
 		"Print the version and exit.")
@@ -117,6 +119,14 @@ func main() {
 	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
 	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
 		"Name of the certificate issuer.")
+	flag.StringVar(&certificateInterfaceIncludeRegex, "certificate-interface-include-regex", `^vlan_[0-9]+$`,
+		"Regular expression matching node interface names from the projectcalico.org/Interfaces annotation "+
+			"whose IP addresses are added to the hypervisor certificate. "+
+			"An empty expression includes all interfaces.")
+	flag.StringVar(&certificateInterfaceExcludeRegex, "certificate-interface-exclude-regex", "",
+		"Regular expression matching node interface names whose IP addresses are excluded "+
+			"from the hypervisor certificate. Applied after the include expression; "+
+			"an empty expression excludes no interfaces.")
 
 	opts := ctrlzap.Options{
 		Development:     true,
@@ -355,7 +365,8 @@ func main() {
 	if err = (&controller.NodeCertificateController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName,
+		certificateInterfaceIncludeRegex, certificateInterfaceExcludeRegex); err != nil {
 		setupLog.Error(err, "unable to create controller", "certificate", "NodeCertificate")
 		os.Exit(1)
 	}
