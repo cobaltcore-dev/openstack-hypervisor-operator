@@ -21,8 +21,8 @@ import "errors"
 
 // CertificateOptions configures the node certificate controller.
 type CertificateOptions struct {
-	Namespace  string `koanf:"certificate_namespace"`
-	IssuerName string `koanf:"certificate_issuer_name"`
+	Namespace  string `koanf:"certificate_namespace" desc:"The namespace for the certificates."`
+	IssuerName string `koanf:"certificate_issuer_name" desc:"Name of the certificate issuer."`
 }
 
 // Validate checks that the certificate controller has the required settings.

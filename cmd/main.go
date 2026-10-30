@@ -25,7 +25,10 @@ import (
 	"os"
 	gruntime "runtime"
 
+	"github.com/octago/sflags"
+	"github.com/octago/sflags/gen/gflag"
 	"github.com/sapcc/go-api-declarations/bininfo"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -97,6 +100,22 @@ func main() {
 
 	cfg, err := loadOptions()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Register CLI flags from the env-filled structs so that explicit
+	// command-line arguments override environment values; the current
+	// (env-derived) field values become the flag defaults.
+	if err := gflag.ParseTo(&cfg.Shared, flag.CommandLine); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+	if err := gflag.ParseTo(&cfg.Certificate, flag.CommandLine, sflags.Prefix("certificate-")); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+	if err := gflag.ParseTo(&cfg.Eviction, flag.CommandLine, sflags.Prefix("eviction-")); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
 		os.Exit(1)
 	}
