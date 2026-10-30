@@ -21,8 +21,8 @@ import "errors"
 
 // CertificateOptions configures the node certificate controller.
 type CertificateOptions struct {
-	Namespace             string `envconfig:"CERTIFICATE_NAMESPACE" default:"monsoon3"`
-	IssuerName            string `envconfig:"CERTIFICATE_ISSUER_NAME" default:"nova-hypervisor-agents-ca-issuer"`
+	Namespace             string `envconfig:"CERTIFICATE_NAMESPACE" default:"monsoon3" desc:"The namespace for the certificates."`
+	IssuerName            string `envconfig:"CERTIFICATE_ISSUER_NAME" default:"nova-hypervisor-agents-ca-issuer" desc:"Name of the certificate issuer."`
 	InterfaceIncludeRegex string `envconfig:"CERTIFICATE_INTERFACE_INCLUDE_REGEX" default:"^vlan_[0-9]+$" desc:"Regular expression for interface names to include in node certificates."`
 	InterfaceExcludeRegex string `envconfig:"CERTIFICATE_INTERFACE_EXCLUDE_REGEX" default:"" desc:"Regular expression for interface names to exclude from node certificates."`
 }

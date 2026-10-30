@@ -26,6 +26,7 @@ import (
 	gruntime "runtime"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/octago/sflags/gen/gflag"
 	"github.com/sapcc/go-api-declarations/bininfo"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -77,7 +78,7 @@ func init() {
 }
 
 type options struct {
-	Shared      config.Shared
+	config.Shared
 	Certificate controller.CertificateOptions
 	Eviction    eviction.Options
 }
@@ -125,6 +126,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Register CLI flags from the env-filled structs so that explicit
+	// command-line arguments override environment values; the current
+	// (env-derived) field values become the flag defaults.
+	if err := gflag.ParseTo(&cfg, flag.CommandLine); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+
 	opts := ctrlzap.Options{
 		Development:     true,
 		TimeEncoder:     zapcore.ISO8601TimeEncoder,
@@ -146,7 +155,7 @@ func main() {
 
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&opts)))
 
-	if err := cfg.Shared.Validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		setupLog.Error(err, "invalid configuration")
 		os.Exit(1)
 	}
@@ -228,9 +237,9 @@ func main() {
 			&policyv1.PodDisruptionBudget{}: maintenanceCacheConfig,
 		},
 	}
-	if cfg.Shared.LabelSelector != "" {
-		setupLog.Info("setting up cache with label selector", "selector", cfg.Shared.LabelSelector)
-		selector, err := labels.Parse(cfg.Shared.LabelSelector)
+	if cfg.LabelSelector != "" {
+		setupLog.Info("setting up cache with label selector", "selector", cfg.LabelSelector)
+		selector, err := labels.Parse(cfg.LabelSelector)
 		if err != nil {
 			setupLog.Error(err, "unable to parse label selector")
 			os.Exit(1)
@@ -241,7 +250,7 @@ func main() {
 
 		h := sha256.New()
 		h.Write([]byte(leaderElectionID)) // Seed it with something "unique" to the project
-		h.Write([]byte(cfg.Shared.LabelSelector))
+		h.Write([]byte(cfg.LabelSelector))
 		leaderElectionID = fmt.Sprintf("%x.cloud.sap", h.Sum(nil))
 	}
 
