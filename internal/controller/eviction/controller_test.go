@@ -33,7 +33,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 )
 
 var _ = Describe("Instance slice helpers", func() {
@@ -663,9 +662,9 @@ var _ = Describe("Eviction Controller", func() {
 			}
 
 			It("starts at most `limit` migrations per pass and never exceeds it in flight", func(ctx SpecContext) {
-				orig := global.EvictionConcurrency
-				global.EvictionConcurrency = 3
-				DeferCleanup(func() { global.EvictionConcurrency = orig })
+				orig := evictionReconciler.Options.Concurrency
+				evictionReconciler.Options.Concurrency = 3
+				DeferCleanup(func() { evictionReconciler.Options.Concurrency = orig })
 
 				seedVMs(ctx, 5)
 				resource := &kvmv1.Eviction{}
@@ -704,9 +703,9 @@ var _ = Describe("Eviction Controller", func() {
 				// with task_state "migrating" for a while before Status becomes
 				// MIGRATING. If those aren't counted as in-flight, the loop keeps
 				// triggering and exceeds the concurrency limit.
-				orig := global.EvictionConcurrency
-				global.EvictionConcurrency = 2
-				DeferCleanup(func() { global.EvictionConcurrency = orig })
+				orig := evictionReconciler.Options.Concurrency
+				evictionReconciler.Options.Concurrency = 2
+				DeferCleanup(func() { evictionReconciler.Options.Concurrency = orig })
 
 				const tmpl = `{
     "server": {
@@ -798,13 +797,13 @@ var _ = Describe("Eviction Controller", func() {
 			})
 
 			It("forces serial migration for hosts carrying the exclusive trait", func(ctx SpecContext) {
-				orig := global.EvictionConcurrency
-				origMap := global.EvictionTraitConcurrency
-				global.EvictionConcurrency = 4
-				global.EvictionTraitConcurrency = map[string]int{"CUSTOM_HANA_EXCLUSIVE_HOST": 1}
+				orig := evictionReconciler.Options.Concurrency
+				origMap := evictionReconciler.Options.TraitConcurrency
+				evictionReconciler.Options.Concurrency = 4
+				evictionReconciler.Options.TraitConcurrency = TraitConcurrency{"CUSTOM_HANA_EXCLUSIVE_HOST": 1}
 				DeferCleanup(func() {
-					global.EvictionConcurrency = orig
-					global.EvictionTraitConcurrency = origMap
+					evictionReconciler.Options.Concurrency = orig
+					evictionReconciler.Options.TraitConcurrency = origMap
 				})
 
 				By("Marking the hypervisor with the exclusive trait")

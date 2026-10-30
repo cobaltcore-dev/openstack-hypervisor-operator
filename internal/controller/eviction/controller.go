@@ -47,6 +47,7 @@ type EvictionReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	computeClient *gophercloud.ServiceClient
+	Options       Options
 }
 
 const (
@@ -173,7 +174,7 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 
 	// That should leave us with "Running" and the hypervisor should be deactivated
 	if len(eviction.Status.OutstandingInstances) > 0 {
-		limit := global.ResolveConcurrency(hypervisor.Status.Traits)
+		limit := r.Options.ResolveConcurrency(hypervisor.Status.Traits)
 		return r.evictNext(ctx, eviction, limit)
 	}
 
@@ -533,7 +534,9 @@ func (r *EvictionReconciler) registerWithManager(mgr ctrl.Manager) error {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager, options Options) error {
+	r.Options = options
+
 	ctx := context.Background()
 
 	var err error
