@@ -25,8 +25,8 @@ import (
 
 // Shared contains configuration options used by more than one controller.
 type Shared struct {
-	LabelSelector   string   `envconfig:"LABEL_SELECTOR"`
-	AgentNamespaces []string `envconfig:"AGENT_NAMESPACES"`
+	LabelSelector   string   `envconfig:"LABEL_SELECTOR" desc:"Label selector to filter watched resources (namely nodes)."`
+	AgentNamespaces []string `envconfig:"AGENT_NAMESPACES" desc:"Comma-separated list of namespaces to search for agent pods (nova-compute, neutron) during offboarding."`
 }
 
 // Validate normalizes the agent namespace list and requires at least one

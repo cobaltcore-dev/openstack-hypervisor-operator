@@ -20,14 +20,16 @@ package eviction
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // Options configures the eviction controller.
 type Options struct {
-	Concurrency      int              `envconfig:"EVICTION_CONCURRENCY" default:"1"`
-	TraitConcurrency TraitConcurrency `envconfig:"EVICTION_TRAIT_CONCURRENCY"`
+	Concurrency      int              `envconfig:"EVICTION_CONCURRENCY" default:"1" desc:"Default maximum number of VM migrations to run concurrently while draining a hypervisor. Defaults to 1 (serial)."`
+	TraitConcurrency TraitConcurrency `envconfig:"EVICTION_TRAIT_CONCURRENCY" desc:"Comma-separated TRAIT=N overrides for per-host migration concurrency, e.g. CUSTOM_HANA_EXCLUSIVE_HOST=1,CUSTOM_FOO=2. The lowest matching trait limit wins."`
 }
 
 // TraitConcurrency maps Placement trait names to migration concurrency limits.
@@ -59,6 +61,18 @@ func (t *TraitConcurrency) Set(value string) error {
 	*t = result
 	return nil
 }
+
+// String renders the map as sorted, comma-separated TRAIT=N entries.
+func (t TraitConcurrency) String() string {
+	entries := make([]string, 0, len(t))
+	for _, trait := range slices.Sorted(maps.Keys(t)) {
+		entries = append(entries, trait+"="+strconv.Itoa(t[trait]))
+	}
+	return strings.Join(entries, ",")
+}
+
+// Type identifies the value type for flag libraries.
+func (t TraitConcurrency) Type() string { return "traitConcurrency" }
 
 // ResolveConcurrency returns the maximum number of concurrent migrations
 // for a host given its traits: the default, lowered by the lowest matching
