@@ -25,8 +25,8 @@ import (
 
 // Options configures the eviction controller.
 type Options struct {
-	Concurrency      int            `koanf:"eviction_concurrency"`
-	TraitConcurrency map[string]int `koanf:"eviction_trait_concurrency"`
+	Concurrency      int            `koanf:"eviction_concurrency" desc:"Default maximum number of VM migrations to run concurrently while draining a hypervisor. Defaults to 1 (serial)."`
+	TraitConcurrency map[string]int `koanf:"eviction_trait_concurrency" desc:"Per-host migration limits. Env: JSON object, e.g. {\"CUSTOM_HANA_EXCLUSIVE_HOST\":1,\"CUSTOM_FOO\":2}. Empty env clears. CLI: repeat TRAIT:N flags to merge keys, e.g. CUSTOM_FOO:2. Empty CLI is invalid. Names must be nonempty without surrounding whitespace. Limits must be >= 1. The lowest matching limit wins."`
 }
 
 // TraitConcurrency preserves the existing name for an ordinary integer map.
