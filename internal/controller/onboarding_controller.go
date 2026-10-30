@@ -106,20 +106,14 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 		statusCfg.WithConditions(utils.ConditionFromStatus(*c))
 	}
 
-	apply := func() error {
-		return r.Status().Apply(ctx,
-			apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
-			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
-	}
-
 	// check if lifecycle management is enabled
 	if !hv.Spec.LifecycleEnabled {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to LifecycleEnabled being false", statusCfg, apply)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to LifecycleEnabled being false", statusCfg)
 	}
 
 	// check if hv is terminating
 	if hv.Spec.Maintenance == kvmv1.MaintenanceTermination {
-		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to MaintenanceTermination", statusCfg, apply)
+		return ctrl.Result{}, r.abortOnboarding(ctx, hv, computeHost, "Aborted due to MaintenanceTermination", statusCfg)
 	}
 
 	// check condition reason
@@ -139,13 +133,13 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 			// Nothing has registered (yet) that we may adopt.
 			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		case errors.Is(err, openstack.ErrAmbiguousHypervisor):
-			return r.recordIdentityAmbiguity(ctx, status, statusCfg, apply)
+			return r.recordIdentityAmbiguity(ctx, hv, status, statusCfg)
 		case err != nil:
 			return ctrl.Result{}, err
 		}
 
 		if identity.HypervisorID != hv.Status.HypervisorID || identity.ServiceID != hv.Status.ServiceID {
-			return r.repairIdentity(ctx, hv, status, identity, statusCfg, apply)
+			return r.repairIdentity(ctx, hv, status, identity, statusCfg)
 		}
 
 		if status == nil {
@@ -156,7 +150,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 					WithStatus(metav1.ConditionTrue).
 					WithReason(kvmv1.ConditionReasonInitial).
 					WithMessage("Initial onboarding"))
-			return ctrl.Result{}, apply()
+			return ctrl.Result{}, r.applyStatus(ctx, hv, statusCfg)
 		}
 
 		// Tests and handover require the current compute service to be
@@ -170,31 +164,31 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 					WithStatus(metav1.ConditionTrue).
 					WithReason(kvmv1.ConditionReasonInitial).
 					WithMessage(fmt.Sprintf("Nova compute service %s is disabled; re-enabling before continuing onboarding", identity.ServiceID)))
-			return ctrl.Result{}, apply()
+			return ctrl.Result{}, r.applyStatus(ctx, hv, statusCfg)
 		}
 	}
 	switch status.Reason {
 	case kvmv1.ConditionReasonInitial:
-		err := r.initialOnboarding(ctx, hv, statusCfg, apply)
+		err := r.initialOnboarding(ctx, hv, statusCfg)
 		if errors.Is(err, errRequeue) {
 			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 		return ctrl.Result{}, err
 	case kvmv1.ConditionReasonTesting:
 		if hv.Spec.SkipTests {
-			return r.completeOnboarding(ctx, computeHost, hv, statusCfg, apply)
+			return r.completeOnboarding(ctx, computeHost, hv, statusCfg)
 		} else {
-			return r.smokeTest(ctx, hv, computeHost, statusCfg, apply)
+			return r.smokeTest(ctx, hv, computeHost, statusCfg)
 		}
 	case kvmv1.ConditionReasonHandover:
-		return r.completeOnboarding(ctx, computeHost, hv, statusCfg, apply)
+		return r.completeOnboarding(ctx, computeHost, hv, statusCfg)
 	default:
 		// Nothing to be done
 		return ctrl.Result{}, nil
 	}
 }
 
-func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) error {
+func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, computeHost, message string, statusCfg *apiv1.HypervisorStatusApplyConfiguration) error {
 	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	// Never onboarded
 	if status == nil {
@@ -221,7 +215,7 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
 				WithReason(kvmv1.ConditionReasonAborted).
 				WithMessage(err.Error()))
-		return errors.Join(err, apply())
+		return errors.Join(err, r.applyStatus(ctx, hv, statusCfg))
 	}
 
 	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
@@ -230,10 +224,10 @@ func (r *OnboardingController) abortOnboarding(ctx context.Context, hv *kvmv1.Hy
 			WithStatus(metav1.ConditionFalse).
 			WithReason(kvmv1.ConditionReasonAborted).
 			WithMessage(message))
-	return apply()
+	return r.applyStatus(ctx, hv, statusCfg)
 }
 
-func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) error {
+func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) error {
 	zone, found := hv.Labels[corev1.LabelTopologyZone]
 	if !found || zone == "" {
 		return fmt.Errorf("cannot find availability-zone label %v on node", corev1.LabelTopologyZone)
@@ -275,10 +269,10 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 			WithStatus(metav1.ConditionTrue).
 			WithReason(kvmv1.ConditionReasonTesting).
 			WithMessage("Running onboarding tests"))
-	return apply()
+	return r.applyStatus(ctx, hv, statusCfg)
 }
 
-func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
+func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervisor, host string, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (ctrl.Result, error) {
 	log := logger.FromContext(ctx)
 	zone := hv.Labels[corev1.LabelTopologyZone]
 	server, err := r.createOrGetTestServer(ctx, zone, host, hv.UID)
@@ -293,7 +287,7 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 				WithStatus(metav1.ConditionTrue).
 				WithReason(kvmv1.ConditionReasonTesting).
 				WithMessage(message))
-		return apply()
+		return r.applyStatus(ctx, hv, statusCfg)
 	}
 
 	switch server.Status {
@@ -350,14 +344,14 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 		}
 
-		return r.completeOnboarding(ctx, host, hv, statusCfg, apply)
+		return r.completeOnboarding(ctx, host, hv, statusCfg)
 
 	default:
 		return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 	}
 }
 
-func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
+func (r *OnboardingController) completeOnboarding(ctx context.Context, host string, hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (ctrl.Result, error) {
 	onboardingCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
 	if onboardingCondition != nil && onboardingCondition.Reason == kvmv1.ConditionReasonHandover {
 		// We're waiting for aggregates and traits controllers to sync
@@ -379,7 +373,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 				WithStatus(metav1.ConditionFalse).
 				WithReason(kvmv1.ConditionReasonSucceeded).
 				WithMessage("Onboarding completed"))
-		return ctrl.Result{}, apply()
+		return ctrl.Result{}, r.applyStatus(ctx, hv, statusCfg)
 	}
 
 	// First time in completeOnboarding - clean up and prepare for aggregate sync
@@ -390,7 +384,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 				WithStatus(metav1.ConditionTrue). // No cleanup, so we are still "onboarding"
 				WithReason(kvmv1.ConditionReasonAborted).
 				WithMessage(err.Error()))
-		return ctrl.Result{}, errors.Join(err, apply())
+		return ctrl.Result{}, errors.Join(err, r.applyStatus(ctx, hv, statusCfg))
 	}
 
 	// Mark onboarding as almost complete, triggers other controllers to do their part
@@ -401,7 +395,7 @@ func (r *OnboardingController) completeOnboarding(ctx context.Context, host stri
 			WithStatus(metav1.ConditionTrue).
 			WithReason(kvmv1.ConditionReasonHandover).
 			WithMessage("Waiting for other controllers to take over"))
-	return ctrl.Result{}, apply()
+	return ctrl.Result{}, r.applyStatus(ctx, hv, statusCfg)
 }
 
 func (r *OnboardingController) deleteTestServers(ctx context.Context, host string) error {
@@ -431,6 +425,35 @@ func (r *OnboardingController) deleteTestServers(ctx context.Context, host strin
 	}
 
 	return errors.Join(errs...)
+}
+
+// errHypervisorReplaced is returned when the Hypervisor object a reconcile
+// observed was deleted and recreated under the same name (node replacement).
+// Status computed for the old object must not land on the replacement.
+var errHypervisorReplaced = errors.New("hypervisor object was replaced")
+
+// applyStatus applies the status configuration via SSA, but only if the
+// Hypervisor object this reconcile observed still exists.
+//
+// Node replacement deletes the Hypervisor (Node owner reference) and the
+// hypervisor controller recreates it under the same name with a new UID. The
+// API server does not enforce a UID precondition on status applies — a write
+// by name alone merges into whatever object currently carries that name — so
+// the observed UID is checked here. The check reads the informer cache, so a
+// replacement that is not yet visible can still slip through; the identity
+// re-validation on the replacement's next reconcile repairs such a write.
+func (r *OnboardingController) applyStatus(ctx context.Context, observed *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) error {
+	current := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKeyFromObject(observed), current); err != nil {
+		// The object is gone; there is nothing left to write to.
+		return k8sclient.IgnoreNotFound(err)
+	}
+	if current.UID != observed.UID {
+		return errHypervisorReplaced
+	}
+	return r.Status().Apply(ctx,
+		apiv1.Hypervisor(observed.Name).WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
 }
 
 // isOnboardingSucceeded reports whether the Onboarding condition marks the
@@ -480,7 +503,7 @@ func (r *OnboardingController) currentNovaIdentity(ctx context.Context, hv *kvmv
 // in progress is restarted from the initial phase so the enable step and the
 // smoke test run against the current compute service; an aborted onboarding
 // only has its IDs refreshed.
-func (r *OnboardingController) repairIdentity(ctx context.Context, hv *kvmv1.Hypervisor, status *metav1.Condition, identity openstack.Identity, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
+func (r *OnboardingController) repairIdentity(ctx context.Context, hv *kvmv1.Hypervisor, status *metav1.Condition, identity openstack.Identity, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (ctrl.Result, error) {
 	logger.FromContext(ctx).Info("Repairing stale Nova identity",
 		"storedHypervisorID", hv.Status.HypervisorID, "currentHypervisorID", identity.HypervisorID,
 		"storedServiceID", hv.Status.ServiceID, "currentServiceID", identity.ServiceID)
@@ -501,12 +524,12 @@ func (r *OnboardingController) repairIdentity(ctx context.Context, hv *kvmv1.Hyp
 				WithMessage(message))
 	}
 
-	return ctrl.Result{}, apply()
+	return ctrl.Result{}, r.applyStatus(ctx, hv, statusCfg)
 }
 
 // recordIdentityAmbiguity surfaces an unresolvable identity on the Onboarding
 // condition instead of guessing which compute service to act on, and requeues.
-func (r *OnboardingController) recordIdentityAmbiguity(ctx context.Context, status *metav1.Condition, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
+func (r *OnboardingController) recordIdentityAmbiguity(ctx context.Context, hv *kvmv1.Hypervisor, status *metav1.Condition, statusCfg *apiv1.HypervisorStatusApplyConfiguration) (ctrl.Result, error) {
 	message := fmt.Sprintf("Waiting for Nova to report an unambiguous compute identity: %v", openstack.ErrAmbiguousHypervisor)
 
 	if status == nil || status.Status == metav1.ConditionTrue {
@@ -518,7 +541,7 @@ func (r *OnboardingController) recordIdentityAmbiguity(ctx context.Context, stat
 					WithStatus(metav1.ConditionTrue).
 					WithReason(kvmv1.ConditionReasonInitial).
 					WithMessage(message))
-			if err := apply(); err != nil {
+			if err := r.applyStatus(ctx, hv, statusCfg); err != nil {
 				return ctrl.Result{}, err
 			}
 		}

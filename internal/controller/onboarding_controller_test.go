@@ -29,14 +29,17 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 )
 
 const (
@@ -259,7 +262,9 @@ var _ = Describe("Onboarding Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, hv)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			// Specs that replace or delete the object may have removed it
+			// already.
+			Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, hv))).To(Succeed())
 		})
 
 		onboardingReconciler = &OnboardingController{
@@ -680,6 +685,74 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
 				Expect(hv.Status.ServiceID).To(Equal("service-old"))
 			})
+		})
+	})
+
+	Context("status applies across object replacement", func() {
+		// A node replacement deletes the Hypervisor object (Node owner) and
+		// recreates it under the same name with a new UID. A reconcile that
+		// is still in flight holds the old object; its status writes must not
+		// land on the replacement.
+		replaceHypervisor := func(ctx SpecContext) types.UID {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			oldUID := hv.UID
+
+			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			Eventually(func() bool {
+				return k8serrors.IsNotFound(k8sClient.Get(ctx, namespacedName, &kvmv1.Hypervisor{}))
+			}).Within(10 * time.Second).Should(BeTrue())
+
+			replacement := &kvmv1.Hypervisor{}
+			replacement.Name = hypervisorName
+			Expect(k8sClient.Create(ctx, replacement)).To(Succeed())
+			Expect(replacement.UID).NotTo(Equal(oldUID))
+			return oldUID
+		}
+
+		It("does not enforce the UID on status applies (documented API behavior)", func(ctx SpecContext) {
+			// The API server ignores a mismatched UID on subresource applies:
+			// both with and without the UID, the write merges into the
+			// replacement. This is why applyStatus guards client-side. If a
+			// Kubernetes release starts enforcing the UID, this spec fails
+			// and the guard can move into the apply payload.
+			oldUID := replaceHypervisor(ctx)
+
+			statusCfg := apiv1.HypervisorStatus().WithServiceID("stale-service")
+			Expect(k8sClient.Status().Apply(ctx,
+				apiv1.Hypervisor(hypervisorName).WithUID(oldUID).WithStatus(statusCfg),
+				k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))).To(Succeed())
+
+			fresh := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, fresh)).To(Succeed())
+			Expect(fresh.Status.ServiceID).To(Equal("stale-service"))
+		})
+
+		It("drops the status write for a replaced object", func(ctx SpecContext) {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			replaceHypervisor(ctx)
+
+			reconciler := &OnboardingController{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			err := reconciler.applyStatus(ctx, hv, apiv1.HypervisorStatus().WithServiceID("stale-service"))
+			Expect(err).To(MatchError(errHypervisorReplaced))
+
+			fresh := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, fresh)).To(Succeed())
+			Expect(fresh.Status.ServiceID).To(BeEmpty())
+		})
+
+		It("drops the status write when the object is gone", func(ctx SpecContext) {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			Eventually(func() bool {
+				return k8serrors.IsNotFound(k8sClient.Get(ctx, namespacedName, &kvmv1.Hypervisor{}))
+			}).Within(10 * time.Second).Should(BeTrue())
+
+			reconciler := &OnboardingController{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			err := reconciler.applyStatus(ctx, hv, apiv1.HypervisorStatus().WithServiceID("stale-service"))
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
