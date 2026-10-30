@@ -20,15 +20,17 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	gruntime "runtime"
-	"strconv"
 	"strings"
 
 	"github.com/sapcc/go-api-declarations/bininfo"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -52,10 +54,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/config"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/ready"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/logger"
 
 	// +kubebuilder:scaffold:imports
@@ -77,19 +79,20 @@ func init() {
 	utilruntime.Must(cmapi.AddToScheme(scheme))
 }
 
+type options struct {
+	Shared      config.Shared
+	Certificate controller.CertificateOptions
+	Eviction    eviction.Options
+}
+
 func main() {
-	var version bool
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	var certificateNamespace string
-	var certificateIssuerName string
 
-	flag.BoolVar(&version, "version", false,
-		"Print the version and exit.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -100,23 +103,8 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&global.LabelSelector, "label-selector", "", "Label selector to filter watched resources (namely nodes).")
 
-	var agentNamespacesFlag string
-	flag.StringVar(&agentNamespacesFlag, "agent-namespaces", "",
-		"Comma-separated list of namespaces to search for agent pods (nova-compute, neutron) during offboarding.")
-
-	flag.IntVar(&global.EvictionConcurrency, "eviction-concurrency", 1,
-		"Default maximum number of VM migrations to run concurrently while draining a hypervisor. Defaults to 1 (serial).")
-
-	var evictionTraitConcurrencyFlag string
-	flag.StringVar(&evictionTraitConcurrencyFlag, "eviction-trait-concurrency", "",
-		"Comma-separated TRAIT=N overrides for per-host migration concurrency, e.g. "+
-			"CUSTOM_HANA_EXCLUSIVE_HOST=1,CUSTOM_FOO=2. The lowest matching trait limit wins.")
-
-	flag.StringVar(&certificateNamespace, "certificate-namespace", "monsoon3", "The namespace for the certificates. ")
-	flag.StringVar(&certificateIssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
-		"Name of the certificate issuer.")
+	var cfg options
 
 	opts := ctrlzap.Options{
 		Development:     true,
@@ -126,72 +114,83 @@ func main() {
 	}
 
 	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
 
-	// Handle --version before validating required runtime flags so that
-	// `./manager --version` works without providing --agent-namespaces.
-	if version {
-		fmt.Printf("%s %s (%s/%s) %s\n",
-			bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
-			bininfo.CommitOr("edge"))
-		os.Exit(0)
+	rootCmd := &cobra.Command{
+		Use:          "manager",
+		Version:      bininfo.VersionOr("devel"),
+		SilenceUsage: true,
+		Run: func(cmd *cobra.Command, args []string) {
+			run(cfg, metricsAddr, probeAddr, enableLeaderElection, secureMetrics, enableHTTP2, tlsOpts, opts)
+		},
 	}
 
-	if agentNamespacesFlag != "" {
-		// Deduplicate. Without this, repeated entries (e.g. from templated
-		// values) would cause redundant pod-list calls and inflate the
-		// AgentPodsEvicted condition message with duplicate pod names.
-		seen := map[string]struct{}{}
-		for ns := range strings.SplitSeq(agentNamespacesFlag, ",") {
-			ns = strings.TrimSpace(ns)
-			if ns == "" {
-				continue
+	rootCmd.SetVersionTemplate(fmt.Sprintf("%s %s (%s/%s) %s\n",
+		bininfo.Component(), bininfo.VersionOr("devel"), gruntime.GOOS, gruntime.GOARCH,
+		bininfo.CommitOr("edge")))
+
+	flags := rootCmd.Flags()
+	cfg.Shared.AddFlags(flags)
+	cfg.Certificate.AddFlags(flags)
+	cfg.Eviction.AddFlags(flags)
+	// Import the flags registered on the standard flag set (manager and
+	// logging flags) into the command.
+	flags.AddGoFlagSet(flag.CommandLine)
+
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	viper.AutomaticEnv()
+	if err := viper.BindPFlags(flags); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Document each flag's environment variable.
+	flags.VisitAll(func(f *pflag.Flag) {
+		f.Usage += fmt.Sprintf(" (env %s)", strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_")))
+	})
+
+	// Apply environment values to flags not given on the command line.
+	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
+		flags.VisitAll(func(f *pflag.Flag) {
+			if f.Name == "version" || f.Name == "help" {
+				return
 			}
-			if _, ok := seen[ns]; ok {
-				continue
+			if f.Changed {
+				return
 			}
-			seen[ns] = struct{}{}
-			global.AgentNamespaces = append(global.AgentNamespaces, ns)
-		}
+			val := viper.GetString(f.Name)
+			if val == "" || val == f.DefValue {
+				return
+			}
+			if err := flags.Set(f.Name, val); err != nil {
+				fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+				os.Exit(1)
+			}
+		})
 	}
 
-	if len(global.AgentNamespaces) == 0 {
-		setupLog.Error(errors.New("--agent-namespaces is required"), "invalid configuration")
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
 
-	if global.EvictionConcurrency < 1 {
-		setupLog.Error(errors.New("--eviction-concurrency must be >= 1"), "invalid configuration")
-		os.Exit(1)
-	}
-
-	for entry := range strings.SplitSeq(evictionTraitConcurrencyFlag, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		trait, value, ok := strings.Cut(entry, "=")
-		trait = strings.TrimSpace(trait)
-		n, err := strconv.Atoi(strings.TrimSpace(value))
-		if !ok || trait == "" || err != nil || n < 1 {
-			setupLog.Error(errors.New("invalid --eviction-trait-concurrency entry: "+entry),
-				"invalid configuration", "expected", "TRAIT=N with N >= 1")
-			os.Exit(1)
-		}
-		global.EvictionTraitConcurrency[trait] = n
-	}
-
-	if certificateIssuerName == "" {
-		setupLog.Error(errors.New("certificate-issuer-name cannot be empty"), "invalid certificate issuer name")
-		os.Exit(1)
-	}
-
-	if certificateNamespace == "" {
-		setupLog.Error(errors.New("certificate-namespace cannot be empty"), "invalid certificate namespace")
-		os.Exit(1)
-	}
-
+// run validates the configuration and runs the controller manager.
+func run(cfg options, metricsAddr, probeAddr string, enableLeaderElection, secureMetrics, enableHTTP2 bool, tlsOpts []func(*tls.Config), opts ctrlzap.Options) {
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&opts)))
+
+	if err := cfg.Shared.Validate(); err != nil {
+		setupLog.Error(err, "invalid configuration")
+		os.Exit(1)
+	}
+
+	if err := cfg.Eviction.Validate(); err != nil {
+		setupLog.Error(err, "invalid configuration")
+		os.Exit(1)
+	}
+
+	if err := cfg.Certificate.Validate(); err != nil {
+		setupLog.Error(err, "invalid configuration")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -260,9 +259,9 @@ func main() {
 			&policyv1.PodDisruptionBudget{}: maintenanceCacheConfig,
 		},
 	}
-	if global.LabelSelector != "" {
-		setupLog.Info("setting up cache with label selector", "selector", global.LabelSelector)
-		selector, err := labels.Parse(global.LabelSelector)
+	if cfg.Shared.LabelSelector != "" {
+		setupLog.Info("setting up cache with label selector", "selector", cfg.Shared.LabelSelector)
+		selector, err := labels.Parse(cfg.Shared.LabelSelector)
 		if err != nil {
 			setupLog.Error(err, "unable to parse label selector")
 			os.Exit(1)
@@ -273,7 +272,7 @@ func main() {
 
 		h := sha256.New()
 		h.Write([]byte(leaderElectionID)) // Seed it with something "unique" to the project
-		h.Write([]byte(global.LabelSelector))
+		h.Write([]byte(cfg.Shared.LabelSelector))
 		leaderElectionID = fmt.Sprintf("%x.cloud.sap", h.Sum(nil))
 	}
 
@@ -315,7 +314,7 @@ func main() {
 	if err = (&controller.HypervisorController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, cfg.Shared); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Hypervisor")
 		os.Exit(1)
 	}
@@ -331,7 +330,7 @@ func main() {
 	if err = (&eviction.EvictionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, cfg.Eviction); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Eviction")
 		os.Exit(1)
 	}
@@ -355,7 +354,7 @@ func main() {
 	if err = (&controller.NodeCertificateController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr, certificateNamespace, certificateIssuerName); err != nil {
+	}).SetupWithManager(mgr, cfg.Certificate); err != nil {
 		setupLog.Error(err, "unable to create controller", "certificate", "NodeCertificate")
 		os.Exit(1)
 	}
@@ -363,7 +362,7 @@ func main() {
 	if err = (&controller.GardenerNodeLifecycleController{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr, certificateNamespace); err != nil {
+	}).SetupWithManager(mgr, cfg.Certificate.Namespace); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Maintenance")
 		os.Exit(1)
 	}
