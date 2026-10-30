@@ -66,6 +66,7 @@ serviceMonitor:
   labels: {}
   interval: 60s
 secret:
+  serviceUsername: ""
   servicePassword: ""
 serviceAccount:
   annotations: {}
