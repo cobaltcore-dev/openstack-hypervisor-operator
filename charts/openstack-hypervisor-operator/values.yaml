@@ -4,14 +4,6 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
-    - --certificate-namespace=$(CERTIFICATE_NAMESPACE)
-    - --certificate-issuer-name=$(CERTIFICATE_ISSUER_NAME)
-    - --certificate-interface-include-regex=$(CERTIFICATE_INTERFACE_INCLUDE_REGEX)
-    - --certificate-interface-exclude-regex=$(CERTIFICATE_INTERFACE_EXCLUDE_REGEX)
-    - --label-selector=$(LABEL_SELECTOR)
-    - --agent-namespaces=$(AGENT_NAMESPACES)
-    - --eviction-concurrency=$(EVICTION_CONCURRENCY)
-    - --eviction-trait-concurrency=$(EVICTION_TRAIT_CONCURRENCY)
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -29,8 +21,10 @@ controllerManager:
       # Default maximum number of VM migrations to run concurrently while draining a hypervisor.
       # Keep this quoted because it is rendered as an environment variable.
       evictionConcurrency: "1"
-      # Optional comma-separated TRAIT=N overrides for per-host migration concurrency.
-      # The lowest matching trait limit wins, e.g. "CUSTOM_HANA_EXCLUSIVE_HOST=1,CUSTOM_FOO=2".
+      # Optional JSON object with integer per-host migration limits >= 1.
+      # Example: '{"CUSTOM_HANA_EXCLUSIVE_HOST":1,"CUSTOM_FOO":2}'. Empty text clears the map.
+      # Trait names must be nonempty without surrounding whitespace. The lowest matching limit wins.
+      # CLI flags repeat --eviction-trait-concurrency=TRAIT:N to merge keys. Empty CLI input is invalid.
       evictionTraitConcurrency: ""
       osAuthUrl: ""
       osProjectDomainName: ""
