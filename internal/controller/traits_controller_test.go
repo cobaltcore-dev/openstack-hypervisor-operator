@@ -264,6 +264,85 @@ var _ = Describe("TraitsController", func() {
 		})
 	})
 
+	Context("Reconcile during onboarding Handover phase with no custom traits", func() {
+		BeforeEach(func(ctx SpecContext) {
+			// Mock resourceproviders.GetTraits
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+			// Mock resourceproviders.UpdateTraits
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.CustomTraits = nil
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:   kvmv1.ConditionTypeOnboarding,
+				Status: metav1.ConditionTrue,
+				Reason: kvmv1.ConditionReasonHandover,
+			})
+			hypervisor.Status.HypervisorID = "1234"
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should set the TraitsUpdated condition without contacting placement", func(ctx SpecContext) {
+			req := ctrl.Request{NamespacedName: hypervisorName}
+			_, err := traitsController.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(traitsController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Traits).To(BeEmpty())
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeTrue())
+			Expect(meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated).Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
+		})
+	})
+
+	Context("Reconcile when the recorded custom traits already match the spec", func() {
+		BeforeEach(func(ctx SpecContext) {
+			// Mock resourceproviders.GetTraits
+			fakeServer.Mux.HandleFunc("GET /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+			// Mock resourceproviders.UpdateTraits
+			fakeServer.Mux.HandleFunc("PUT /resource_providers/1234/traits", func(w http.ResponseWriter, r *http.Request) {
+				defer GinkgoRecover()
+				Fail("should not be called")
+			})
+
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:   kvmv1.ConditionTypeOnboarding,
+				Status: metav1.ConditionTrue,
+				Reason: kvmv1.ConditionReasonHandover,
+			})
+			hypervisor.Status.HypervisorID = "1234"
+			hypervisor.Status.Traits = []string{"CUSTOM_BAR", "HW_CPU_X86_VMX", "CUSTOM_FOO"}
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+		})
+
+		It("should set the TraitsUpdated condition without contacting placement", func(ctx SpecContext) {
+			req := ctrl.Request{NamespacedName: hypervisorName}
+			_, err := traitsController.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(traitsController.Client.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Traits).To(Equal([]string{"CUSTOM_BAR", "HW_CPU_X86_VMX", "CUSTOM_FOO"}))
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated)).To(BeTrue())
+			Expect(meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated).Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
+		})
+	})
+
 	Context("Reconcile when GetTraits returns an error", func() {
 		BeforeEach(func(ctx SpecContext) {
 			// Mock resourceproviders.GetTraits to return a server error

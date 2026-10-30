@@ -85,28 +85,29 @@ func (tc *TraitsController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	customTraitsApplied := slices.Collect(func(yield func(string) bool) {
-		for _, trait := range hv.Status.Traits {
-			if strings.HasPrefix(trait, customPrefix) && !yield(trait) {
-				return
-			}
-		}
-	})
+	statusCustomTraits := customTraitsOf(hv.Status.Traits)
 
-	if slices.Equal(hv.Spec.CustomTraits, customTraitsApplied) {
-		// Nothing to be done
-		return ctrl.Result{}, nil
+	if slicesEqualUnordered(hv.Spec.CustomTraits, statusCustomTraits) {
+		// Nothing to apply; only ensure the success condition is set,
+		// since it gates the handover phase.
+		if meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeTraitsUpdated) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, tc.applyTraitsStatus(ctx, hv, hv.Status.Traits,
+			getTraitCondition(nil, "Traits in sync"))
 	}
 
-	toAdd := utils.Difference(customTraitsApplied, hv.Spec.CustomTraits)
-	toRemove := utils.Difference(hv.Spec.CustomTraits, customTraitsApplied)
-
-	// fetch current traits, to ensure we don't add duplicates
+	// fetch the traits currently set in placement
 	current, err := resourceproviders.GetTraits(ctx, tc.serviceClient, hv.Status.HypervisorID).Extract()
 	if err != nil {
 		return ctrl.Result{}, errors.Join(err,
 			tc.applyTraitsStatus(ctx, hv, hv.Status.Traits, getTraitCondition(err, "Failed to get current traits from placement")))
 	}
+
+	// the applied set is what placement currently reports
+	appliedCustomTraits := customTraitsOf(current.Traits)
+	toAdd := utils.Difference(appliedCustomTraits, hv.Spec.CustomTraits)
+	toRemove := utils.Difference(hv.Spec.CustomTraits, appliedCustomTraits)
 
 	var targetTraits []string
 	slices.Sort(current.Traits)
@@ -183,6 +184,17 @@ func getTraitCondition(err error, msg string) metav1.Condition {
 		Reason:  reason,
 		Message: message,
 	}
+}
+
+// customTraitsOf returns the subset of traits carrying the CUSTOM_ prefix.
+func customTraitsOf(traits []string) []string {
+	return slices.Collect(func(yield func(string) bool) {
+		for _, trait := range traits {
+			if strings.HasPrefix(trait, customPrefix) && !yield(trait) {
+				return
+			}
+		}
+	})
 }
 
 // registerWithManager registers the controller with the Manager without acquiring OpenStack clients.
