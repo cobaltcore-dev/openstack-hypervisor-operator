@@ -156,9 +156,9 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
-	r.namespace = namespace
-	r.issuerName = issuerName
+func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, options CertificateOptions) error {
+	r.namespace = options.Namespace
+	r.issuerName = options.IssuerName
 
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{
