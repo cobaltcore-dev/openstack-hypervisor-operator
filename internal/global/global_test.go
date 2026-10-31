@@ -15,65 +15,61 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package global
+package global_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
+)
 
 func TestResolveConcurrency(t *testing.T) {
-	// Save and restore the package globals so tests don't leak into each other.
-	origDefault := EvictionConcurrency
-	origMap := EvictionTraitConcurrency
-	t.Cleanup(func() {
-		EvictionConcurrency = origDefault
-		EvictionTraitConcurrency = origMap
-	})
-
 	tests := []struct {
 		name       string
 		defaultVal int
-		traitMap   map[string]int
+		traitMap   map[string]string
 		traits     []string
 		want       int
 	}{
 		{
 			name:       "no traits falls back to default",
 			defaultVal: 3,
-			traitMap:   map[string]int{"CUSTOM_HANA_EXCLUSIVE_HOST": 1},
+			traitMap:   map[string]string{"CUSTOM_HANA_EXCLUSIVE_HOST": "1"},
 			traits:     nil,
 			want:       3,
 		},
 		{
 			name:       "non-matching trait falls back to default",
 			defaultVal: 3,
-			traitMap:   map[string]int{"CUSTOM_HANA_EXCLUSIVE_HOST": 1},
+			traitMap:   map[string]string{"CUSTOM_HANA_EXCLUSIVE_HOST": "1"},
 			traits:     []string{"CUSTOM_SOMETHING_ELSE"},
 			want:       3,
 		},
 		{
 			name:       "matching trait overrides default",
 			defaultVal: 5,
-			traitMap:   map[string]int{"CUSTOM_HANA_EXCLUSIVE_HOST": 1},
+			traitMap:   map[string]string{"CUSTOM_HANA_EXCLUSIVE_HOST": "1"},
 			traits:     []string{"CUSTOM_HANA_EXCLUSIVE_HOST"},
 			want:       1,
 		},
 		{
 			name:       "lowest matching trait wins",
 			defaultVal: 10,
-			traitMap:   map[string]int{"CUSTOM_A": 4, "CUSTOM_B": 2, "CUSTOM_C": 7},
+			traitMap:   map[string]string{"CUSTOM_A": "4", "CUSTOM_B": "2", "CUSTOM_C": "7"},
 			traits:     []string{"CUSTOM_A", "CUSTOM_B", "CUSTOM_C"},
 			want:       2,
 		},
 		{
 			name:       "trait limit above default is ignored (default is the cap)",
 			defaultVal: 2,
-			traitMap:   map[string]int{"CUSTOM_BIG": 8},
+			traitMap:   map[string]string{"CUSTOM_BIG": "8"},
 			traits:     []string{"CUSTOM_BIG"},
 			want:       2,
 		},
 		{
 			name:       "result is clamped to at least 1",
 			defaultVal: 0,
-			traitMap:   map[string]int{},
+			traitMap:   map[string]string{},
 			traits:     nil,
 			want:       1,
 		},
@@ -81,9 +77,11 @@ func TestResolveConcurrency(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			EvictionConcurrency = tt.defaultVal
-			EvictionTraitConcurrency = tt.traitMap
-			if got := ResolveConcurrency(tt.traits); got != tt.want {
+			options := eviction.Options{
+				Concurrency:      tt.defaultVal,
+				TraitConcurrency: tt.traitMap,
+			}
+			if got := options.ResolveConcurrency(tt.traits); got != tt.want {
 				t.Errorf("ResolveConcurrency(%v) = %d, want %d", tt.traits, got, tt.want)
 			}
 		})
