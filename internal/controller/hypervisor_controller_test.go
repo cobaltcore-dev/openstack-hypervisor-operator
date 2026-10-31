@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 )
 
 // envtest does not actually GC pods when their namespace is deleted, so
@@ -455,8 +454,8 @@ var _ = Describe("Hypervisor Controller", func() {
 			})
 
 			// Restrict pod listing to the test namespace.
-			global.AgentNamespaces = []string{agentNamespace}
-			DeferCleanup(func() { global.AgentNamespaces = nil })
+			hypervisorController.Options.AgentNamespaces = []string{agentNamespace}
+			DeferCleanup(func() { hypervisorController.Options.AgentNamespaces = nil })
 
 			// The condition is only computed during termination.
 			_, err := hypervisorController.Reconcile(ctx, ctrl.Request{
