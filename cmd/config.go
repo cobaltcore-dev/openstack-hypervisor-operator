@@ -49,9 +49,7 @@ func loadOptions() (options, error) {
 	k := koanf.New(".")
 
 	// Environment variables use the same names as before, lowercased as keys.
-	if err := k.Load(env.ProviderWithValue("", ".", func(name, value string) (string, any) {
-		return strings.ToLower(name), value
-	}), nil); err != nil {
+	if err := k.Load(env.Provider("", ".", strings.ToLower), nil); err != nil {
 		return cfg, err
 	}
 
