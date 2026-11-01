@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/config"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/ready"
@@ -77,7 +76,7 @@ func init() {
 }
 
 type options struct {
-	Shared      config.Shared `flatten:"true"`
+	Shared      controller.Shared `flatten:"true"`
 	Certificate controller.CertificateOptions
 	Eviction    eviction.Options
 }
