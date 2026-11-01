@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -26,9 +27,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -41,9 +43,42 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/config"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
+
+// Shared contains configuration options used by more than one controller.
+type Shared struct {
+	LabelSelector   string
+	AgentNamespaces []string
+}
+
+// AddFlags registers the shared options on the flag set.
+func (s *Shared) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&s.LabelSelector, "label-selector", "",
+		"Label selector to filter watched resources (namely nodes).")
+	fs.StringSliceVar(&s.AgentNamespaces, "agent-namespaces", nil,
+		"Comma-separated list of namespaces to search for agent pods (nova-compute, neutron) during offboarding.")
+}
+
+// Validate normalizes the agent namespace list and requires at least one
+// namespace to remain.
+func (s *Shared) Validate() error {
+	namespaces := make([]string, 0, len(s.AgentNamespaces))
+	for _, namespace := range s.AgentNamespaces {
+		namespace = strings.TrimSpace(namespace)
+		if namespace == "" || slices.Contains(namespaces, namespace) {
+			continue
+		}
+		namespaces = append(namespaces, namespace)
+	}
+	s.AgentNamespaces = namespaces
+
+	if len(namespaces) == 0 {
+		return errors.New("--agent-namespaces (AGENT_NAMESPACES) must contain at least one namespace")
+	}
+
+	return nil
+}
 
 const (
 	labelLifecycleMode       = "cobaltcore.cloud.sap/node-hypervisor-lifecycle"
@@ -69,7 +104,7 @@ var transferLabels = append([]string{}, defaultTransferLabels...)
 type HypervisorController struct {
 	k8sclient.Client
 	Scheme  *runtime.Scheme
-	Options config.Shared
+	Options Shared
 }
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
@@ -99,7 +134,7 @@ func (hv *HypervisorController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Check if hypervisor already exists
 	if err := hv.Get(ctx, k8sclient.ObjectKeyFromObject(hypervisor), hypervisor); err != nil {
-		if !errors.IsNotFound(err) {
+		if !k8serrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("failed to get hypervisor: %w", err)
 		}
 		// continue with creation
@@ -214,7 +249,7 @@ func syncLabelsAndAnnotations(nodeLabels labels.Set, hypervisor *kvmv1.Hyperviso
 	transportAggregatesAndTraits(&node.ObjectMeta, hypervisor)
 }
 
-func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager, options config.Shared) error {
+func (hv *HypervisorController) SetupWithManager(mgr ctrl.Manager, options Shared) error {
 	hv.Options = options
 
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
