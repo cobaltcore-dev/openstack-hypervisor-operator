@@ -42,6 +42,55 @@ import (
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
+// Options configures the eviction controller.
+type Options struct {
+	Concurrency      int            `koanf:"eviction_concurrency" desc:"Default maximum number of VM migrations to run concurrently while draining a hypervisor. Defaults to 1 (serial)."`
+	TraitConcurrency map[string]int `koanf:"eviction_trait_concurrency" desc:"Per-host migration limits. Env: JSON object, e.g. {\"CUSTOM_HANA_EXCLUSIVE_HOST\":1,\"CUSTOM_FOO\":2}. Empty env clears. CLI: repeat TRAIT:N flags to merge keys, e.g. CUSTOM_FOO:2. Empty CLI is invalid. Names must be nonempty without surrounding whitespace. Limits must be >= 1. The lowest matching limit wins."`
+}
+
+// TraitConcurrency preserves the existing name for an ordinary integer map.
+type TraitConcurrency = map[string]int
+
+// DefaultOptions returns the eviction controller defaults.
+func DefaultOptions() Options {
+	return Options{Concurrency: 1}
+}
+
+// ResolveConcurrency returns the maximum number of concurrent migrations
+// for a host given its traits: the default, lowered by the lowest matching
+// trait limit, and never below 1.
+func (o Options) ResolveConcurrency(traits []string) int {
+	limit := o.Concurrency
+	for _, trait := range traits {
+		if traitLimit, ok := o.TraitConcurrency[trait]; ok && traitLimit < limit {
+			limit = traitLimit
+		}
+	}
+	return max(limit, 1)
+}
+
+// Validate checks that the concurrency and every trait limit are >= 1 and
+// that trait names are non-empty and carry no surrounding whitespace.
+func (o Options) Validate() error {
+	if o.Concurrency < 1 {
+		return fmt.Errorf("--eviction-concurrency (EVICTION_CONCURRENCY) must be >= 1, got %d", o.Concurrency)
+	}
+
+	for trait, limit := range o.TraitConcurrency {
+		if limit < 1 {
+			return fmt.Errorf("--eviction-trait-concurrency (EVICTION_TRAIT_CONCURRENCY): trait %q must have an integer limit >= 1, got %d", trait, limit)
+		}
+		if trait != strings.TrimSpace(trait) {
+			return fmt.Errorf("--eviction-trait-concurrency (EVICTION_TRAIT_CONCURRENCY): trait name %q must not contain surrounding whitespace", trait)
+		}
+		if trait == "" {
+			return errors.New("--eviction-trait-concurrency (EVICTION_TRAIT_CONCURRENCY): trait name must not be empty")
+		}
+	}
+
+	return nil
+}
+
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
 	client.Client

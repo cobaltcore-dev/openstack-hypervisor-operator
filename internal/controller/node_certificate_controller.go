@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -35,6 +36,32 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
+
+// CertificateOptions configures the node certificate controller.
+type CertificateOptions struct {
+	Namespace  string `koanf:"certificate_namespace" desc:"The namespace for the certificates."`
+	IssuerName string `koanf:"certificate_issuer_name" desc:"Name of the certificate issuer."`
+}
+
+// DefaultCertificateOptions returns the certificate controller defaults.
+func DefaultCertificateOptions() CertificateOptions {
+	return CertificateOptions{
+		Namespace:  "monsoon3",
+		IssuerName: "nova-hypervisor-agents-ca-issuer",
+	}
+}
+
+// Validate checks that the certificate controller has the required settings.
+func (o CertificateOptions) Validate() error {
+	if o.Namespace == "" {
+		return errors.New("--certificate-namespace (CERTIFICATE_NAMESPACE) cannot be empty")
+	}
+	if o.IssuerName == "" {
+		return errors.New("--certificate-issuer-name (CERTIFICATE_ISSUER_NAME) cannot be empty")
+	}
+
+	return nil
+}
 
 const (
 	NodeCertificateControllerName = "certificate"
