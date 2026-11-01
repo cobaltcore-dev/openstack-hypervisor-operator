@@ -26,15 +26,14 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
 
-	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/config"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
 )
 
 type options struct {
-	config.Shared `koanf:",squash"`
-	Certificate   controller.CertificateOptions `koanf:",squash"`
-	Eviction      eviction.Options              `koanf:",squash"`
+	controller.Shared `koanf:",squash"`
+	Certificate       controller.CertificateOptions `koanf:",squash"`
+	Eviction          eviction.Options              `koanf:",squash"`
 }
 
 // loadOptions reads the operator settings from the environment, starting from
@@ -43,7 +42,7 @@ type options struct {
 // changes or flag registration.
 func loadOptions() (options, error) {
 	cfg := options{
-		Shared:      config.DefaultOptions(),
+		Shared:      controller.DefaultOptions(),
 		Certificate: controller.DefaultCertificateOptions(),
 		Eviction:    eviction.DefaultOptions(),
 	}
