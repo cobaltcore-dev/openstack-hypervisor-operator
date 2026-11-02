@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -35,6 +36,24 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
+
+// CertificateOptions configures the node certificate controller.
+type CertificateOptions struct {
+	Namespace  string `envconfig:"CERTIFICATE_NAMESPACE" default:"monsoon3" desc:"The namespace for the certificates."`
+	IssuerName string `envconfig:"CERTIFICATE_ISSUER_NAME" default:"nova-hypervisor-agents-ca-issuer" desc:"Name of the certificate issuer."`
+}
+
+// Validate checks that the certificate controller has the required settings.
+func (o CertificateOptions) Validate() error {
+	if o.Namespace == "" {
+		return errors.New("--certificate-namespace (CERTIFICATE_NAMESPACE) cannot be empty")
+	}
+	if o.IssuerName == "" {
+		return errors.New("--certificate-issuer-name (CERTIFICATE_ISSUER_NAME) cannot be empty")
+	}
+
+	return nil
+}
 
 const (
 	NodeCertificateControllerName = "certificate"
@@ -156,9 +175,9 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
-	r.namespace = namespace
-	r.issuerName = issuerName
+func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, options CertificateOptions) error {
+	r.namespace = options.Namespace
+	r.issuerName = options.IssuerName
 
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{
