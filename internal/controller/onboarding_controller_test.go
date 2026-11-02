@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -28,14 +29,17 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 )
 
 const (
@@ -83,6 +87,49 @@ const (
     ]
 }`
 )
+
+// hypervisorRecordJSON builds a single GET /os-hypervisors/detail record with
+// a parameterized identity, service liveness and service status, for
+// identity-resolution scenarios.
+func hypervisorRecordJSON(hypervisorID, serviceID, state, status, hostname string) string {
+	return fmt.Sprintf(`{
+            "service": {
+                "host": %q,
+                "id": "%s",
+                "disabled_reason": ""
+            },
+            "cpu_info": {
+                "arch": "x86_64",
+                "model": "Nehalem",
+                "vendor": "Intel",
+                "features": ["pge", "clflush"],
+                "topology": {"cores": 1, "threads": 1, "sockets": 4}
+            },
+            "current_workload": 0,
+            "status": "%s",
+            "state": "%s",
+            "disk_available_least": 0,
+            "host_ip": "1.1.1.1",
+            "free_disk_gb": 1028,
+            "free_ram_mb": 7680,
+            "hypervisor_hostname": %q,
+            "hypervisor_type": "fake",
+            "hypervisor_version": 2002000,
+            "id": "%s",
+            "local_gb": 1028,
+            "local_gb_used": 0,
+            "memory_mb": 8192,
+            "memory_mb_used": 512,
+            "running_vms": 0,
+            "vcpus": 1,
+            "vcpus_used": 0
+        }`, hostname, serviceID, status, state, hostname, hypervisorID)
+}
+
+// hypervisorListJSON wraps records into a GET /os-hypervisors/detail response.
+func hypervisorListJSON(records ...string) string {
+	return `{"hypervisors": [` + strings.Join(records, ",") + `]}`
+}
 
 var _ = Describe("Onboarding Controller", func() {
 	const (
@@ -215,7 +262,9 @@ var _ = Describe("Onboarding Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, hv)).To(Succeed())
 		DeferCleanup(func(ctx SpecContext) {
-			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			// Specs that replace or delete the object may have removed it
+			// already.
+			Expect(k8sclient.IgnoreNotFound(k8sClient.Delete(ctx, hv))).To(Succeed())
 		})
 
 		onboardingReconciler = &OnboardingController{
@@ -407,6 +456,306 @@ var _ = Describe("Onboarding Controller", func() {
 		})
 	})
 
+	Context("Nova identity resolution", func() {
+		var (
+			hypervisorListBody string
+			listCalls          int
+		)
+
+		BeforeEach(func() {
+			listCalls = 0
+			hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON(hypervisorId, serviceId, "up", "enabled", hypervisorName))
+			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+				listCalls++
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, err := fmt.Fprint(w, hypervisorListBody)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		setStatus := func(ctx SpecContext, hypervisorID, serviceID, reason string) {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			hv.Status.HypervisorID = hypervisorID
+			hv.Status.ServiceID = serviceID
+			if reason != "" {
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionTrue,
+					Reason: reason,
+				})
+			}
+			Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+		}
+
+		When("the only compute record has no live service", func() {
+			BeforeEach(func() {
+				// Leftover of a replaced node: the agent is gone, so the
+				// record must not be adopted even though it is the only match.
+				hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON("hv-old", "service-old", "down", "enabled", hypervisorName))
+			})
+
+			It("waits instead of adopting the stale record", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(BeEmpty())
+				Expect(hv.Status.HypervisorID).To(BeEmpty())
+				Expect(meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)).To(BeNil())
+			})
+		})
+
+		When("the stored identity points at a replaced compute service", func() {
+			var enableNewCalls, enableOldCalls int
+
+			BeforeEach(func(ctx SpecContext) {
+				setStatus(ctx, "hv-old", "service-old", kvmv1.ConditionReasonTesting)
+
+				// The replacement agent registered a new service; with
+				// compute/disable_new_services it starts disabled.
+				hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON("hv-new", "service-new", "up", "disabled", hypervisorName))
+
+				fakeServer.Mux.HandleFunc("PUT /os-services/service-new", func(w http.ResponseWriter, r *http.Request) {
+					enableNewCalls++
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"service": {"id": "service-new", "status": "enabled"}}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				fakeServer.Mux.HandleFunc("PUT /os-services/service-old", func(w http.ResponseWriter, r *http.Request) {
+					enableOldCalls++
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"service": {"id": "service-old", "status": "enabled"}}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
+			It("repairs the identity and enables the current service", func(ctx SpecContext) {
+				By("Repairing the stale identity and restarting at the enable step")
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.HypervisorID).To(Equal("hv-new"))
+				Expect(hv.Status.ServiceID).To(Equal("service-new"))
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+				Expect(condition.Message).To(ContainSubstring("identity changed"))
+
+				By("Running the enable step against the new service once aggregates are in place")
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				_, err = onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(enableNewCalls).To(Equal(1))
+				Expect(enableOldCalls).To(BeZero())
+
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				condition = meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonTesting))
+			})
+		})
+
+		When("the current compute service is disabled during testing", func() {
+			BeforeEach(func(ctx SpecContext) {
+				setStatus(ctx, hypervisorId, serviceId, kvmv1.ConditionReasonTesting)
+				hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON(hypervisorId, serviceId, "up", "disabled", hypervisorName))
+			})
+
+			It("returns to the enable step instead of testing a disabled host", func(ctx SpecContext) {
+				_, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+				Expect(condition.Message).To(ContainSubstring("disabled"))
+			})
+		})
+
+		When("several live records match the hostname", func() {
+			BeforeEach(func() {
+				hypervisorListBody = hypervisorListJSON(
+					hypervisorRecordJSON("hv-a", "service-a", "up", "enabled", hypervisorName),
+					hypervisorRecordJSON("hv-b", "service-b", "up", "enabled", hypervisorName),
+				)
+			})
+
+			It("refuses to guess and records the ambiguity", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(BeEmpty())
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+				Expect(condition.Message).To(ContainSubstring("multiple"))
+			})
+		})
+
+		When("records for other hostnames match the search pattern", func() {
+			BeforeEach(func() {
+				// The hostname pattern is a substring search, so records for
+				// other hosts can be returned; only an exact match counts.
+				hypervisorListBody = hypervisorListJSON(
+					hypervisorRecordJSON("hv-other", "service-other", "up", "enabled", "test-host-other"),
+					hypervisorRecordJSON(hypervisorId, serviceId, "up", "enabled", hypervisorName),
+				)
+			})
+
+			It("ignores records that do not exactly match the hostname", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.HypervisorID).To(Equal(hypervisorId))
+				Expect(hv.Status.ServiceID).To(Equal(serviceId))
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+			})
+		})
+
+		When("the stored identity is still current among duplicates", func() {
+			BeforeEach(func(ctx SpecContext) {
+				setStatus(ctx, "hv-b", "service-b", kvmv1.ConditionReasonInitial)
+				hypervisorListBody = hypervisorListJSON(
+					hypervisorRecordJSON("hv-a", "service-a", "up", "enabled", hypervisorName),
+					hypervisorRecordJSON("hv-b", "service-b", "up", "enabled", hypervisorName),
+				)
+			})
+
+			It("keeps the stored identity", func(ctx SpecContext) {
+				// No aggregates are set, so initialOnboarding requeues after
+				// the identity check; the stored identity must survive it.
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.HypervisorID).To(Equal("hv-b"))
+				Expect(hv.Status.ServiceID).To(Equal("service-b"))
+			})
+		})
+
+		When("onboarding already succeeded", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Status.ServiceID = "service-old"
+				hv.Status.HypervisorID = "hv-old"
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeOnboarding,
+					Status:  metav1.ConditionFalse,
+					Reason:  kvmv1.ConditionReasonSucceeded,
+					Message: "Onboarding completed",
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+			})
+
+			It("does not contact Nova and keeps the stored identity", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
+				Expect(listCalls).To(BeZero())
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(Equal("service-old"))
+			})
+		})
+	})
+
+	Context("status applies across object replacement", func() {
+		// A node replacement deletes the Hypervisor object (Node owner) and
+		// recreates it under the same name with a new UID. A reconcile that
+		// is still in flight holds the old object; its status writes must not
+		// land on the replacement.
+		replaceHypervisor := func(ctx SpecContext) types.UID {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			oldUID := hv.UID
+
+			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			Eventually(func() bool {
+				return k8serrors.IsNotFound(k8sClient.Get(ctx, namespacedName, &kvmv1.Hypervisor{}))
+			}).Within(10 * time.Second).Should(BeTrue())
+
+			replacement := &kvmv1.Hypervisor{}
+			replacement.Name = hypervisorName
+			Expect(k8sClient.Create(ctx, replacement)).To(Succeed())
+			Expect(replacement.UID).NotTo(Equal(oldUID))
+			return oldUID
+		}
+
+		It("does not enforce the UID on status applies (documented API behavior)", func(ctx SpecContext) {
+			// The API server ignores a mismatched UID on subresource applies:
+			// both with and without the UID, the write merges into the
+			// replacement. This is why applyStatus guards client-side. If a
+			// Kubernetes release starts enforcing the UID, this spec fails
+			// and the guard can move into the apply payload.
+			oldUID := replaceHypervisor(ctx)
+
+			statusCfg := apiv1.HypervisorStatus().WithServiceID("stale-service")
+			Expect(k8sClient.Status().Apply(ctx,
+				apiv1.Hypervisor(hypervisorName).WithUID(oldUID).WithStatus(statusCfg),
+				k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))).To(Succeed())
+
+			fresh := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, fresh)).To(Succeed())
+			Expect(fresh.Status.ServiceID).To(Equal("stale-service"))
+		})
+
+		It("drops the status write for a replaced object", func(ctx SpecContext) {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			replaceHypervisor(ctx)
+
+			reconciler := &OnboardingController{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			err := reconciler.applyStatus(ctx, hv, apiv1.HypervisorStatus().WithServiceID("stale-service"))
+			Expect(err).To(MatchError(errHypervisorReplaced))
+
+			fresh := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, fresh)).To(Succeed())
+			Expect(fresh.Status.ServiceID).To(BeEmpty())
+		})
+
+		It("drops the status write when the object is gone", func(ctx SpecContext) {
+			hv := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, hv)).To(Succeed())
+			Eventually(func() bool {
+				return k8serrors.IsNotFound(k8sClient.Get(ctx, namespacedName, &kvmv1.Hypervisor{}))
+			}).Within(10 * time.Second).Should(BeTrue())
+
+			reconciler := &OnboardingController{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			err := reconciler.applyStatus(ctx, hv, apiv1.HypervisorStatus().WithServiceID("stale-service"))
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 	Context("running tests after initial setup", func() {
 		var (
 			serverActionHandler func(http.ResponseWriter, *http.Request)
@@ -430,6 +779,16 @@ var _ = Describe("Onboarding Controller", func() {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprintf(w, `{"service": {"id": "%v", "status": "enabled"}}`, serviceId)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			// The onboarding controller re-validates the Nova identity on
+			// every reconcile, so the smoke-test phases still need a
+			// hypervisor listing that matches the stored identity.
+			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, err := fmt.Fprint(w, hypervisorListJSON(hypervisorRecordJSON(hypervisorId, serviceId, "up", "enabled", hypervisorName)))
 				Expect(err).NotTo(HaveOccurred())
 			})
 
