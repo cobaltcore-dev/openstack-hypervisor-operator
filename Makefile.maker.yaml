@@ -9,7 +9,9 @@ controllerGen:
   enabled: true
   crdOutputPath: charts/openstack-hypervisor-operator/crds
   objectHeaderFile: hack/boilerplate.go.txt
-  rbacRoleName: hypervisor-operator-manager-role
+  # Release-scoped ClusterRole name (Helm template): multiple instances of
+  # this operator must not share RBAC objects in the same cluster.
+  rbacRoleName: '{{ include "openstack-hypervisor-operator.fullname" . }}-manager-role'
   rbacOutputPath: charts/openstack-hypervisor-operator/templates
   allowDangerousTypes: true
 
