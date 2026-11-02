@@ -34,6 +34,8 @@ controllerManager:
       osUsername: ""
     image:
       repository: ghcr.io/cobaltcore-dev/openstack-hypervisor-operator
+      # Defaults to Chart.AppVersion.
+      tag: null
     resources:
       limits:
         cpu: 500m
