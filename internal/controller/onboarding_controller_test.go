@@ -227,6 +227,7 @@ var _ = Describe("Onboarding Controller", func() {
 			testComputeClient: client.ServiceClient(fakeServer),
 			testImageClient:   client.ServiceClient(fakeServer),
 			testNetworkClient: client.ServiceClient(fakeServer),
+			testVolumeClient:  client.ServiceClient(fakeServer),
 		}
 
 		DeferCleanup(func() {
@@ -412,6 +413,8 @@ var _ = Describe("Onboarding Controller", func() {
 			serverActionHandler func(http.ResponseWriter, *http.Request)
 			serverDeleteHandler func(http.ResponseWriter, *http.Request)
 			serverDetailHandler func(http.ResponseWriter, *http.Request)
+			serverListHandler   func(http.ResponseWriter, *http.Request)
+			volumeListHandler   func(http.ResponseWriter, *http.Request)
 		)
 
 		BeforeEach(func(ctx SpecContext) {
@@ -433,11 +436,14 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			fakeServer.Mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+			serverListHandler = func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprint(w, emptyServersBody)
 				Expect(err).NotTo(HaveOccurred())
+			}
+			fakeServer.Mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+				serverListHandler(w, r)
 			})
 
 			serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
@@ -469,6 +475,16 @@ var _ = Describe("Onboarding Controller", func() {
 				w.WriteHeader(http.StatusOK)
 				_, err := fmt.Fprint(w, networksBody)
 				Expect(err).NotTo(HaveOccurred())
+			})
+
+			volumeListHandler = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, err := fmt.Fprint(w, `{"volumes": []}`)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			fakeServer.Mux.HandleFunc("GET /volumes/detail", func(w http.ResponseWriter, r *http.Request) {
+				volumeListHandler(w, r)
 			})
 
 			fakeServer.Mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
@@ -713,6 +729,106 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(onboardingCond).NotTo(BeNil())
 				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
 				Expect(onboardingCond.Message).To(ContainSubstring("timeout"))
+			})
+		})
+
+		When("the test server ended up in an error state", func() {
+			var (
+				serverDeleteCalls         int
+				orphanedVolumeDeleteCalls int
+				liveVolumeDeleteCalls     int
+				inUseVolumeDeleteCalls    int
+			)
+
+			BeforeEach(func(ctx SpecContext) {
+				By("Overriding HV status to Testing state")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionTrue,
+					Reason: kvmv1.ConditionReasonTesting,
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				// Construct the server name the controller will look for.
+				serverName := fmt.Sprintf("%s-%s-%s", testPrefixName, hypervisorName, string(hv.UID))
+
+				// GET /servers/detail returns the test server in ERROR state.
+				serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
+					_, err := fmt.Fprintf(w,
+						`{"servers": [{"id": "server-id", "name": %q, "status": "ERROR"}], "servers_links": []}`,
+						serverName)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				// The unfiltered server list holds an unrelated live instance
+				// whose boot volume must not be deleted.
+				serverListHandler = func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"servers": [{"id": "c48f6247-abe4-4a24-824e-e820f-afd1c2bc7521", "name": "live-instance", "status": "ACTIVE"}]}`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				fakeServer.Mux.HandleFunc("GET /servers/server-id", func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"server": {"id": "server-id", "name": "server-id", "status": "ERROR", "fault": {"message": "Build of instance 77b7129b-aecb-4d6e-820f-afd1c2bc7521 aborted: VolumeLimitExceeded: Maximum number of volumes allowed (100) exceeded for quota 'volumes_premium'."}}}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				serverDeleteHandler = func(w http.ResponseWriter, _ *http.Request) {
+					serverDeleteCalls++
+					w.WriteHeader(http.StatusAccepted)
+				}
+
+				// Three volumes: an orphaned boot volume (instance gone), the
+				// boot volume of the live instance (instance exists), and an
+				// in-use volume (attached).
+				volumeListHandler = func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"volumes": [
+						{"id": "orphaned-volume-id", "name": "77b7129b-aecb-4d6e-820f-afd1c2bc7521", "status": "available"},
+						{"id": "live-instance-volume-id", "name": "c48f6247-abe4-4a24-824e-e820f-afd1c2bc7521", "status": "available"},
+						{"id": "in-use-volume-id", "name": "in-use-volume-id", "status": "in-use"}
+					]}`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				fakeServer.Mux.HandleFunc("DELETE /volumes/orphaned-volume-id", func(w http.ResponseWriter, _ *http.Request) {
+					orphanedVolumeDeleteCalls++
+					w.WriteHeader(http.StatusAccepted)
+				})
+				fakeServer.Mux.HandleFunc("DELETE /volumes/live-instance-volume-id", func(w http.ResponseWriter, _ *http.Request) {
+					liveVolumeDeleteCalls++
+					w.WriteHeader(http.StatusAccepted)
+				})
+				fakeServer.Mux.HandleFunc("DELETE /volumes/in-use-volume-id", func(w http.ResponseWriter, _ *http.Request) {
+					inUseVolumeDeleteCalls++
+					w.WriteHeader(http.StatusAccepted)
+				})
+			})
+
+			It("should delete the server and the orphaned volume and record the fault", func(ctx SpecContext) {
+				_, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying the failed server was deleted")
+				Expect(serverDeleteCalls).To(Equal(1))
+
+				By("Verifying only the orphaned volume was deleted")
+				Expect(orphanedVolumeDeleteCalls).To(Equal(1))
+				Expect(liveVolumeDeleteCalls).To(BeZero())
+				Expect(inUseVolumeDeleteCalls).To(BeZero())
+
+				By("Verifying the onboarding condition records the fault")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				onboardingCond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(onboardingCond).NotTo(BeNil())
+				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
+				Expect(onboardingCond.Message).To(ContainSubstring("VolumeLimitExceeded"))
 			})
 		})
 

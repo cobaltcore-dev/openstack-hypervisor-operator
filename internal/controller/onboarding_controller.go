@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"uuid"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -37,6 +38,7 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/services"
@@ -72,6 +74,7 @@ type OnboardingController struct {
 	testComputeClient *gophercloud.ServiceClient
 	testImageClient   *gophercloud.ServiceClient
 	testNetworkClient *gophercloud.ServiceClient
+	testVolumeClient  *gophercloud.ServiceClient
 	requeueInterval   time.Duration
 }
 
@@ -284,6 +287,12 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 			log.Error(err, "failed to delete test instance", "id", id)
 		}
 
+		// Aborted builds can leak the boot volume; delete it so the test
+		// project does not exhaust its volume quota.
+		if err := r.deleteOrphanedTestVolumes(ctx); err != nil {
+			log.Error(err, "failed to delete orphaned test volumes")
+		}
+
 		return ctrl.Result{RequeueAfter: defaultWaitTime}, nil
 
 	case "ACTIVE":
@@ -401,6 +410,57 @@ func (r *OnboardingController) deleteTestServers(ctx context.Context, host strin
 	return errors.Join(errs...)
 }
 
+// deleteOrphanedTestVolumes deletes unattached boot volumes left behind by
+// aborted test server builds. Nova names boot volumes after the instance
+// UUID, so a volume is only deleted when it is unattached and no instance
+// with that ID exists in the project anymore.
+func (r *OnboardingController) deleteOrphanedTestVolumes(ctx context.Context) error {
+	log := logger.FromContext(ctx)
+
+	serverPages, err := servers.ListSimple(r.testComputeClient, servers.ListOpts{}).AllPages(ctx)
+	if err != nil {
+		return err
+	}
+	serverList, err := servers.ExtractServers(serverPages)
+	if err != nil {
+		return err
+	}
+	existingInstances := make(map[string]struct{}, len(serverList))
+	for _, server := range serverList {
+		existingInstances[server.ID] = struct{}{}
+	}
+
+	volumePages, err := volumes.List(r.testVolumeClient, volumes.ListOpts{}).AllPages(ctx)
+	if err != nil {
+		return err
+	}
+	volumeList, err := volumes.ExtractVolumes(volumePages)
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+	for _, volume := range volumeList {
+		if volume.Status != "available" {
+			continue
+		}
+		if _, err := uuid.Parse(volume.Name); err != nil {
+			continue
+		}
+		if _, exists := existingInstances[volume.Name]; exists {
+			continue
+		}
+		log.Info("deleting orphaned test volume", "id", volume.ID, "name", volume.Name)
+		if err := volumes.Delete(ctx, r.testVolumeClient, volume.ID, nil).ExtractErr(); err != nil {
+			if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 func (r *OnboardingController) lookupNovaProperties(ctx context.Context, hv *kvmv1.Hypervisor) (hypervisorID, serviceID string, err error) {
 	hypervisorAddress := hv.Labels[corev1.LabelHostname]
 	if hypervisorAddress == "" {
@@ -476,6 +536,12 @@ func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, 
 
 	if foundServer != nil {
 		return foundServer, nil
+	}
+
+	// Aborted builds can leak boot volumes, which eventually exhausts the
+	// test project's volume quota.
+	if err := r.deleteOrphanedTestVolumes(ctx); err != nil {
+		log.Error(err, "failed to delete orphaned test volumes")
 	}
 
 	flavorRef := r.TestFlavorID
@@ -604,6 +670,10 @@ func (r *OnboardingController) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	r.testNetworkClient.ResourceBase = fmt.Sprintf("%vv2.0/", r.testNetworkClient.Endpoint)
+
+	if r.testVolumeClient, err = openstack.GetServiceClient(ctx, "volumev3", testAuth); err != nil {
+		return err
+	}
 
 	if r.Clock == nil {
 		r.Clock = clock.RealClock{}
