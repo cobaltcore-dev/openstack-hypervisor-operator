@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -26,6 +27,7 @@ import (
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmapplyv1 "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/certmanager/v1"
 	cmapplymetav1 "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/meta/v1"
+	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +37,31 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
+
+// CertificateOptions configures the node certificate controller.
+type CertificateOptions struct {
+	Namespace  string
+	IssuerName string
+}
+
+// AddFlags registers the certificate options on the flag set.
+func (o *CertificateOptions) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&o.Namespace, "certificate-namespace", "monsoon3", "The namespace for the certificates.")
+	fs.StringVar(&o.IssuerName, "certificate-issuer-name", "nova-hypervisor-agents-ca-issuer",
+		"Name of the certificate issuer.")
+}
+
+// Validate checks that the certificate controller has the required settings.
+func (o CertificateOptions) Validate() error {
+	if o.Namespace == "" {
+		return errors.New("--certificate-namespace (CERTIFICATE_NAMESPACE) cannot be empty")
+	}
+	if o.IssuerName == "" {
+		return errors.New("--certificate-issuer-name (CERTIFICATE_ISSUER_NAME) cannot be empty")
+	}
+
+	return nil
+}
 
 const (
 	NodeCertificateControllerName = "certificate"
@@ -156,9 +183,9 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, namespace, issuerName string) error {
-	r.namespace = namespace
-	r.issuerName = issuerName
+func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, options CertificateOptions) error {
+	r.namespace = options.Namespace
+	r.issuerName = options.IssuerName
 
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{

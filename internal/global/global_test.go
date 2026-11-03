@@ -15,19 +15,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package global
+package global_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/controller/eviction"
+)
 
 func TestResolveConcurrency(t *testing.T) {
-	// Save and restore the package globals so tests don't leak into each other.
-	origDefault := EvictionConcurrency
-	origMap := EvictionTraitConcurrency
-	t.Cleanup(func() {
-		EvictionConcurrency = origDefault
-		EvictionTraitConcurrency = origMap
-	})
-
 	tests := []struct {
 		name       string
 		defaultVal int
@@ -81,9 +77,11 @@ func TestResolveConcurrency(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			EvictionConcurrency = tt.defaultVal
-			EvictionTraitConcurrency = tt.traitMap
-			if got := ResolveConcurrency(tt.traits); got != tt.want {
+			options := eviction.Options{
+				Concurrency:      tt.defaultVal,
+				TraitConcurrency: tt.traitMap,
+			}
+			if got := options.ResolveConcurrency(tt.traits); got != tt.want {
 				t.Errorf("ResolveConcurrency(%v) = %d, want %d", tt.traits, got, tt.want)
 			}
 		})
