@@ -11,7 +11,9 @@ controllerGen:
   objectHeaderFile: hack/boilerplate.go.txt
   # Release-scoped ClusterRole name (Helm template): multiple instances of
   # this operator must not share RBAC objects in the same cluster.
-  rbacRoleName: '{{ include "openstack-hypervisor-operator.fullname" . }}-manager-role'
+  # Embedded verbatim into the Makefile, so the value must carry the
+  # quoting itself.
+  rbacRoleName: '''"{{ include \"openstack-hypervisor-operator.fullname\" . }}-manager-role"'''
   rbacOutputPath: charts/openstack-hypervisor-operator/templates
   allowDangerousTypes: true
 
