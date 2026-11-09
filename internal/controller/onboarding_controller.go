@@ -110,9 +110,7 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	apply := func() error {
-		return r.Status().Apply(ctx,
-			apiv1.Hypervisor(hv.Name).WithStatus(statusCfg),
-			k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
+		return r.applyStatus(ctx, hv, statusCfg)
 	}
 
 	// check if lifecycle management is enabled
@@ -491,6 +489,35 @@ func (r *OnboardingController) deleteOrphanedTestVolumes(ctx context.Context) er
 	}
 
 	return errors.Join(errs...)
+}
+
+// errHypervisorReplaced is returned when the Hypervisor object a reconcile
+// observed was deleted and recreated under the same name (node replacement).
+// Status computed for the old object must not land on the replacement.
+var errHypervisorReplaced = errors.New("hypervisor object was replaced")
+
+// applyStatus applies the status configuration via SSA, but only if the
+// Hypervisor object this reconcile observed still exists.
+//
+// Node replacement deletes the Hypervisor (Node owner reference) and the
+// hypervisor controller recreates it under the same name with a new UID. The
+// API server does not enforce a UID precondition on status applies — a write
+// by name alone merges into whatever object currently carries that name — so
+// the observed UID is checked here. The check reads the informer cache, so a
+// replacement that is not yet visible can still slip through; the identity
+// re-validation on the replacement's next reconcile repairs such a write.
+func (r *OnboardingController) applyStatus(ctx context.Context, observed *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration) error {
+	current := &kvmv1.Hypervisor{}
+	if err := r.Get(ctx, k8sclient.ObjectKeyFromObject(observed), current); err != nil {
+		// The object is gone; there is nothing left to write to.
+		return k8sclient.IgnoreNotFound(err)
+	}
+	if current.UID != observed.UID {
+		return errHypervisorReplaced
+	}
+	return r.Status().Apply(ctx,
+		apiv1.Hypervisor(observed.Name).WithStatus(statusCfg),
+		k8sclient.ForceOwnership, k8sclient.FieldOwner(OnboardingControllerName))
 }
 
 // isOnboardingSucceeded reports whether the Onboarding condition marks the
