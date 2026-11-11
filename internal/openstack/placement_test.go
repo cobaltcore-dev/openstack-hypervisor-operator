@@ -364,4 +364,36 @@ var _ = Describe("Placement API", func() {
 			})
 		})
 	})
+
+	Describe("ResourceProviderInUse", func() {
+		const (
+			providerID    = "test-provider-uuid"
+			usagesPattern = "/resource_providers/{provider_id}/usages"
+		)
+
+		DescribeTable("reports whether the provider has usage",
+			func(status int, body string, expected bool, expectErr bool) {
+				fakeServer.Mux.HandleFunc(usagesPattern, func(w http.ResponseWriter, r *http.Request) {
+					Expect(r.Method).To(Equal(http.MethodGet))
+					Expect(r.PathValue("provider_id")).To(Equal(providerID))
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					fmt.Fprint(w, body)
+				})
+
+				inUse, err := ResourceProviderInUse(ctx, client.ServiceClient(fakeServer), providerID)
+				if expectErr {
+					Expect(err).To(HaveOccurred())
+					return
+				}
+				Expect(err).NotTo(HaveOccurred())
+				Expect(inUse).To(Equal(expected))
+			},
+			Entry("no usages", http.StatusOK, `{"usages": {}}`, false, false),
+			Entry("zero usage", http.StatusOK, `{"usages": {"VCPU": 0}}`, false, false),
+			Entry("positive usage", http.StatusOK, `{"usages": {"VCPU": 2}}`, true, false),
+			Entry("provider not found", http.StatusNotFound, `{"error": "Not Found"}`, false, false),
+			Entry("usage query failure", http.StatusInternalServerError, `{"error": "Internal Server Error"}`, false, true),
+		)
+	})
 })

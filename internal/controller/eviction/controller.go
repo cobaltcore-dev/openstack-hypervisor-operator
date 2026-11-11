@@ -45,8 +45,9 @@ import (
 // EvictionReconciler reconciles a Eviction object
 type EvictionReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	computeClient *gophercloud.ServiceClient
+	Scheme          *runtime.Scheme
+	computeClient   *gophercloud.ServiceClient
+	placementClient *gophercloud.ServiceClient
 }
 
 const (
@@ -175,6 +176,29 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 	if len(eviction.Status.OutstandingInstances) > 0 {
 		limit := global.ResolveConcurrency(hypervisor.Status.Traits)
 		return r.evictNext(ctx, eviction, limit)
+	}
+
+	inUse, err := openstack.ResourceProviderInUse(ctx, r.placementClient, hypervisor.Status.HypervisorID)
+	if err != nil {
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeEvicting,
+			Status:  metav1.ConditionTrue,
+			Message: fmt.Sprintf("waiting for host allocations: %v", err),
+			Reason:  kvmv1.ConditionReasonRunning,
+		})
+		if updateErr := r.updateStatus(ctx, eviction); updateErr != nil {
+			return ctrl.Result{}, errors.Join(err, updateErr)
+		}
+		return ctrl.Result{}, err
+	}
+	if inUse {
+		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
+			Type:    kvmv1.ConditionTypeEvicting,
+			Status:  metav1.ConditionTrue,
+			Message: "waiting for host allocations to drain",
+			Reason:  kvmv1.ConditionReasonRunning,
+		})
+		return ctrl.Result{RequeueAfter: global.DefaultPollTime}, r.updateStatus(ctx, eviction)
 	}
 
 	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
@@ -541,6 +565,11 @@ func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	r.computeClient.Microversion = "2.90" // Xena (or later)
+
+	if r.placementClient, err = openstack.GetServiceClient(ctx, "placement", nil); err != nil {
+		return err
+	}
+	r.placementClient.Microversion = "1.39" // yoga, or later
 
 	return r.registerWithManager(mgr)
 }
