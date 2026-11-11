@@ -20,6 +20,7 @@ package eviction
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
 	"github.com/gophercloud/gophercloud/v2/testhelper/client"
@@ -143,8 +144,9 @@ var _ = Describe("Eviction Controller", func() {
 			Name:      resourceName,
 			Namespace: namespaceName,
 		}
-		reconcileRequest = ctrl.Request{NamespacedName: typeNamespacedName}
-		fakeServer       testhelper.FakeServer
+		reconcileRequest    = ctrl.Request{NamespacedName: typeNamespacedName}
+		fakeServer          testhelper.FakeServer
+		placementUsagesBody string
 	)
 
 	BeforeEach(func(ctx SpecContext) {
@@ -157,11 +159,23 @@ var _ = Describe("Eviction Controller", func() {
 			Fail("Unhandled request to fake server: " + r.Method + " " + r.URL.Path)
 		})
 
+		By("Installing the placement usages mock")
+		fakeServer.Mux.HandleFunc("GET /resource_providers/{provider_id}/usages", func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.PathValue("provider_id")).To(Equal(hypervisorId))
+			w.Header().Add("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, placementUsagesBody)
+		})
+
+		By("Setting default placement usages")
+		placementUsagesBody = `{"usages": {}}`
+
 		By("Creating the EvictionReconciler")
 		evictionReconciler = &EvictionReconciler{
-			Client:        k8sClient,
-			Scheme:        k8sClient.Scheme(),
-			computeClient: client.ServiceClient(fakeServer),
+			Client:          k8sClient,
+			Scheme:          k8sClient.Scheme(),
+			computeClient:   client.ServiceClient(fakeServer),
+			placementClient: client.ServiceClient(fakeServer),
 		}
 	})
 
@@ -393,6 +407,64 @@ var _ = Describe("Eviction Controller", func() {
 							HaveField("Reason", kvmv1.ConditionReasonSucceeded),
 						),
 					))
+				})
+			})
+
+			Context("When placement still has usage after the instances left", func() {
+				BeforeEach(func(ctx SpecContext) {
+					By("Mocking hypervisor API to return enabled status")
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/{hypervisor_id}", func(w http.ResponseWriter, r *http.Request) {
+						rHypervisorId := r.PathValue("hypervisor_id")
+						Expect(rHypervisorId).To(Equal(hypervisorId))
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprintf(w, hypervisorTpl, "null", "enabled")
+						Expect(err).To(Succeed())
+					})
+
+					By("Mocking service update API")
+					fakeServer.Mux.HandleFunc("PUT /os-services/{service_id}", func(w http.ResponseWriter, r *http.Request) {
+						rServiceId := r.PathValue("service_id")
+						Expect(rServiceId).To(Equal(serviceId))
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprintf(w, `{"service": {"id": "%v", "status": "disabled"}}`, serviceId)
+						Expect(err).To(Succeed())
+					})
+
+					By("Seeding placement with remaining usages on the host")
+					placementUsagesBody = `{"usages": {"VCPU": 2}}`
+				})
+
+				It("keeps the eviction running until placement is clear", func(ctx SpecContext) {
+					By("Reconciling until placement blocks completion")
+					Eventually(func(g Gomega) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						g.Expect(err).NotTo(HaveOccurred())
+
+						resource := &kvmv1.Eviction{}
+						g.Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+						condition := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
+						g.Expect(condition).NotTo(BeNil())
+						g.Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+						g.Expect(condition.Message).To(ContainSubstring("waiting for host allocations to drain"))
+					}).WithTimeout(10 * time.Second).Should(Succeed())
+
+					By("Clearing placement usage")
+					placementUsagesBody = `{"usages": {}}`
+
+					By("Reconciling until the eviction completes")
+					Eventually(func(g Gomega) {
+						_, err := evictionReconciler.Reconcile(ctx, reconcileRequest)
+						g.Expect(err).NotTo(HaveOccurred())
+
+						resource := &kvmv1.Eviction{}
+						g.Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+						condition := meta.FindStatusCondition(resource.Status.Conditions, kvmv1.ConditionTypeEvicting)
+						g.Expect(condition).NotTo(BeNil())
+						g.Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+						g.Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonSucceeded))
+					}).WithTimeout(10 * time.Second).Should(Succeed())
 				})
 			})
 		})

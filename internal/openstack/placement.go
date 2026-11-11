@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/placement/v1/resourceproviders"
@@ -121,6 +122,28 @@ func deleteConsumerAllocations(ctx context.Context, client *gophercloud.ServiceC
 
 	_, r.Header, r.Err = gophercloud.ParseResponse(resp, err)
 	return
+}
+
+// ResourceProviderInUse reports whether the resource provider has any
+// non-zero usage. A missing provider is treated as not in use.
+func ResourceProviderInUse(ctx context.Context, client *gophercloud.ServiceClient, providerID string) (bool, error) {
+	if providerID == "" {
+		return false, nil
+	}
+
+	usage, err := resourceproviders.GetUsages(ctx, client, providerID).Extract()
+	if err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("getting usages for resource provider %s: %w", providerID, err)
+	}
+	for _, amount := range usage.Usages {
+		if amount > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Remove all empty Allocations for a certain provider, and if it is empty, delete it
