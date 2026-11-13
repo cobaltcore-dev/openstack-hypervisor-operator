@@ -31,12 +31,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
+	k8sacmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
+	apiv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/applyconfigurations/api/v1"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/global"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/openstack"
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
@@ -104,6 +105,32 @@ func isMigrationTaskState(taskState string) bool {
 	return strings.Contains(taskState, "migrat") || strings.Contains(taskState, "resize")
 }
 
+// evictionStatusCfg builds an EvictionStatusApplyConfiguration pre-populated
+// with the current scalar fields and the conditions this controller owns.
+// Call sites upsert the single condition they are setting via
+// utils.SetApplyConfigurationStatusCondition, then apply.
+func evictionStatusCfg(eviction *kvmv1.Eviction) *apiv1.EvictionStatusApplyConfiguration {
+	cfg := apiv1.EvictionStatus().
+		WithHypervisorServiceId(eviction.Status.HypervisorServiceId).
+		WithOutstandingRamMb(eviction.Status.OutstandingRamMb)
+	cfg.OutstandingInstances = eviction.Status.OutstandingInstances
+	// Seed all conditions this controller owns so they are not pruned on Apply.
+	for _, t := range []string{kvmv1.ConditionTypeEvicting, kvmv1.ConditionTypePreflight, kvmv1.ConditionTypeMigration} {
+		if c := meta.FindStatusCondition(eviction.Status.Conditions, t); c != nil {
+			cfg.WithConditions(utils.ConditionFromStatus(*c))
+		}
+	}
+	return cfg
+}
+
+// applyStatus applies the eviction status via SSA with this controller as the
+// field owner.
+func (r *EvictionReconciler) applyStatus(ctx context.Context, name string, cfg *apiv1.EvictionStatusApplyConfiguration) error {
+	return r.Status().Apply(ctx,
+		apiv1.Eviction(name).WithStatus(cfg),
+		client.ForceOwnership, client.FieldOwner(EvictionControllerName))
+}
+
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kvm.cloud.sap,resources=evictions/finalizers,verbs=update
@@ -137,14 +164,14 @@ func (r *EvictionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	statusCondition := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeEvicting)
 	if statusCondition == nil {
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeEvicting,
-			Status:  metav1.ConditionTrue,
-			Message: "Running",
-			Reason:  kvmv1.ConditionReasonRunning,
-		})
-
-		return ctrl.Result{}, r.updateStatus(ctx, eviction)
+		statusCfg := evictionStatusCfg(eviction)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeEvicting).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonRunning).
+				WithMessage("Running"))
+		return ctrl.Result{}, r.applyStatus(ctx, eviction.Name, statusCfg)
 	}
 
 	switch statusCondition.Status {
@@ -177,36 +204,16 @@ func (r *EvictionReconciler) handleRunning(ctx context.Context, eviction *kvmv1.
 		return r.evictNext(ctx, eviction, limit)
 	}
 
-	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeEvicting,
-		Status:  metav1.ConditionFalse,
-		Message: "eviction completed successfully",
-		Reason:  kvmv1.ConditionReasonSucceeded,
-	})
-
-	eviction.Status.OutstandingRamMb = 0
+	statusCfg := evictionStatusCfg(eviction)
+	statusCfg.WithOutstandingRamMb(0)
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeEvicting).
+			WithStatus(metav1.ConditionFalse).
+			WithReason(kvmv1.ConditionReasonSucceeded).
+			WithMessage("eviction completed successfully"))
 	logger.FromContext(ctx).Info("succeeded")
-	return ctrl.Result{}, r.updateStatus(ctx, eviction)
-}
-
-func (r *EvictionReconciler) updateStatus(ctx context.Context, eviction *kvmv1.Eviction) error {
-	desiredStatus := eviction.Status.DeepCopy()
-	return retry.RetryOnConflict(utils.StatusPatchBackoff, func() error {
-		freshEviction := &kvmv1.Eviction{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(eviction), freshEviction); err != nil {
-			return err
-		}
-		freshBase := freshEviction.DeepCopy()
-		// Apply desired conditions and scalar fields onto the fresh status
-		for _, c := range desiredStatus.Conditions {
-			meta.SetStatusCondition(&freshEviction.Status.Conditions, c)
-		}
-		freshEviction.Status.OutstandingInstances = desiredStatus.OutstandingInstances
-		freshEviction.Status.OutstandingRamMb = desiredStatus.OutstandingRamMb
-		freshEviction.Status.HypervisorServiceId = desiredStatus.HypervisorServiceId
-		return r.Status().Patch(ctx, freshEviction, client.MergeFromWithOptions(freshBase,
-			client.MergeFromWithOptimisticLock{}), client.FieldOwner(EvictionControllerName))
-	})
+	return ctrl.Result{}, r.applyStatus(ctx, eviction.Name, statusCfg)
 }
 
 func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv1.Eviction, hv *kvmv1.Hypervisor) (ctrl.Result, error) {
@@ -214,14 +221,20 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 
 	// If the hypervisor should exist, then we need to ensure it is disabled before we start evicting
 	if expectHypervisor && !meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeHypervisorDisabled) {
-		// Hypervisor is not disabled (yet?), reflect that as a failing preflight check
-		if meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypePreflight,
-			Status:  metav1.ConditionFalse,
-			Message: "hypervisor not disabled",
-			Reason:  kvmv1.ConditionReasonFailed,
-		}) {
-			return ctrl.Result{}, r.updateStatus(ctx, eviction)
+		// Hypervisor is not disabled (yet?), reflect that as a failing preflight check.
+		// Only apply if the condition is new or changed, to avoid unnecessary API calls on repeated requeues.
+		existing := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypePreflight)
+		if existing == nil || existing.Status != metav1.ConditionFalse {
+			statusCfg := evictionStatusCfg(eviction)
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypePreflight).
+					WithStatus(metav1.ConditionFalse).
+					WithReason(kvmv1.ConditionReasonFailed).
+					WithMessage("hypervisor not disabled"))
+			if err := r.applyStatus(ctx, eviction.Name, statusCfg); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		return ctrl.Result{RequeueAfter: global.DefaultPollTime}, nil // Wait for hypervisor to be disabled
 	}
@@ -236,59 +249,62 @@ func (r *EvictionReconciler) handlePreflight(ctx context.Context, eviction *kvmv
 
 		if expectHypervisor {
 			// Abort eviction
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeEvicting,
-				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("failed to get hypervisor %v", err),
-				Reason:  kvmv1.ConditionReasonFailed,
-			})
-			return ctrl.Result{}, r.updateStatus(ctx, eviction)
-		} else {
-			// That is (likely) an eviction for a node that never registered
-			// so we are good to go
-			msg := "eviction completed successfully due to expected case of no hypervisor"
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeEvicting,
-				Status:  metav1.ConditionFalse,
-				Message: msg,
-				Reason:  kvmv1.ConditionReasonSucceeded,
-			})
-			eviction.Status.OutstandingRamMb = 0
-			logger.FromContext(ctx).Info(msg)
-			return ctrl.Result{}, r.updateStatus(ctx, eviction)
+			statusCfg := evictionStatusCfg(eviction)
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeEvicting).
+					WithStatus(metav1.ConditionFalse).
+					WithReason(kvmv1.ConditionReasonFailed).
+					WithMessage(fmt.Sprintf("failed to get hypervisor %v", err)))
+			return ctrl.Result{}, r.applyStatus(ctx, eviction.Name, statusCfg)
 		}
+
+		// That is (likely) an eviction for a node that never registered
+		// so we are good to go
+		msg := "eviction completed successfully due to expected case of no hypervisor"
+		statusCfg := evictionStatusCfg(eviction)
+		statusCfg.WithOutstandingRamMb(0)
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeEvicting).
+				WithStatus(metav1.ConditionFalse).
+				WithReason(kvmv1.ConditionReasonSucceeded).
+				WithMessage(msg))
+		logger.FromContext(ctx).Info(msg)
+		return ctrl.Result{}, r.applyStatus(ctx, eviction.Name, statusCfg)
 	}
 
+	var instances []string
 	if hypervisor.Servers != nil {
-		uuids := make([]string, len(*hypervisor.Servers))
+		instances = make([]string, len(*hypervisor.Servers))
 		for i, server := range *hypervisor.Servers {
-			uuids[i] = server.UUID
+			instances[i] = server.UUID
 		}
-		eviction.Status.OutstandingInstances = uuids
 	}
 
-	// Update status
-	eviction.Status.HypervisorServiceId = hypervisor.ID
-	eviction.Status.OutstandingRamMb = int64(hypervisor.MemoryMBUsed)
-	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypePreflight,
-		Status:  metav1.ConditionTrue,
-		Message: "Preflight checks passed, hypervisor is disabled and ready for eviction",
-		Reason:  kvmv1.ConditionReasonSucceeded,
-	})
-	return ctrl.Result{}, r.updateStatus(ctx, eviction)
+	statusCfg := evictionStatusCfg(eviction)
+	statusCfg.WithHypervisorServiceId(hypervisor.ID)
+	statusCfg.WithOutstandingRamMb(int64(hypervisor.MemoryMBUsed))
+	statusCfg.OutstandingInstances = instances
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypePreflight).
+			WithStatus(metav1.ConditionTrue).
+			WithReason(kvmv1.ConditionReasonSucceeded).
+			WithMessage("Preflight checks passed, hypervisor is disabled and ready for eviction"))
+	return ctrl.Result{}, r.applyStatus(ctx, eviction.Name, statusCfg)
 }
 
 // removeGone drops a specific instance from the outstanding set when it is
 // gone (NotFound), recording a success condition. Returns true if the error was
 // a NotFound and was handled, false otherwise (caller should treat the original
 // error as a real failure).
-func (r *EvictionReconciler) removeGone(eviction *kvmv1.Eviction, uuid string, err error) bool {
+func (r *EvictionReconciler) removeGone(statusCfg *apiv1.EvictionStatusApplyConfiguration, uuid string, err error) bool {
 	if !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		return false
 	}
-	eviction.Status.OutstandingInstances = removeInstance(eviction.Status.OutstandingInstances, uuid)
-	r.setMigrationSucceeded(eviction, fmt.Sprintf("Instance %s is gone", uuid))
+	statusCfg.OutstandingInstances = removeInstance(statusCfg.OutstandingInstances, uuid)
+	r.setMigrationSucceeded(statusCfg, fmt.Sprintf("Instance %s is gone", uuid))
 	return true
 }
 
@@ -303,9 +319,11 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	}
 	baseLog := logger.FromContext(ctx).WithName("Evict")
 
-	// Snapshot the current queue; we mutate eviction.Status.OutstandingInstances
-	// as instances complete, so iterate over a copy.
+	// Snapshot the current queue; we mutate statusCfg.OutstandingInstances as
+	// instances complete, so iterate over a copy.
 	outstanding := append([]string(nil), eviction.Status.OutstandingInstances...)
+
+	statusCfg := evictionStatusCfg(eviction)
 
 	inFlight := 0 // migrations currently running (or terminating)
 	started := 0  // migrations we triggered this pass
@@ -321,7 +339,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 
 		vm, err := servers.Get(vmCtx, r.computeClient, uuid).Extract()
 		if err != nil {
-			if r.removeGone(eviction, uuid, err) {
+			if r.removeGone(statusCfg, uuid, err) {
 				continue
 			}
 			// Transient Get error - leave the instance queued and retry soon.
@@ -339,14 +357,14 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 		case "ERROR":
 			// Needs manual intervention (or another operator fixes it);
 			// deprioritize and record the failure, but don't hold a slot.
-			eviction.Status.OutstandingInstances = deprioritize(eviction.Status.OutstandingInstances, uuid)
+			statusCfg.OutstandingInstances = deprioritize(statusCfg.OutstandingInstances, uuid)
 			log.Info("error", "faultMessage", vm.Fault.Message)
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message),
-				Reason:  kvmv1.ConditionReasonFailed,
-			})
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeMigration).
+					WithStatus(metav1.ConditionFalse).
+					WithReason(kvmv1.ConditionReasonFailed).
+					WithMessage(fmt.Sprintf("Migration of instance %s failed: %s", vm.ID, vm.Fault.Message)))
 			errs = append(errs, fmt.Errorf("error migrating instance %v", uuid))
 			continue
 		}
@@ -369,7 +387,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			if vm.Status == "VERIFY_RESIZE" {
 				log.Info("confirm-resize")
 				err := servers.ConfirmResize(vmCtx, r.computeClient, vm.ID).ExtractErr()
-				if err != nil && !r.removeGone(eviction, uuid, err) {
+				if err != nil && !r.removeGone(statusCfg, uuid, err) {
 					// Retry confirm on the next pass.
 					errs = append(errs, err)
 				}
@@ -380,21 +398,21 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			}
 
 			log.Info("migrated")
-			eviction.Status.OutstandingInstances = removeInstance(eviction.Status.OutstandingInstances, uuid)
-			r.setMigrationSucceeded(eviction, fmt.Sprintf("Migration of instance %s finished", vm.ID))
+			statusCfg.OutstandingInstances = removeInstance(statusCfg.OutstandingInstances, uuid)
+			r.setMigrationSucceeded(statusCfg, fmt.Sprintf("Migration of instance %s finished", vm.ID))
 			continue
 		}
 
 		if vm.TaskState == "deleting" {
 			// Just wait for it to disappear; deprioritize and count as busy so
 			// we don't spend a fresh slot on it.
-			eviction.Status.OutstandingInstances = deprioritize(eviction.Status.OutstandingInstances, uuid)
-			meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-				Type:    kvmv1.ConditionTypeMigration,
-				Status:  metav1.ConditionFalse,
-				Message: fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID),
-				Reason:  kvmv1.ConditionReasonFailed,
-			})
+			statusCfg.OutstandingInstances = deprioritize(statusCfg.OutstandingInstances, uuid)
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeMigration).
+					WithStatus(metav1.ConditionFalse).
+					WithReason(kvmv1.ConditionReasonFailed).
+					WithMessage(fmt.Sprintf("Live migration of terminating instance %s skipped", vm.ID)))
 			inFlight++
 			continue
 		}
@@ -424,9 +442,18 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 			migErr = r.coldMigrate(migrateCtx, c.id, eviction)
 		}
 		if migErr != nil {
-			if r.removeGone(eviction, c.id, migErr) {
+			if r.removeGone(statusCfg, c.id, migErr) {
 				continue
 			}
+			// A migration trigger failed for a reason other than the instance
+			// being gone; record the failure on the MigratingInstance condition
+			// so it is visible even though we keep retrying.
+			utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+				*k8sacmetav1.Condition().
+					WithType(kvmv1.ConditionTypeMigration).
+					WithStatus(metav1.ConditionFalse).
+					WithReason(kvmv1.ConditionReasonFailed).
+					WithMessage(migErr.Error()))
 			errs = append(errs, migErr)
 			continue
 		}
@@ -440,7 +467,7 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	// condition and retried via RequeueAfter, so returning them as a reconcile
 	// error would only discard our RequeueAfter (controller-runtime ignores the
 	// result when the error is non-nil) and emit a warning.
-	if err := r.updateStatus(ctx, eviction); err != nil {
+	if err := r.applyStatus(ctx, eviction.Name, statusCfg); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -449,12 +476,12 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 	}
 
 	baseLog.Info("poll", "inFlight", inFlight, "started", started,
-		"outstanding", len(eviction.Status.OutstandingInstances), "limit", limit)
+		"outstanding", len(statusCfg.OutstandingInstances), "limit", limit)
 
 	// Requeue while there is still work; use a short retry when nothing is
 	// actually migrating yet (e.g. all instances errored) so we don't idle.
 	requeue := global.DefaultPollTime
-	if inFlight+started == 0 && len(eviction.Status.OutstandingInstances) > 0 {
+	if inFlight+started == 0 && len(statusCfg.OutstandingInstances) > 0 {
 		requeue = global.ShortRetryTime
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
@@ -465,20 +492,22 @@ func (r *EvictionReconciler) evictNext(ctx context.Context, eviction *kvmv1.Evic
 // outstanding - an earlier ERROR instance moved to the back of the queue means
 // the eviction is not actually clean yet. The condition is only allowed to flip
 // to Succeeded once the whole eviction completes (OutstandingInstances empty).
-func (r *EvictionReconciler) setMigrationSucceeded(eviction *kvmv1.Eviction, msg string) {
-	prior := meta.FindStatusCondition(eviction.Status.Conditions, kvmv1.ConditionTypeMigration)
-	stickyFailure := len(eviction.Status.OutstandingInstances) > 0 && prior != nil &&
-		prior.Status == metav1.ConditionFalse &&
-		prior.Reason == kvmv1.ConditionReasonFailed
-	if stickyFailure {
-		return
+func (r *EvictionReconciler) setMigrationSucceeded(statusCfg *apiv1.EvictionStatusApplyConfiguration, msg string) {
+	if len(statusCfg.OutstandingInstances) > 0 {
+		for _, c := range statusCfg.Conditions {
+			if c.Type != nil && *c.Type == kvmv1.ConditionTypeMigration &&
+				c.Status != nil && *c.Status == metav1.ConditionFalse &&
+				c.Reason != nil && *c.Reason == kvmv1.ConditionReasonFailed {
+				return
+			}
+		}
 	}
-	meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-		Type:    kvmv1.ConditionTypeMigration,
-		Status:  metav1.ConditionFalse,
-		Message: msg,
-		Reason:  kvmv1.ConditionReasonSucceeded,
-	})
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeMigration).
+			WithStatus(metav1.ConditionFalse).
+			WithReason(kvmv1.ConditionReasonSucceeded).
+			WithMessage(msg))
 }
 
 func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, eviction *kvmv1.Eviction) error {
@@ -490,14 +519,7 @@ func (r *EvictionReconciler) liveMigrate(ctx context.Context, uuid string, evict
 
 	res := servers.LiveMigrate(ctx, r.computeClient, uuid, liveMigrateOpts)
 	if res.Err != nil {
-		err := fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeMigration,
-			Status:  metav1.ConditionFalse,
-			Message: err.Error(),
-			Reason:  kvmv1.ConditionReasonFailed,
-		})
-		return err
+		return fmt.Errorf("failed to evict VM %s due to %w", uuid, res.Err)
 	}
 
 	log.Info("Live migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header.Get("X-Openstack-Request-Id"))
@@ -509,14 +531,7 @@ func (r *EvictionReconciler) coldMigrate(ctx context.Context, uuid string, evict
 
 	res := servers.Migrate(ctx, r.computeClient, uuid)
 	if res.Err != nil {
-		err := fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
-		meta.SetStatusCondition(&eviction.Status.Conditions, metav1.Condition{
-			Type:    kvmv1.ConditionTypeMigration,
-			Status:  metav1.ConditionFalse,
-			Message: err.Error(),
-			Reason:  kvmv1.ConditionReasonFailed,
-		})
-		return err
+		return fmt.Errorf("failed to evict stopped server %s due to %w", uuid, res.Err)
 	}
 
 	log.Info("Cold-migrating server", "server", uuid, "source", eviction.Spec.Hypervisor, "X-Openstack-Request-Id", res.Header.Get("X-Openstack-Request-Id"))
