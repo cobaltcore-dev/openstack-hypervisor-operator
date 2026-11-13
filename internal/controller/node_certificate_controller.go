@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -38,6 +39,26 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
+
+// CertificateOptions configures the node certificate controller.
+type CertificateOptions struct {
+	Namespace             string `default:"monsoon3" usage:"The namespace for the certificates."`
+	IssuerName            string `default:"nova-hypervisor-agents-ca-issuer" usage:"Name of the certificate issuer."`
+	InterfaceIncludeRegex string `default:"^vlan_[0-9]+$" usage:"Regular expression for interface names to include in node certificates."`
+	InterfaceExcludeRegex string `default:""              usage:"Regular expression for interface names to exclude from node certificates."`
+}
+
+// Validate checks that the certificate controller has the required settings.
+func (o CertificateOptions) Validate() error {
+	if o.Namespace == "" {
+		return errors.New("--certificate-namespace (CERTIFICATE_NAMESPACE) cannot be empty")
+	}
+	if o.IssuerName == "" {
+		return errors.New("--certificate-issuer-name (CERTIFICATE_ISSUER_NAME) cannot be empty")
+	}
+
+	return nil
+}
 
 const (
 	NodeCertificateControllerName = "certificate"
@@ -217,30 +238,27 @@ func (r *NodeCertificateController) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NodeCertificateController) SetupWithManager(
-	mgr ctrl.Manager, namespace, issuerName, interfaceIncludeRegex, interfaceExcludeRegex string,
-) error {
-
-	if interfaceIncludeRegex != "" {
-		includeRegex, err := regexp.Compile(interfaceIncludeRegex)
+func (r *NodeCertificateController) SetupWithManager(mgr ctrl.Manager, options CertificateOptions) error {
+	if options.InterfaceIncludeRegex != "" {
+		includeRegex, err := regexp.Compile(options.InterfaceIncludeRegex)
 		if err != nil {
-			return fmt.Errorf("invalid interface include regex %q: %w", interfaceIncludeRegex, err)
+			return fmt.Errorf("invalid interface include regex %q: %w", options.InterfaceIncludeRegex, err)
 		}
 
 		r.includeInterfaceNames = includeRegex
 	}
 
-	if interfaceExcludeRegex != "" {
-		excludeRegex, err := regexp.Compile(interfaceExcludeRegex)
+	if options.InterfaceExcludeRegex != "" {
+		excludeRegex, err := regexp.Compile(options.InterfaceExcludeRegex)
 		if err != nil {
-			return fmt.Errorf("invalid interface exclude regex %q: %w", interfaceExcludeRegex, err)
+			return fmt.Errorf("invalid interface exclude regex %q: %w", options.InterfaceExcludeRegex, err)
 		}
 
 		r.excludeInterfaceNames = excludeRegex
 	}
 
-	r.namespace = namespace
-	r.issuerName = issuerName
+	r.namespace = options.Namespace
+	r.issuerName = options.IssuerName
 
 	novaVirtLabeledPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{
