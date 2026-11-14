@@ -804,4 +804,109 @@ var _ = Describe("AggregatesController", func() {
 			})
 		})
 	})
+
+	Context("When terminating after aggregates were applied", func() {
+		BeforeEach(func(ctx SpecContext) {
+			By("Mocking GetAggregates with the host in test-aggregate2")
+			fakeServer.Mux.HandleFunc("GET /os-aggregates", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, err := fmt.Fprint(w, `{
+					"aggregates": [
+						{"name": "test-aggregate2", "id": 100001, "uuid": "uuid-100001", "hosts": ["hv-test"]}
+					]
+				}`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			By("Setting the desired aggregate")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Aggregates = []string{"test-aggregate2"}
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			By("Reconciling to populate status.aggregates")
+			_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Aggregates).To(HaveLen(1))
+			Expect(updated.Status.Aggregates[0].Name).To(Equal("test-aggregate2"))
+			Expect(updated.Status.Aggregates[0].UUID).To(Equal("uuid-100001"))
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)).To(BeTrue())
+		})
+
+		It("should keep status.aggregates while eviction is in progress", func(ctx SpecContext) {
+			By("Requesting termination before eviction is complete")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonEvictionInProgress))
+
+			Expect(updated.Status.Aggregates).To(HaveLen(1))
+			Expect(updated.Status.Aggregates[0].Name).To(Equal("test-aggregate2"))
+			Expect(updated.Status.Aggregates[0].UUID).To(Equal("uuid-100001"))
+		})
+
+		It("should remove the host from Nova and clear status.aggregates once eviction is complete", func(ctx SpecContext) {
+			By("Requesting termination before eviction is complete")
+			hypervisor := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			hypervisor.Spec.Maintenance = kvmv1.MaintenanceTermination
+			Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+
+			_, err := aggregatesController.Reconcile(ctx, reconcileRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			var removeHostBodies []string
+			By("Mocking RemoveHost for test-aggregate2")
+			fakeServer.Mux.HandleFunc("POST /os-aggregates/100001/action", func(w http.ResponseWriter, r *http.Request) {
+				body := make([]byte, r.ContentLength)
+				_, err := r.Body.Read(body)
+				Expect(err == nil || err.Error() == EOF).To(BeTrue())
+				removeHostBodies = append(removeHostBodies, string(body))
+
+				w.Header().Add("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, err = fmt.Fprint(w, `{"aggregate": {"name": "test-aggregate2", "id": 100001, "uuid": "uuid-100001", "hosts": []}}`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			By("Completing eviction with Evicting=False")
+			Expect(k8sClient.Get(ctx, hypervisorName, hypervisor)).To(Succeed())
+			meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+				Type:    kvmv1.ConditionTypeEvicting,
+				Status:  metav1.ConditionFalse,
+				Reason:  kvmv1.ConditionReasonSucceeded,
+				Message: "Evicted",
+			})
+			Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+
+			_, err = aggregatesController.Reconcile(ctx, reconcileRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(removeHostBodies).To(HaveLen(1))
+			Expect(removeHostBodies[0]).To(MatchJSON(`{"remove_host":{"host":"hv-test"}}`))
+
+			updated := &kvmv1.Hypervisor{}
+			Expect(k8sClient.Get(ctx, hypervisorName, updated)).To(Succeed())
+			Expect(updated.Status.Aggregates).To(BeEmpty())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, kvmv1.ConditionTypeAggregatesUpdated)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(kvmv1.ConditionReasonTerminating))
+		})
+	})
 })
