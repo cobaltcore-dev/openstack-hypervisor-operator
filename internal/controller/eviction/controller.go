@@ -534,13 +534,19 @@ func (r *EvictionReconciler) registerWithManager(mgr ctrl.Manager) error {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *EvictionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	ctx := context.Background()
-
-	var err error
-	if r.computeClient, err = openstack.GetServiceClient(ctx, "compute", nil); err != nil {
+	computeClient, err := openstack.GetServiceClient(context.Background(), "compute", nil)
+	if err != nil {
 		return err
 	}
-	r.computeClient.Microversion = "2.90" // Xena (or later)
+	computeClient.Microversion = "2.90" // Xena (or later)
 
+	return r.SetupWithManagerAndClient(mgr, computeClient)
+}
+
+// SetupWithManagerAndClient sets up the controller with the Manager and uses
+// the given compute service client instead of discovering one from the
+// environment.
+func (r *EvictionReconciler) SetupWithManagerAndClient(mgr ctrl.Manager, computeClient *gophercloud.ServiceClient) error {
+	r.computeClient = computeClient
 	return r.registerWithManager(mgr)
 }
