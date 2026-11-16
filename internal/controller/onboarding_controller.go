@@ -52,7 +52,10 @@ import (
 	"github.com/cobaltcore-dev/openstack-hypervisor-operator/internal/utils"
 )
 
-var errRequeue = errors.New("requeue requested")
+var (
+	errRequeue       = errors.New("requeue requested")
+	errNoLiveService = errors.New("no compute service is up for the hostname")
+)
 
 const (
 	defaultWaitTime          = 1 * time.Minute
@@ -132,6 +135,9 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 			if errors.Is(err, errRequeue) {
 				return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
 			}
+			if errors.Is(err, errNoLiveService) {
+				return r.waitForNovaService(hv, statusCfg, apply)
+			}
 			return ctrl.Result{}, err
 		}
 		statusCfg.WithHypervisorID(hypervisorID).WithServiceID(serviceID)
@@ -158,7 +164,11 @@ func (r *OnboardingController) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	switch status.Reason {
 	case kvmv1.ConditionReasonInitial:
-		return ctrl.Result{}, r.initialOnboarding(ctx, hv, statusCfg, apply)
+		err := r.initialOnboarding(ctx, hv, statusCfg, apply)
+		if errors.Is(err, errRequeue) {
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
+		}
+		return ctrl.Result{}, err
 	case kvmv1.ConditionReasonTesting:
 		if hv.Spec.SkipTests {
 			return r.completeOnboarding(ctx, computeHost, hv, statusCfg, apply)
@@ -237,6 +247,13 @@ func (r *OnboardingController) initialOnboarding(ctx context.Context, hv *kvmv1.
 		ForcedDown: &falseVal,
 	}
 	if result := services.Update(ctx, r.computeClient, hv.Status.ServiceID, opts); result.Err != nil {
+		if gophercloud.ResponseCodeIs(result.Err, http.StatusNotFound) {
+			r.resetNovaIdentity(statusCfg, "nova-compute service vanished; re-resolving identity")
+			if err := apply(); err != nil {
+				return err
+			}
+			return errRequeue
+		}
 		return result.Err
 	}
 
@@ -275,6 +292,15 @@ func (r *OnboardingController) smokeTest(ctx context.Context, hv *kvmv1.Hypervis
 		if err != nil {
 			log.Error(err, "failed to get test instance, instance vanished", "id", id)
 			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
+		}
+
+		if strings.Contains(strings.ToLower(server.Fault.Message), "no valid host") {
+			if err = servers.Delete(ctx, r.testComputeClient, id).ExtractErr(); err != nil &&
+				!gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+				log.Error(err, "failed to delete test instance", "id", id)
+			}
+			r.resetNovaIdentity(statusCfg, "test instance cannot be scheduled; re-resolving identity")
+			return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, apply()
 		}
 
 		// Set condition back to testing
@@ -483,18 +509,42 @@ func (r *OnboardingController) lookupNovaProperties(ctx context.Context, hv *kvm
 		return "", "", err
 	}
 
-	if len(hs) < 1 {
-		return "", "", errRequeue
-	}
-
+	// Records without a live service are leftovers of a dead or replaced agent.
 	for _, h := range hs {
 		short, _, _ := strings.Cut(h.HypervisorHostname, ".")
-		if short == shortHypervisorAddress {
+		if short == shortHypervisorAddress && h.State == "up" {
 			return h.ID, h.Service.ID, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("could not find exact match for %v", shortHypervisorAddress)
+	return "", "", errNoLiveService
+}
+
+func (r *OnboardingController) waitForNovaService(hv *kvmv1.Hypervisor, statusCfg *apiv1.HypervisorStatusApplyConfiguration, apply func() error) (ctrl.Result, error) {
+	message := "Waiting for the nova-compute service to report up"
+	status := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+	if status == nil || status.Message != message {
+		utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+			*k8sacmetav1.Condition().
+				WithType(kvmv1.ConditionTypeOnboarding).
+				WithStatus(metav1.ConditionTrue).
+				WithReason(kvmv1.ConditionReasonInitial).
+				WithMessage(message))
+		if err := apply(); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: r.getRequeueInterval()}, nil
+}
+
+func (r *OnboardingController) resetNovaIdentity(statusCfg *apiv1.HypervisorStatusApplyConfiguration, message string) {
+	statusCfg.WithHypervisorID("").WithServiceID("")
+	utils.SetApplyConfigurationStatusCondition(&statusCfg.Conditions,
+		*k8sacmetav1.Condition().
+			WithType(kvmv1.ConditionTypeOnboarding).
+			WithStatus(metav1.ConditionTrue).
+			WithReason(kvmv1.ConditionReasonInitial).
+			WithMessage(message))
 }
 
 func (r *OnboardingController) createOrGetTestServer(ctx context.Context, zone, computeHost string, nodeUid types.UID) (*servers.Server, error) {
