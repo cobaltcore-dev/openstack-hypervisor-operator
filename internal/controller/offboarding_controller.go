@@ -110,7 +110,11 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
 	if err != nil {
 		if errors.Is(err, openstack.ErrNoHypervisor) {
-			// We are (hopefully) done
+			// Deleting the compute service also removed its hypervisor record,
+			// so only the resource provider may remain to be cleaned up.
+			if err := r.cleanupResourceProvider(ctx, hv.Status.HypervisorID); err != nil {
+				return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, err.Error()))
+			}
 			return ctrl.Result{}, r.markOffboarded(ctx, hv)
 		}
 		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get hypervisor by name %s due to %s", hostname, err)))
@@ -147,16 +151,30 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, msg))
 	}
 
-	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisor.ID).Extract()
-	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err)))
-	}
-
-	if err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp); err != nil {
-		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err)))
+	if err := r.cleanupResourceProvider(ctx, hypervisor.ID); err != nil {
+		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, err.Error()))
 	}
 
 	return ctrl.Result{}, r.markOffboarded(ctx, hv)
+}
+
+// cleanupResourceProvider removes the Placement resource provider belonging to
+// the given hypervisor. A missing resource provider is not an error.
+func (r *HypervisorOffboardingReconciler) cleanupResourceProvider(ctx context.Context, hypervisorID string) error {
+	if hypervisorID == "" {
+		return nil
+	}
+	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisorID).Extract()
+	if gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot get resource provider: %w", err)
+	}
+	if err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp); err != nil {
+		return fmt.Errorf("cannot clean up resource provider: %w", err)
+	}
+	return nil
 }
 
 func (r *HypervisorOffboardingReconciler) applyStatus(ctx context.Context, hv *kvmv1.Hypervisor, cond *k8sacmetav1.ConditionApplyConfiguration) error {
