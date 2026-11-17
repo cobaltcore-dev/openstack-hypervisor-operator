@@ -343,8 +343,9 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should set offboarding condition with error", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).To(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "")
 			})
 		})
@@ -375,8 +376,9 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should set offboarding condition about running VMs", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "still has 2 running VMs")
 			})
 		})
@@ -413,8 +415,11 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should wait for aggregates to be cleared", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
+				// Aggregates are cleared by the aggregates controller, whose changes
+				// are Kubernetes-watched, so no polling requeue is required.
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "Waiting for aggregates to be removed")
 			})
 		})
@@ -457,8 +462,11 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should wait for the agent pods to be evicted and not delete the compute service", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
 				Expect(err).NotTo(HaveOccurred())
+				// Eviction progress is Kubernetes-watched via the AgentPodsEvicted
+				// condition, so no polling requeue is required.
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "Waiting for agent pods to be evicted")
 				Expect(getHypervisorsCalled).To(Equal(0),
 					"external hypervisor lookup must be short-circuited by the AgentPodsEvicted gate")
@@ -493,8 +501,9 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should set offboarding condition with error", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).To(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "cannot delete service")
 			})
 		})
@@ -531,8 +540,9 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should set offboarding condition with error", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).To(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "cannot get resource provider")
 			})
 		})
@@ -581,8 +591,9 @@ var _ = Describe("Offboarding Controller", func() {
 			})
 
 			It("should set offboarding condition with error", func(ctx SpecContext) {
-				_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
-				Expect(err).NotTo(HaveOccurred())
+				result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).To(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
 				sharedOffboardingErrorCheck(ctx, "cannot clean up resource provider")
 			})
 		})
