@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kvmv1 "github.com/cobaltcore-dev/openstack-hypervisor-operator/api/v1"
 )
@@ -261,5 +263,78 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 				Expect(count).To(Equal(1))
 			})
 		})
+	})
+
+	Context("Hypervisor watch predicate", func() {
+		// Status-only updates keep the generation, so the watch drops them
+		// unless this predicate reports a relevant condition change.
+		predicateUnderTest := predicate.Predicate(evictingConditionChangedPredicate{})
+
+		makeCondition := func(t string, status metav1.ConditionStatus) metav1.Condition {
+			return metav1.Condition{
+				Type:    t,
+				Status:  status,
+				Reason:  "reason",
+				Message: "message",
+			}
+		}
+
+		makeHypervisor := func(conds ...metav1.Condition) *kvmv1.Hypervisor {
+			hv := &kvmv1.Hypervisor{
+				Name:            "hv-predicate-test",
+				ResourceVersion: "1",
+				Generation:      1,
+				Spec:            kvmv1.HypervisorSpec{LifecycleEnabled: true},
+			}
+			for _, c := range conds {
+				meta.SetStatusCondition(&hv.Status.Conditions, c)
+			}
+			return hv
+		}
+
+		DescribeTable("Update enqueues a reconcile when a condition inspected by Reconcile changes status",
+			func(oldConds, newConds []metav1.Condition, want bool) {
+				got := predicateUnderTest.Update(event.UpdateEvent{
+					ObjectOld: makeHypervisor(oldConds...),
+					ObjectNew: makeHypervisor(newConds...),
+				})
+				Expect(got).To(Equal(want))
+			},
+			Entry("Evicting appears",
+				nil,
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeEvicting, metav1.ConditionTrue)},
+				true,
+			),
+			Entry("Evicting changes (True -> False)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeEvicting, metav1.ConditionTrue)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeEvicting, metav1.ConditionFalse)},
+				true,
+			),
+			Entry("Offboarded changes (False -> True)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeOffboarded, metav1.ConditionFalse)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeOffboarded, metav1.ConditionTrue)},
+				true,
+			),
+			Entry("HaEnabled changes (True -> False)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeHaEnabled, metav1.ConditionTrue)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeHaEnabled, metav1.ConditionFalse)},
+				true,
+			),
+			Entry("Onboarding changes (True -> False)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeOnboarding, metav1.ConditionTrue)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeOnboarding, metav1.ConditionFalse)},
+				true,
+			),
+			Entry("Evicting is unchanged (True -> True)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeEvicting, metav1.ConditionTrue)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeEvicting, metav1.ConditionTrue)},
+				false,
+			),
+			Entry("an uninspected condition changes (Ready False -> True)",
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeReady, metav1.ConditionFalse)},
+				[]metav1.Condition{makeCondition(kvmv1.ConditionTypeReady, metav1.ConditionTrue)},
+				false,
+			),
+		)
 	})
 })
