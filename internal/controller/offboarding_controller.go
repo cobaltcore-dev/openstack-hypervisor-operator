@@ -75,7 +75,7 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 	offboardedCondition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOffboarded)
 	if offboardedCondition == nil {
 		// Start offboarding
-		return r.setOffboardingCondition(ctx, hv, "Hypervisor is being offboarded, removing host from nova")
+		return ctrl.Result{}, r.setOffboardingCondition(ctx, hv, "Hypervisor is being offboarded, removing host from nova")
 	}
 
 	if offboardedCondition.Status == metav1.ConditionTrue {
@@ -104,7 +104,7 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 		if cond := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeAgentPodsEvicted); cond != nil && cond.Message != "" {
 			msg = "Waiting for agent pods to be evicted: " + cond.Message
 		}
-		return r.setOffboardingCondition(ctx, hv, msg)
+		return ctrl.Result{}, r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	hypervisor, err := openstack.GetHypervisorByName(ctx, r.computeClient, hostname, true)
@@ -113,7 +113,7 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 			// We are (hopefully) done
 			return ctrl.Result{}, r.markOffboarded(ctx, hv)
 		}
-		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get hypervisor by name %s due to %s", hostname, err))
+		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get hypervisor by name %s due to %s", hostname, err)))
 	}
 
 	// TODO: remove since RunningVMs is only available until micro-version 2.87, and also is updated asynchronously
@@ -121,14 +121,14 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 	if hypervisor.RunningVMs > 0 {
 		// Still running VMs, cannot delete the service
 		msg := fmt.Sprintf("Hypervisor is being offboarded, but still has %d running VMs", hypervisor.RunningVMs)
-		return r.setOffboardingCondition(ctx, hv, msg)
+		return ctrl.Result{}, r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	if hypervisor.Servers != nil && len(*hypervisor.Servers) > 0 {
 		// Still VMs assigned to the host, cannot delete the service
 		msg := fmt.Sprintf("Hypervisor is being offboarded, but still has %d assigned VMs, "+
 			"check with `openstack server list --all-projects --host %s`", len(*hypervisor.Servers), hostname)
-		return r.setOffboardingCondition(ctx, hv, msg)
+		return ctrl.Result{}, r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	// Wait for aggregates controller to remove from all aggregates
@@ -138,22 +138,22 @@ func (r *HypervisorOffboardingReconciler) Reconcile(ctx context.Context, req ctr
 			aggregateNames[i] = agg.Name
 		}
 		msg := fmt.Sprintf("Waiting for aggregates to be removed, current: %v", aggregateNames)
-		return r.setOffboardingCondition(ctx, hv, msg)
+		return ctrl.Result{}, r.setOffboardingCondition(ctx, hv, msg)
 	}
 
 	err = services.Delete(ctx, r.computeClient, hypervisor.Service.ID).ExtractErr()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
 		msg := fmt.Sprintf("cannot delete service %s due to %v", hypervisor.Service.ID, err)
-		return r.setOffboardingCondition(ctx, hv, msg)
+		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, msg))
 	}
 
 	rp, err := resourceproviders.Get(ctx, r.placementClient, hypervisor.ID).Extract()
 	if err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err))
+		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot get resource provider: %v", err)))
 	}
 
 	if err = openstack.CleanupResourceProvider(ctx, r.placementClient, rp); err != nil {
-		return r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err))
+		return ctrl.Result{}, errors.Join(err, r.setOffboardingCondition(ctx, hv, fmt.Sprintf("cannot clean up resource provider: %v", err)))
 	}
 
 	return ctrl.Result{}, r.markOffboarded(ctx, hv)
@@ -170,16 +170,16 @@ func (r *HypervisorOffboardingReconciler) applyStatus(ctx context.Context, hv *k
 		k8sclient.ForceOwnership, k8sclient.FieldOwner(OffboardingControllerName))
 }
 
-func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) (ctrl.Result, error) {
+func (r *HypervisorOffboardingReconciler) setOffboardingCondition(ctx context.Context, hv *kvmv1.Hypervisor, message string) error {
 	err := r.applyStatus(ctx, hv, k8sacmetav1.Condition().
 		WithType(kvmv1.ConditionTypeOffboarded).
 		WithStatus(metav1.ConditionFalse).
 		WithReason("Offboarding").
 		WithMessage(message))
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("cannot update hypervisor status due to %w", err)
+		return fmt.Errorf("cannot update hypervisor status due to %w", err)
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *HypervisorOffboardingReconciler) markOffboarded(ctx context.Context, hv *kvmv1.Hypervisor) error {
