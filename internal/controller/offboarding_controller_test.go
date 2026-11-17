@@ -597,5 +597,200 @@ var _ = Describe("Offboarding Controller", func() {
 				sharedOffboardingErrorCheck(ctx, "cannot clean up resource provider")
 			})
 		})
+
+		Context("When the compute service was already deleted in a previous reconcile", func() {
+			// hypervisorID matches the ID in the HypervisorWithServers const
+			const hypervisorID = "c48f6247-abe4-4a24-824e-ea39e108874f"
+
+			BeforeEach(func(ctx SpecContext) {
+				By("Setting the IDs stored by a previous reconcile")
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+				hypervisor.Status.ServiceID = serviceId
+				hypervisor.Status.HypervisorID = hypervisorID
+				meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+					Type:    kvmv1.ConditionTypeEvicting,
+					Status:  metav1.ConditionFalse,
+					Reason:  "dontcare",
+					Message: "dontcare",
+				})
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			Context("When the resource provider delete fails once and then succeeds", func() {
+				var (
+					listHypervisorsCalls int
+					deleteRPCalled       int
+				)
+
+				BeforeEach(func() {
+					listHypervisorsCalls = 0
+					deleteRPCalled = 0
+
+					// First list call returns the hypervisor, later ones an
+					// empty list, as Nova does after the service was deleted.
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						listHypervisorsCalls++
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						if listHypervisorsCalls == 1 {
+							_, err := fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)
+							Expect(err).NotTo(HaveOccurred())
+						} else {
+							_, err := fmt.Fprint(w, `{"hypervisors": []}`)
+							Expect(err).NotTo(HaveOccurred())
+						}
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/"+hypervisorID, func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"allocations": {}}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+						deleteRPCalled++
+						if deleteRPCalled == 1 {
+							w.WriteHeader(http.StatusInternalServerError)
+							_, err := fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+							Expect(err).NotTo(HaveOccurred())
+						} else {
+							w.WriteHeader(http.StatusAccepted)
+						}
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /os-services/"+serviceId, func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusNoContent)
+					})
+				})
+
+				It("should clean up the resource provider and only then mark the hypervisor offboarded", func(ctx SpecContext) {
+					By("Reconciling while the hypervisor still exists")
+					result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).To(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+					sharedOffboardingErrorCheck(ctx, "cannot clean up resource provider")
+					Expect(deleteRPCalled).To(Equal(1))
+
+					By("Reconciling after the compute service was deleted")
+					result, err = offboardingReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+					// The hypervisor no longer exists in Nova, but the resource
+					// provider must still be deleted before offboarding is done.
+					Expect(deleteRPCalled).To(Equal(2))
+
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					Expect(hypervisor.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeOffboarded),
+							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", "Offboarded"),
+							HaveField("Message", "Offboarding successful"),
+						),
+					))
+				})
+			})
+
+			Context("When the resource provider delete keeps failing", func() {
+				var deleteRPCalled int
+
+				BeforeEach(func() {
+					deleteRPCalled = 0
+
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"hypervisors": []}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/"+hypervisorID, func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"uuid": "rp-uuid", "name": "hv-test"}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/rp-uuid/allocations", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"allocations": {}}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+						deleteRPCalled++
+						w.WriteHeader(http.StatusInternalServerError)
+						_, err := fmt.Fprint(w, `{"error": "Internal Server Error"}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+				})
+
+				It("should return an error and not mark the hypervisor offboarded", func(ctx SpecContext) {
+					_, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).To(HaveOccurred())
+
+					By("Reconciling again while the resource provider delete still fails")
+					result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).To(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+					sharedOffboardingErrorCheck(ctx, "cannot clean up resource provider")
+					Expect(deleteRPCalled).To(Equal(2))
+				})
+			})
+
+			Context("When the resource provider is already gone", func() {
+				var deleteRPCalled int
+
+				BeforeEach(func() {
+					deleteRPCalled = 0
+
+					fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, err := fmt.Fprint(w, `{"hypervisors": []}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("GET /resource_providers/"+hypervisorID, func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusNotFound)
+						_, err := fmt.Fprint(w, `{"error": "Not Found"}`)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					fakeServer.Mux.HandleFunc("DELETE /resource_providers/rp-uuid", func(w http.ResponseWriter, r *http.Request) {
+						deleteRPCalled++
+						w.WriteHeader(http.StatusAccepted)
+					})
+				})
+
+				It("should mark the hypervisor offboarded without deleting anything", func(ctx SpecContext) {
+					result, err := offboardingReconciler.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(ctrl.Result{}))
+					Expect(deleteRPCalled).To(BeZero())
+
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, resourceName, hypervisor)).To(Succeed())
+					Expect(hypervisor.Status.Conditions).To(ContainElement(
+						SatisfyAll(
+							HaveField("Type", kvmv1.ConditionTypeOffboarded),
+							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", "Offboarded"),
+						),
+					))
+				})
+			})
+		})
 	})
 })
