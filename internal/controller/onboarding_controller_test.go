@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2/testhelper"
@@ -84,11 +85,23 @@ const (
 }`
 )
 
+// hypervisorRecordJSON builds a GET /os-hypervisors/detail record.
+func hypervisorRecordJSON(hypervisorID, serviceID, state, status string) string {
+	return fmt.Sprintf(`{"service": {"id": "%s"}, "hypervisor_hostname": %q, "id": "%s", "state": "%s", "status": "%s", "hypervisor_version": 2002000}`,
+		serviceID, hypervisorName, hypervisorID, state, status)
+}
+
+// hypervisorListJSON wraps records into a GET /os-hypervisors/detail response.
+func hypervisorListJSON(records ...string) string {
+	return `{"hypervisors": [` + strings.Join(records, ",") + `]}`
+}
+
+const hypervisorName = "test-host"
+
 var _ = Describe("Onboarding Controller", func() {
 	const (
 		region           = "test-region"
 		availabilityZone = "test-az"
-		hypervisorName   = "test-host"
 		serviceId        = "service-id"
 		hypervisorId     = "c48f6247-abe4-4a24-824e-ea39e108874f"
 
@@ -312,11 +325,15 @@ var _ = Describe("Onboarding Controller", func() {
 	})
 
 	Context("initial setup of a new hypervisor", func() {
+		var hypervisorListBody string
+
 		BeforeEach(func() {
+			hypervisorListBody = fmt.Sprintf(HypervisorWithServers, serviceId, "", hypervisorName)
 			fakeServer.Mux.HandleFunc("GET /os-hypervisors/detail", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				Expect(fmt.Fprintf(w, HypervisorWithServers, serviceId, "", hypervisorName)).ToNot(BeNil())
+				_, err := fmt.Fprint(w, hypervisorListBody)
+				Expect(err).NotTo(HaveOccurred())
 			})
 
 			fakeServer.Mux.HandleFunc("PUT /os-services/service-id", func(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +421,77 @@ var _ = Describe("Onboarding Controller", func() {
 						HaveField("Reason", kvmv1.ConditionReasonTesting),
 					),
 				))
+			})
+		})
+
+		When("no compute service is up for the hostname yet", func() {
+			BeforeEach(func() {
+				hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON("hv-old", "service-old", "down", "enabled"))
+			})
+
+			It("waits for a live service instead of adopting the stale record", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(BeEmpty())
+				Expect(hv.Status.HypervisorID).To(BeEmpty())
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+				Expect(condition.Message).To(ContainSubstring("nova-compute service to report up"))
+			})
+		})
+
+		When("the stored compute service vanished", func() {
+			var enableOldCalls, enableNewCalls int
+
+			BeforeEach(func(ctx SpecContext) {
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				hv.Status.HypervisorID = "hv-old"
+				hv.Status.ServiceID = "service-old"
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionTrue,
+					Reason: kvmv1.ConditionReasonInitial,
+				})
+				hv.Status.Aggregates = []kvmv1.Aggregate{
+					{Name: availabilityZone, UUID: "uuid-" + availabilityZone},
+					{Name: testAggregateName, UUID: "uuid-" + testAggregateName},
+				}
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				hypervisorListBody = hypervisorListJSON(hypervisorRecordJSON("hv-new", "service-new", "up", "disabled"))
+
+				fakeServer.Mux.HandleFunc("PUT /os-services/service-old", func(w http.ResponseWriter, r *http.Request) {
+					enableOldCalls++
+					w.WriteHeader(http.StatusNotFound)
+				})
+				fakeServer.Mux.HandleFunc("PUT /os-services/service-new", func(w http.ResponseWriter, r *http.Request) {
+					enableNewCalls++
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprint(w, `{"service": {"id": "service-new", "status": "enabled"}}`)
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
+			It("re-resolves the identity and enables the replacement service", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(BeEmpty())
+
+				// The next reconciles adopt the replacement service and enable it.
+				Expect(reconcileLoop(ctx, 2)).To(Succeed())
+				Expect(enableOldCalls).To(Equal(1))
+				Expect(enableNewCalls).To(Equal(1))
 			})
 		})
 	})
@@ -509,6 +597,16 @@ var _ = Describe("Onboarding Controller", func() {
 			}
 			fakeServer.Mux.HandleFunc("DELETE /servers/server-id", func(w http.ResponseWriter, r *http.Request) {
 				serverDeleteHandler(w, r)
+			})
+		})
+
+		When("the identity is already stored", func() {
+			It("does not query Nova for it", func(ctx SpecContext) {
+				// Without aggregates onboarding requeues before any Nova call;
+				// an identity lookup would hit an unhandled route and fail.
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 			})
 		})
 
@@ -729,6 +827,61 @@ var _ = Describe("Onboarding Controller", func() {
 				Expect(onboardingCond).NotTo(BeNil())
 				Expect(onboardingCond.Reason).To(Equal(kvmv1.ConditionReasonTesting))
 				Expect(onboardingCond.Message).To(ContainSubstring("timeout"))
+			})
+		})
+
+		When("the smoke test cannot be scheduled", func() {
+			var serverDeleted bool
+
+			BeforeEach(func(ctx SpecContext) {
+				By("Overriding HV status to Testing state")
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				meta.SetStatusCondition(&hv.Status.Conditions, metav1.Condition{
+					Type:   kvmv1.ConditionTypeOnboarding,
+					Status: metav1.ConditionTrue,
+					Reason: kvmv1.ConditionReasonTesting,
+				})
+				Expect(k8sClient.Status().Update(ctx, hv)).To(Succeed())
+
+				serverName := fmt.Sprintf("%s-%s-%s", testPrefixName, hypervisorName, string(hv.UID))
+
+				// GET /servers/detail returns the test server in ERROR state.
+				serverDetailHandler = func(w http.ResponseWriter, _ *http.Request) {
+					_, err := fmt.Fprintf(w,
+						`{"servers": [{"id": "server-id", "name": %q, "status": "ERROR"}], "servers_links": []}`,
+						serverName)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				fakeServer.Mux.HandleFunc("GET /servers/server-id", func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Add("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err := fmt.Fprintf(w,
+						`{"server": {"id": "server-id", "name": %q, "status": "ERROR", "fault": {"message": "No valid host was found. There are not enough hosts available.", "code": 500}}}`,
+						serverName)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				serverDeleteHandler = func(w http.ResponseWriter, _ *http.Request) {
+					serverDeleted = true
+					w.WriteHeader(http.StatusAccepted)
+				}
+			})
+
+			It("clears the identity to re-resolve it", func(ctx SpecContext) {
+				result, err := onboardingReconciler.Reconcile(ctx, reconcileReq)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+				Expect(serverDeleted).To(BeTrue())
+
+				hv := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, namespacedName, hv)).To(Succeed())
+				Expect(hv.Status.ServiceID).To(BeEmpty())
+				condition := meta.FindStatusCondition(hv.Status.Conditions, kvmv1.ConditionTypeOnboarding)
+				Expect(condition).NotTo(BeNil())
+				Expect(condition.Reason).To(Equal(kvmv1.ConditionReasonInitial))
+				Expect(condition.Message).To(ContainSubstring("cannot be scheduled"))
 			})
 		})
 
