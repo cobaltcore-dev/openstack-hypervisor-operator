@@ -267,7 +267,7 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 
 	hypervisorToNode := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &corev1.Node{})
 
-	// Maintenance=termination bumps generation; Evicting status changes do not.
+	// Maintenance=termination bumps generation; status condition changes do not.
 	hypervisorRelevantChange := predicate.Or(
 		predicate.GenerationChangedPredicate{},
 		evictingConditionChangedPredicate{},
@@ -282,6 +282,15 @@ func (r *GardenerNodeLifecycleController) SetupWithManager(mgr ctrl.Manager, nam
 		Owns(&appsv1.Deployment{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Complete(r)
+}
+
+// reconcileRelevantConditions are the only Hypervisor conditions Reconcile
+// reads, so status-only changes on them must trigger a reconcile.
+var reconcileRelevantConditions = [...]string{
+	kvmv1.ConditionTypeEvicting,
+	kvmv1.ConditionTypeOnboarding,
+	kvmv1.ConditionTypeOffboarded,
+	kvmv1.ConditionTypeHaEnabled,
 }
 
 // evictingConditionChangedPredicate complements GenerationChangedPredicate,
@@ -299,8 +308,19 @@ func (evictingConditionChangedPredicate) Update(e event.UpdateEvent) bool {
 	if !ok1 || !ok2 {
 		return false
 	}
-	oldCond := meta.FindStatusCondition(oldHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
-	newCond := meta.FindStatusCondition(newHv.Status.Conditions, kvmv1.ConditionTypeEvicting)
+	for _, conditionType := range reconcileRelevantConditions {
+		if conditionStatusChanged(oldHv, newHv, conditionType) {
+			return true
+		}
+	}
+	return false
+}
+
+// conditionStatusChanged reports whether the condition was added, removed, or
+// changed its Status.
+func conditionStatusChanged(oldHv, newHv *kvmv1.Hypervisor, conditionType string) bool {
+	oldCond := meta.FindStatusCondition(oldHv.Status.Conditions, conditionType)
+	newCond := meta.FindStatusCondition(newHv.Status.Conditions, conditionType)
 	switch {
 	case oldCond == nil && newCond == nil:
 		return false
