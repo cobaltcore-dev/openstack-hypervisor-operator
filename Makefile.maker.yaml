@@ -76,6 +76,10 @@ reuse:
       SPDX-FileCopyrightText: 'SAP SE or an SAP affiliate company and cobaltcore-dev contributors'
       SPDX-License-Identifier: Apache-2.0
 
+typos:
+  extendIgnoreIdentifiersRe:
+    - ANDed
+
 verbatim: |
   .PHONY: install-crds
   install-crds: generate ## Install CRDs into the K8s cluster specified in ~/.kube/config.

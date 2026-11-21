@@ -210,6 +210,132 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: status
       type:
         namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverride
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverrideSpec
+    - name: status
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverrideStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverrideSpec
+  map:
+    fields:
+    - name: override
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSpec
+    - name: reason
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigOverrideStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: specHash
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSet
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetSpec
+    - name: status
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetStatus
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetSpec
+  map:
+    fields:
+    - name: selector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: template
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetTemplate
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: specHash
+      type:
+        scalar: string
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSetTemplate
+  map:
+    fields:
+    - name: spec
+      type:
+        namedType: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSpec
+- name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorConfigSpec
+  map:
+    fields:
+    - name: aggregates
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: createCertManagerCertificate
+      type:
+        scalar: boolean
+    - name: customTraits
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: evacuateOnReboot
+      type:
+        scalar: boolean
+    - name: highAvailability
+      type:
+        scalar: boolean
+    - name: installCertificate
+      type:
+        scalar: boolean
+    - name: lifecycleEnabled
+      type:
+        scalar: boolean
+    - name: maintenance
+      type:
+        scalar: string
+    - name: reboot
+      type:
+        scalar: boolean
+    - name: skipTests
+      type:
+        scalar: boolean
+    - name: version
+      type:
+        scalar: string
 - name: com.github.cobaltcore-dev.openstack-hypervisor-operator.api.v1.HypervisorSpec
   map:
     fields:
@@ -485,6 +611,38 @@ var schemaYAML = typed.YAMLObject(`types:
         elementType:
           namedType: __untyped_deduced_
         elementRelationship: separable
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+  map:
+    fields:
+    - name: matchExpressions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+          elementRelationship: atomic
+    - name: matchLabels
+      type:
+        map:
+          elementType:
+            scalar: string
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorOperator
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+  map:
+    fields:
+    - name: key
+      type:
+        scalar: string
+    - name: operator
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorOperator
+    - name: values
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
 - name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
   map:
     fields:
