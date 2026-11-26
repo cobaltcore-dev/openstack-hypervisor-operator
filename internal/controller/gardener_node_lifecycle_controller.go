@@ -117,6 +117,12 @@ func (r *GardenerNodeLifecycleController) Reconcile(ctx context.Context, req ctr
 				return ctrl.Result{}, nil // Will be reconciled again when condition changes
 			}
 		}
+	} else if hv.Spec.Maintenance == kvmv1.MaintenanceAuto ||
+		hv.Spec.Maintenance == kvmv1.MaintenanceManual {
+		if hv.Status.Evicted &&
+			!meta.IsStatusConditionTrue(hv.Status.Conditions, kvmv1.ConditionTypeHaEnabled) {
+			minAvailable = 0
+		}
 	}
 
 	if err := r.ensureBlockingPodDisruptionBudget(ctx, node, minAvailable); err != nil {
