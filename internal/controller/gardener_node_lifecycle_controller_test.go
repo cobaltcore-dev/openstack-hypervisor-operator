@@ -134,6 +134,174 @@ var _ = Describe("Gardener Maintenance Controller", func() {
 			})
 		})
 
+		When("the hypervisor is in maintenance", func() {
+			BeforeEach(func(ctx SpecContext) {
+				hypervisor := &kvmv1.Hypervisor{}
+				Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+				hypervisor.Spec.Maintenance = kvmv1.MaintenanceAuto
+				Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+				hypervisor.Status.Evicted = true
+				Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+			})
+
+			It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+				pdb := &policyv1.PodDisruptionBudget{}
+				Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+				Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+			})
+
+			It("should scale down the signalling deployment", func(ctx SpecContext) {
+				dep := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+				Expect(dep.Spec.Replicas).NotTo(BeNil())
+				Expect(*dep.Spec.Replicas).To(BeNumerically("==", int32(0)))
+			})
+
+			When("maintenance is manual", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					hypervisor.Spec.Maintenance = kvmv1.MaintenanceManual
+					hypervisor.Spec.MaintenanceReason = "Test maintenance"
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+				})
+
+				It("should scale down the signalling deployment", func(ctx SpecContext) {
+					dep := &appsv1.Deployment{}
+					Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+					Expect(dep.Spec.Replicas).NotTo(BeNil())
+					Expect(*dep.Spec.Replicas).To(BeNumerically("==", int32(0)))
+				})
+			})
+
+			When("HA is disabled", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeHaEnabled,
+						Status:  metav1.ConditionFalse,
+						Reason:  "dontcare",
+						Message: "dontcare",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+				})
+			})
+
+			When("HA status is unknown", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeHaEnabled,
+						Status:  metav1.ConditionUnknown,
+						Reason:  "dontcare",
+						Message: "dontcare",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+				})
+			})
+
+			When("HA is enabled", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					meta.SetStatusCondition(&hypervisor.Status.Conditions, metav1.Condition{
+						Type:    kvmv1.ConditionTypeHaEnabled,
+						Status:  metav1.ConditionTrue,
+						Reason:  "dontcare",
+						Message: "dontcare",
+					})
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should keep the poddisruptionbudget at minAvailable 1", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(1))))
+				})
+
+				It("should keep the signalling deployment running", func(ctx SpecContext) {
+					dep := &appsv1.Deployment{}
+					Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+					Expect(dep.Spec.Replicas).NotTo(BeNil())
+					Expect(*dep.Spec.Replicas).To(BeNumerically("==", int32(1)))
+				})
+			})
+
+			When("eviction has not completed", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					hypervisor.Status.Evicted = false
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should keep the poddisruptionbudget at minAvailable 1", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(1))))
+				})
+			})
+
+			When("the instance count disagrees with eviction status", func() {
+				BeforeEach(func(ctx SpecContext) {
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					hypervisor.Status.NumInstances = 1
+					Expect(k8sClient.Status().Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should update the poddisruptionbudget to minAvailable 0", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(0))))
+				})
+			})
+
+			When("maintenance is cleared", func() {
+				BeforeEach(func(ctx SpecContext) {
+					_, err := controller.Reconcile(ctx, reconcileReq)
+					Expect(err).NotTo(HaveOccurred())
+					hypervisor := &kvmv1.Hypervisor{}
+					Expect(k8sClient.Get(ctx, name, hypervisor)).To(Succeed())
+					hypervisor.Spec.Maintenance = kvmv1.MaintenanceUnset
+					Expect(k8sClient.Update(ctx, hypervisor)).To(Succeed())
+				})
+
+				It("should restore the poddisruptionbudget to minAvailable 1", func(ctx SpecContext) {
+					pdb := &policyv1.PodDisruptionBudget{}
+					Expect(k8sClient.Get(ctx, maintenanceName, pdb)).To(Succeed())
+					Expect(pdb.Spec.MinAvailable).To(HaveField("IntVal", BeNumerically("==", int32(1))))
+				})
+
+				It("should restore the signalling deployment", func(ctx SpecContext) {
+					dep := &appsv1.Deployment{}
+					Expect(k8sClient.Get(ctx, maintenanceName, dep)).To(Succeed())
+					Expect(dep.Spec.Replicas).NotTo(BeNil())
+					Expect(*dep.Spec.Replicas).To(BeNumerically("==", int32(1)))
+				})
+			})
+		})
+
 	})
 
 	Context("When hypervisor does not exist", func() {
