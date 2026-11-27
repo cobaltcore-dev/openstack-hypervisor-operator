@@ -83,6 +83,13 @@
         ".github/workflows/container-registry-ghcr.yaml"
       ],
       "enabled": false
+    },
+    {
+      "matchDepTypes": [
+        "action",
+        "workflow"
+      ],
+      "pinDigests": true
     }
   ],
   "prHourlyLimit": 0,
